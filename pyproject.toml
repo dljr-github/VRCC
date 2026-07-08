@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vrcc"
+version = "0.1.0"
+description = "Live-caption your voice into the VRChat chatbox, translated locally via CTranslate2"
+requires-python = ">=3.10"
+dependencies = [
+    "ctranslate2==4.8.1",
+    "faster-whisper==1.2.1",
+    "onnxruntime>=1.16,<2",
+    "tokenizers>=0.15",
+    "sentencepiece>=0.2.0",
+    "huggingface_hub>=0.23",
+    "numpy>=1.24",
+    "sounddevice>=0.4.6",
+    "soxr>=0.3",
+    "python-osc>=1.8",
+    "zeroconf>=0.120",
+    "pydantic>=2.5",
+    "platformdirs>=4.0",
+    "PySide6>=6.6",
+    # Tiny pure-python NVML bindings: first-run hardware tiering, the sm120
+    # compute-type rule and the driver-floor check all need it. Degrades
+    # gracefully at runtime (vrcc.core.hardware) if NVML itself is absent.
+    "nvidia-ml-py>=12.0",
+]
+
+[project.optional-dependencies]
+cuda = ["nvidia-cublas-cu12>=12.8,<13"]
+dev = ["pytest>=8.0", "pyinstaller>=6.10"]
+
+[project.scripts]
+vrcc = "vrcc.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vrcc*"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not integration'"
+markers = ["integration: needs models/network/audio hardware"]
