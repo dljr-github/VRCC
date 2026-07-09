@@ -1,4 +1,4 @@
-# STT benchmark results
+﻿# STT benchmark results
 
 Speed and accuracy numbers for the speech-to-text models VRCC offers,
 measured on real machines with `tools/bench_stt.py`. Each JSON file in
@@ -42,7 +42,7 @@ speed numbers transfer to other languages.
    pip install -e .[dev,bench]
    ```
 
-2. Fetch the dataset (~350 MB) and any missing models (~11 GB for all ten):
+2. Fetch the dataset (~350 MB) and any missing models (~9.5 GB for all nine):
 
    ```
    python tools/bench_stt.py --download-only
@@ -54,8 +54,10 @@ speed numbers transfer to other languages.
 
    ```
    python tools/bench_stt.py --device cpu
-   python tools/bench_stt.py --device cuda    (NVIDIA machines only)
+   python tools/bench_stt.py --device cuda
    ```
+
+   Skip the cuda passes on machines without an NVIDIA GPU.
 
    Then measure Quality mode on the whisper models that are fast enough to
    use live on that device (the others already lag at beam 1, so their
@@ -82,4 +84,4 @@ speed numbers transfer to other languages.
 5. Open a PR adding your JSON and the regenerated `RESULTS.md`.
 
 Partial contributions are welcome: a CPU-only machine, or a subset of
-models via `--models` (e.g. laptops without disk space for all ten).
+models via `--models` (e.g. laptops without disk space for all nine).

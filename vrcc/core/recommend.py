@@ -30,7 +30,7 @@ _VRAM_HIGH_BYTES = 8 * 1024 ** 3
 STT_BENCH: dict[str, tuple[float, float, float, float]] = {
     "tiny": (0.074, 0.079, 0.03, 0.13),
     "base": (0.057, 0.059, 0.04, 0.25),
-    "small": (0.037, 0.037, 0.09, 0.75),
+    "small": (0.037, 0.037, 0.09, 0.74),
     "medium": (0.027, 0.026, 0.17, 2.41),
     "large-v3": (0.017, 0.018, 0.24, 3.90),
     "large-v3-turbo": (0.017, 0.016, 0.07, 2.81),
@@ -347,6 +347,14 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
     if tier == "cpu" and choice != "cpu":
         tier = "gpu_low"
 
+    # The wizard's CPU verdict (a small card should stay VRChat's) must bind
+    # the device too: "auto" resolves to cuda whenever CUDA exists, which
+    # would run the CPU-tier models on the GPU the verdict chose to spare and
+    # compute the performance mode for the wrong device.
+    if choice == "cpu":
+        cfg.stt.device = "cpu"
+        cfg.translate.device = "cpu"
+
     whisper, mt = preset_for_choice(choice, tier=tier, language=language)
     if dm is not None:
         # A recommended model that is not downloaded would leave the app
@@ -358,7 +366,10 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
         mt = have_mt or mt
 
     cfg.stt.model = whisper
-    if mt is not None:
+    # The MT pick is only meaningful while translation is on: overwriting the
+    # stored model while it is off would swap a possibly-downloaded choice for
+    # a possibly-missing preset the user never sees applied.
+    if mt is not None and cfg.translate.enabled:
         cfg.translate.model = mt
 
     device = "cpu" if choice == "cpu" else "cuda"

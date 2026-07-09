@@ -36,13 +36,7 @@ from PySide6.QtWidgets import (
 from vrcc.core import languages
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.core.hardware import device_names
-from vrcc.gui import (
-    model_fit,
-    model_prompts,
-    settings_advanced,
-    settings_live,
-    settings_pages,
-)
+from vrcc.gui import model_fit, model_prompts, settings_advanced, settings_live, settings_pages
 from vrcc.gui.style import PALETTE, apply_font_scale, apply_theme_guarded, resolve_theme
 from vrcc.i18n import tr
 from vrcc.stt.registry import WHISPER_MODELS
@@ -240,6 +234,10 @@ class SettingsDialog(QDialog):
         self._changed()
         if self._on_model_change is not None:
             self._on_model_change("stt")
+            # The swap rebuilds with every current stt engine field (config is
+            # re-read at build), covering the CPU-offer device flip above; the
+            # debounced flush must not force a second, identical rebuild.
+            settings_live.rebaseline(self._applied, self._specs(), ("stt",))
 
     def _on_mt_model_changed(self, _i: int) -> None:
         if self._loading:

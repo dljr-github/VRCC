@@ -276,14 +276,42 @@ def test_reset_to_recommended_restores_engine_fields_and_picks_models(monkeypatc
 
     summary = recommend.reset_to_recommended(cfg)
 
-    assert cfg.stt.device == "auto" and cfg.stt.compute_type == "auto"
+    # A CPU wizard verdict binds the device explicitly: "auto" would resolve
+    # to cuda on a CUDA machine and run the CPU-tier picks on the GPU the
+    # verdict chose to spare.
+    assert cfg.stt.device == "cpu" and cfg.stt.compute_type == "auto"
     assert cfg.stt.cpu_threads == 0 and cfg.stt.num_workers == 1
-    assert cfg.translate.device == "auto" and cfg.translate.intra_threads == 0
+    assert cfg.translate.device == "cpu" and cfg.translate.intra_threads == 0
     # German is inside parakeet's set, and on CPU it leads the ranking.
     assert cfg.stt.model == "parakeet-tdt-0.6b-v3"
     assert summary["stt_model"] == "parakeet-tdt-0.6b-v3"
     # parakeet decodes greedily, so it gets no profile advice: Speed stands.
     assert cfg.gui.profile == "latency"
+
+
+def test_reset_to_recommended_keeps_auto_device_for_a_gpu_verdict(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    cfg = _cfg_with_personal_choices()
+
+    recommend.reset_to_recommended(cfg)
+
+    assert cfg.stt.device == "auto"
+    assert cfg.translate.device == "auto"
+    assert cfg.stt.model == "large-v3-turbo"
+
+
+def test_reset_to_recommended_leaves_mt_model_alone_when_translation_off(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+    cfg.translate.enabled = False
+    cfg.translate.model = "m2m100-418M-int8"
+
+    recommend.reset_to_recommended(cfg)
+
+    # The stored MT choice is not visible while translation is off; replacing
+    # it with a possibly-missing preset would surprise on the next enable.
+    assert cfg.translate.model == "m2m100-418M-int8"
 
 
 def test_reset_to_recommended_leaves_personal_choices_alone(monkeypatch):

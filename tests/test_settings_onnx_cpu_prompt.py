@@ -53,6 +53,28 @@ def _select_device(dlg, data):
     raise AssertionError(f"device entry {data!r} not offered")
 
 
+class _RecordingApply:
+    """Records reload_engine only; the other facade hooks are quiet no-ops."""
+
+    def __init__(self):
+        self.calls = []
+
+    def reload_engine(self, kind):
+        self.calls.append(("reload", kind))
+
+    def apply_audio_device(self, device):
+        return True
+
+    def apply_osc(self, cfg):
+        pass
+
+    def apply_mute_sync(self, enabled):
+        pass
+
+    def apply_vad(self, cfg):
+        pass
+
+
 def test_onnx_pick_on_cuda_yes_flips_device_to_cpu(qapp, tmp_path, monkeypatch):
     dlg, store = _dialog(tmp_path, monkeypatch, model_id="small", device="cuda")
     try:
@@ -91,6 +113,33 @@ def test_onnx_pick_on_auto_never_prompts(qapp, tmp_path, monkeypatch):
         combo.setCurrentIndex(combo.findData("parakeet-tdt-0.6b-v3"))
         assert asked == []
         assert store.config.stt.device == "auto"
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_accepted_offer_rebuilds_the_engine_exactly_once(qapp, tmp_path, monkeypatch):
+    # The model hot-swap already rebuilds with the flipped cpu device (config
+    # is re-read at build); the debounced flush must not force a second,
+    # identical rebuild against its stale device baseline.
+    monkeypatch.setattr(settings_mod.model_fit, "vram_warning", lambda *a, **k: None)
+    monkeypatch.setattr(settings_mod, "device_names", lambda: ["Fake GPU"])
+    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    store.config.stt.model = "small"
+    store.config.stt.device = "cuda"
+    apply = _RecordingApply()
+    swaps = []
+    dlg = SettingsDialog(store, on_model_change=swaps.append, apply=apply)
+    try:
+        _capture_question(monkeypatch, QMessageBox.StandardButton.Yes)
+        combo = dlg._model_combo
+        combo.setCurrentIndex(combo.findData("parakeet-tdt-0.6b-v3"))
+        assert store.config.stt.device == "cpu"
+        assert swaps == ["stt"]
+        # Flush the pending debounce the way dialog close does.
+        dlg._apply_timer.stop()
+        dlg._apply_live_changes()
+        assert apply.calls == []
     finally:
         dlg.close()
         dlg.deleteLater()

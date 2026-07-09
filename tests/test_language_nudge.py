@@ -2,11 +2,12 @@
 
 Both language combos (Settings and the main window) grey the spoken languages
 the active voice model cannot transcribe, so an unsupported language can't be
-picked from the popup. The main window additionally keeps the model nudge: if a
-language outside the active model's set is chosen anyway (config or code), it
-offers the best downloaded compatible model. Settings no longer nudges -- its
-greying makes the prompt unreachable -- so ``maybe_switch_model_for_language``
-is gone.
+picked from the popup. The main window additionally keeps the model nudge: a
+language set programmatically fires it at once, and a STORED language the
+model cannot serve fires it once after construction/reload (queued via a
+zero-delay shot), remembering a declined (model, language) pair so reloads do
+not nag. Settings no longer nudges -- its greying makes the prompt
+unreachable -- so ``maybe_switch_model_for_language`` is gone.
 """
 
 import os
@@ -14,6 +15,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from vrcc.core.bus import EventBus
@@ -76,12 +78,14 @@ class _Pipeline:
         pass
 
 
-def _window(tmp_path, downloaded, model_id):
+def _window(tmp_path, downloaded, model_id, source=None):
     from vrcc.gui.main_window import MainWindow
 
     store = ConfigStore(tmp_path / "config.json")
     store.config.stt.model = model_id
     store.config.stt.device = "cpu"  # pins tier_for_config, machine-independent
+    if source is not None:
+        store.config.stt.source_language = source
     bridge = BusBridge(EventBus())
     swaps: list[str] = []
     window = MainWindow(
@@ -94,6 +98,12 @@ def _window(tmp_path, downloaded, model_id):
         on_model_change=swaps.append,
     )
     return window, store, bridge, swaps
+
+
+def _fire_scheduled_nudge(qapp):
+    # The stored-language nudge queues a zero-delay singleShot; spin the event
+    # loop so it fires (a bare construct/reload never shows the dialog).
+    QTest.qWait(20)
 
 
 def test_main_window_greys_source_languages_for_active_model(qapp, tmp_path):
@@ -160,6 +170,85 @@ def test_main_window_nudge_no_leaves_everything(qapp, tmp_path, monkeypatch):
         assert len(asked) == 1
         assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
         assert store.config.stt.source_language == "Japanese"
+        assert swaps == []
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+# -- stored-language nudge at load/reload --------------------------------------
+
+
+def test_stored_unsupported_language_prompts_once_at_load(qapp, tmp_path, monkeypatch):
+    # A config whose stored language the active model cannot transcribe never
+    # passes through _on_source_changed (loads run under the _loading guard),
+    # so the load path must fire the nudge itself -- exactly once, even when a
+    # reload lands while the shot is still queued.
+    asked = _capture_question(monkeypatch, QMessageBox.StandardButton.No)
+    window, store, bridge, swaps = _window(
+        tmp_path, {"parakeet-tdt-0.6b-v3", "small"}, "parakeet-tdt-0.6b-v3",
+        source="Japanese",
+    )
+    try:
+        assert asked == []  # queued, never shown mid-construction
+        window.reload_from_config()  # re-schedules; the pending flag must coalesce
+        _fire_scheduled_nudge(qapp)
+        assert len(asked) == 1
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_declined_stored_nudge_does_not_reprompt_on_reload(qapp, tmp_path, monkeypatch):
+    asked = _capture_question(monkeypatch, QMessageBox.StandardButton.No)
+    window, store, bridge, swaps = _window(
+        tmp_path, {"parakeet-tdt-0.6b-v3", "small"}, "parakeet-tdt-0.6b-v3",
+        source="Japanese",
+    )
+    try:
+        _fire_scheduled_nudge(qapp)
+        assert len(asked) == 1
+        assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
+        assert swaps == []
+        window.reload_from_config()
+        _fire_scheduled_nudge(qapp)
+        assert len(asked) == 1  # same (model, language) mismatch: stay quiet
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_accepted_stored_nudge_routes_through_model_change(qapp, tmp_path, monkeypatch):
+    asked = _capture_question(monkeypatch, QMessageBox.StandardButton.Yes)
+    window, store, bridge, swaps = _window(
+        tmp_path, {"parakeet-tdt-0.6b-v3", "small"}, "parakeet-tdt-0.6b-v3",
+        source="Japanese",
+    )
+    try:
+        _fire_scheduled_nudge(qapp)
+        assert len(asked) == 1
+        assert store.config.stt.model == "small"
+        assert swaps == ["stt"]
+        # The accepted model covers Japanese, so the greying re-enables it.
+        assert _lang_enabled(window._source_combo, "Japanese")
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_supported_stored_language_never_prompts(qapp, tmp_path, monkeypatch):
+    asked = _capture_question(monkeypatch, QMessageBox.StandardButton.Yes)
+    window, store, bridge, swaps = _window(
+        tmp_path, {"parakeet-tdt-0.6b-v3", "small"}, "parakeet-tdt-0.6b-v3",
+        source="French",  # inside Parakeet's set
+    )
+    try:
+        _fire_scheduled_nudge(qapp)
+        assert asked == []
         assert swaps == []
     finally:
         window.close()

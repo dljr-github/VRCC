@@ -137,6 +137,13 @@ def _apply_reset(dlg: "SettingsDialog") -> None:
         dlg._loading = False
 
     dlg._store.save_soon()
+    # The reset's apply_profile changed the VAD timings; push them to the
+    # running Segmenter before the re-baseline below swallows the diff. VAD is
+    # the only non-engine live group the reset can move: audio/osc/mute are
+    # personal fields it never writes, and the gui group's live value is
+    # font_scale, not gui.profile.
+    if dlg._apply is not None:
+        dlg._apply.apply_vad(dlg._cfg.vad)
     # Re-baseline every live-apply group so the debounced/close flush cannot
     # rebuild an engine this reset already pushed by hand.
     dlg._applied = settings_live.snapshot(dlg._specs())

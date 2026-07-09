@@ -222,6 +222,18 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             stack.chatbox.start()
             if stack.mute is not None:
                 stack.mute.start()
+            try:
+                self._finish_startup(success)
+            finally:
+                # The engines were the loader's until here; run the swaps
+                # Settings asked for during startup now that each engine has a
+                # single caller again. After the failure seeding, so a replayed
+                # swap in flight is never stamped _FAILED underneath.
+                for kind, force in sorted(startup_deferred.items()):
+                    reloader.request(kind, _target_for(kind), force=force)
+                startup_deferred.clear()
+
+        def _finish_startup(self, success: bool) -> None:
             if not success:
                 # Mark each dead kind so re-picking the SAME configured model
                 # in Settings runs a real swap instead of no-opping into the
@@ -337,16 +349,30 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         loaded=dict(startup_ids),
     )
 
+    # Swap requests that arrive while the startup EngineLoader still owns the
+    # engines are held here (kind -> force) and replayed by _Starter._on_done.
+    # The reloader's swap thread would otherwise unload() the very object the
+    # loader thread is inside load()/warm_up() on; both engines document a
+    # single-caller contract. on_model_change/_on_done both run on the GUI
+    # thread, so the check-then-defer below cannot race the replay.
+    startup_deferred: dict[str, bool] = {}
+
+    def _request_or_defer(kind: str, force: bool) -> None:
+        if loader.is_alive():
+            startup_deferred[kind] = startup_deferred.get(kind, False) or force
+            return
+        reloader.request(kind, _target_for(kind), force=force)
+
     def on_model_change(kind: str) -> None:
         """Settings wrote a live model change (or toggled translate); hot-swap
         it into the running pipeline without a restart."""
-        reloader.request(kind, _target_for(kind))
+        _request_or_defer(kind, force=False)
 
     def reload_engine(kind: str) -> None:
         """Rebuild an engine for a device/compute/thread change that keeps the
         same model id: forced so the reloader can't no-op on the unchanged id
         (same hot-swap path as a model switch)."""
-        reloader.request(kind, _target_for(kind), force=True)
+        _request_or_defer(kind, force=True)
 
     # Coalesced (mid-swap) requests recompute their target from current config.
     reloader._on_pending = on_model_change
@@ -407,13 +433,22 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     def rebuild_main_window() -> None:
         """Rebuild MainWindow in the new UI language (tr() is read at widget
         construction). The old window detaches its bridge slots first so events
-        stop reaching it; geometry carries across for a seamless swap."""
+        stop reaching it; geometry carries across for a seamless swap.
+
+        Runtime state carries across too: a fresh window starts gray with an
+        empty caption feed, and nothing re-pushes engine/capture state until
+        the next event, so mid-session it would sit on "Starting" over a
+        healthy pipeline."""
         nonlocal window
         apply_ui_language(app, store.config.gui.ui_language)
         old = window
         old.disconnect_bridge()
         fresh = make_window()
         fresh.restoreGeometry(old.saveGeometry())
+        fresh._engine_states.update(old._engine_states)
+        fresh._render_log()
+        if pipeline_started[0]:
+            fresh.set_capture_status(stack.pipeline.captioning_enabled)
         window = fresh
         fresh.show()
         old.hide()
@@ -442,8 +477,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         detector.stop()
         stack.pipeline.stop()
         stack.chatbox.stop()
-        if stack.mute is not None:
-            stack.mute.stop()
+        # Covers both the startup coordinator and one LiveApply built lazily
+        # when mute sync was enabled after launch (stack.mute is None then).
+        live_apply.stop_mute()
         bridge.detach()
         store.save_now()
         logger.info("VRCC stopped")

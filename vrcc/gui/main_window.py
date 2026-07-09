@@ -66,6 +66,10 @@ class MainWindow(QMainWindow):
         # language-change model nudge, mirroring SettingsDialog's pair.
         self._download_manager = download_manager
         self._on_model_change = on_model_change
+        # Language-nudge state: one queued prompt at a time, and the declined
+        # (model, language) pair so config reloads do not re-ask it.
+        self._nudge_pending = False
+        self._nudge_declined: tuple[str, str] | None = None
         # Resolved once at construction (theme + text size are restart-applied).
         self._p = PALETTE[resolve_theme(config_store.config.gui.theme)]
         self._scale = max(0.5, min(2.0, config_store.config.gui.font_scale))
@@ -157,6 +161,9 @@ class MainWindow(QMainWindow):
         # so a model change made in Settings re-enables the right languages).
         model_prompts.grey_unsupported_languages(self._source_combo, cfg.stt.model)
         self._set_combo_text(self._source_combo, cfg.stt.source_language)
+        # A stored language the greying just disabled would caption wrongly in
+        # silence; offer a better downloaded model once construction settles.
+        model_prompts.schedule_language_nudge(self)
 
         targets = list(cfg.translate.targets)
         for slot, combo in enumerate(self._target_combos):
@@ -406,14 +413,7 @@ class MainWindow(QMainWindow):
         # A target equal to the new source would translate a language into itself
         # (sending the original twice); rebuild drops it (and persists via save_soon).
         self._rebuild_targets()
-        candidate = model_prompts.offer_language_switch(
-            self, self._store.config, self._download_manager, text
-        )
-        if candidate is not None:
-            self._store.config.stt.model = candidate
-            self._store.save_soon()
-            if self._on_model_change is not None:
-                self._on_model_change("stt")
+        model_prompts.run_language_nudge(self)
 
     def _on_targets_changed(self, _text: str) -> None:
         self._rebuild_targets()

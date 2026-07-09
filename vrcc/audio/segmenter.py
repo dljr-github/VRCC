@@ -116,6 +116,16 @@ class Segmenter:
         if self._preroll.maxlen != self._preroll_frames:
             self._preroll = deque(maxlen=self._preroll_frames)
 
+    def reset(self) -> None:
+        """Drop all in-flight state: the open utterance, its buffer, the idle
+        pre-roll ring and any pending speculative snapshot. For restarts where
+        buffered audio belongs to a previous run (a device swap must not
+        prefix the old microphone's audio onto the new one's first caption).
+        Call only while no audio thread is feeding :meth:`process`; the
+        utterance id advances so a dropped utterance never shares its id."""
+        self._reset_to_idle()
+        self._preroll.clear()
+
     @property
     def active(self) -> bool:
         """Whether mid-utterance (ACTIVE). The energy pre-gate consults this so

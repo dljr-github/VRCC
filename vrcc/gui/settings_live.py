@@ -54,6 +54,16 @@ def snapshot(specs) -> dict:
     return {group: values for group, values, _ in specs}
 
 
+def rebaseline(applied: dict, specs, groups: tuple[str, ...]) -> None:
+    """Mark ``groups`` as already live at their current values: the caller
+    pushed the change through another path (e.g. a model hot-swap, which
+    rebuilds with every current engine field), so the next flush must not
+    re-run those hooks against a stale baseline."""
+    for group, values, _ in specs:
+        if group in groups:
+            applied[group] = values
+
+
 def flush(applied: dict, specs) -> None:
     """Run each group's hook whose values moved since ``applied`` was taken,
     updating ``applied`` in place so a later no-op re-selection does nothing."""

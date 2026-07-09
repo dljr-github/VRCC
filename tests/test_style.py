@@ -101,6 +101,32 @@ def test_build_qss_clamps_scale():
     assert "font-size: 7px" in build_qss("dark", 0.01)  # clamp to 0.5 -> 7
 
 
+def test_apply_font_scale_never_compounds_across_live_changes():
+    # The live text-size path calls apply_font_scale repeatedly; every call
+    # must set base*scale from the captured base (Large then Small must not
+    # yield base*1.2*0.9, and Normal must restore the base exactly).
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    import vrcc.gui.style as style_mod
+
+    app = QApplication.instance() or QApplication([])
+    style_mod._BASE_POINT_SIZE = None  # this test owns the captured base
+    base = app.font().pointSizeF()
+    assert base > 0
+    try:
+        style_mod.apply_font_scale(app, 1.2)
+        style_mod.apply_font_scale(app, 0.9)
+        assert app.font().pointSizeF() == pytest.approx(base * 0.9)
+        style_mod.apply_font_scale(app, 1.0)
+        assert app.font().pointSizeF() == pytest.approx(base)
+    finally:
+        style_mod.apply_font_scale(app, 1.0)  # leave the shared app font unscaled
+        style_mod._BASE_POINT_SIZE = None
+
+
 def test_apply_theme_scale_changes_resolved_font_height():
     import os
 
@@ -111,14 +137,19 @@ def test_apply_theme_scale_changes_resolved_font_height():
 
     app = QApplication.instance() or QApplication([])
 
-    apply_theme(app, "dark", 1.0)
-    small = QLabel("Ag")
-    small.ensurePolished()
-    h1 = small.fontMetrics().height()
+    try:
+        apply_theme(app, "dark", 1.0)
+        small = QLabel("Ag")
+        small.ensurePolished()
+        h1 = small.fontMetrics().height()
 
-    apply_theme(app, "dark", 2.0)
-    big = QLabel("Ag")
-    big.ensurePolished()
-    h2 = big.fontMetrics().height()
+        apply_theme(app, "dark", 2.0)
+        big = QLabel("Ag")
+        big.ensurePolished()
+        h2 = big.fontMetrics().height()
 
-    assert h2 > h1  # the QSS font-size actually scales the resolved font
+        assert h2 > h1  # the QSS font-size actually scales the resolved font
+    finally:
+        # The QApplication is shared across test files; a leftover 2x QSS
+        # breaks any later window-metrics test.
+        apply_theme(app, "dark", 1.0)

@@ -16,19 +16,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from vrcc.audio.segmenter import (
-    SegDiscard,
-    SegFinal,
-    SegLevel,
-    SegSpeculative,
-    SegSpeechStart,
+    SegDiscard, SegFinal, SegLevel, SegSpeculative, SegSpeechStart,
 )
 from vrcc.core import energy_gate, languages, pipeline_jobs
-from vrcc.core.events import (
-    AppError,
-    MicLevel,
-    PhraseRecognized,
-    SpeechStarted,
-)
+from vrcc.core.events import AppError, MicLevel, PhraseRecognized, SpeechStarted
 from vrcc.core.pipeline_jobs import _NO_ENGINE, _MtJob
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
 
@@ -114,6 +105,8 @@ class Pipeline:
         self._stop_flag = threading.Event()
         self._join_timeout_s = JOIN_TIMEOUT_S  # tests shrink this
         self._started = False
+        # Capture intent across a failed restart_source (see that method).
+        self._resume_pending = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -131,12 +124,14 @@ class Pipeline:
             self._stop_flag = stop
 
             # Fresh queues + state so a restart never inherits a prior run's
-            # sentinels, backlog or half-resolved utterances.
+            # sentinels, backlog, half-resolved utterances, or audio the
+            # segmenter buffered from a previous device.
             self._frame_queue = queue.Queue(maxsize=FRAME_QUEUE_MAX)
             self._stt_queue = queue.Queue(maxsize=JOB_QUEUE_MAX)
             self._mt_queue = queue.Queue(maxsize=JOB_QUEUE_MAX)
             self._spec.reset()
             self._typing.reset()
+            self._segmenter.reset()
             self._dropped_frames = 0
 
             # Each worker is bound to THIS run's queue + stop event via thread
@@ -236,22 +231,24 @@ class Pipeline:
 
     def set_mute(self, mute: "MuteSync | None") -> None:
         """Install a mute-sync coordinator (``None`` removes it). Read by the
-        STT worker between utterances; a plain attribute write is atomic and a
+        STT worker between utterances; the attribute write is atomic and a
         swap mid-utterance only decides the next one."""
         self._mute = mute
 
     def restart_source(self, new_source: "AudioSource") -> bool:
-        """Swap the audio source live (stop old, install ``new_source``, restart
-        capture if it was running) via the proven stop()/start() path -- queues +
-        workers rebuild, engines untouched. Returns whether capture runs after; a
-        failed device open re-raises after start() unwinds itself (_started
-        False), leaving the pipeline consistent so the caller reports the error."""
-        was_running = self._started
-        if was_running:
+        """Swap the audio source live via the proven stop()/start() path;
+        engines untouched. Returns whether capture runs after. A failed device
+        open re-raises after start() unwinds itself, but the capture intent
+        survives (``_resume_pending``), so the next swap to a good device
+        resumes capture instead of inheriting the stopped state."""
+        want_running = self._started or self._resume_pending
+        if self._started:
             self.stop()
         self._source = new_source
-        if was_running:
+        if want_running:
+            self._resume_pending = True
             self.start()
+            self._resume_pending = False
         return self._started
 
     @staticmethod

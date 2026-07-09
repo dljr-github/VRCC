@@ -83,10 +83,24 @@ class LiveApply:
         """Apply new VAD timings/threshold; the next utterance adopts them."""
         self._segmenter.reconfigure(cfg)
 
-    def apply_osc(self, cfg: "OscConfig") -> None:
-        """Retarget the chatbox client (ip/port) and retune its send rate."""
-        self._chatbox.reconfigure(cfg.ip, cfg.port)
+    def apply_osc(self, cfg: "OscConfig") -> bool:
+        """Retarget the chatbox client (ip/port) and retune its send rate.
+
+        The debounce fires while the IP field is mid-typed, and building a UDP
+        client resolves the host, so a partial address raises. That must not
+        escape into the Qt timer slot and abort the rest of the flush: log,
+        keep the old client, and let the next edit try again. Returns whether
+        the retarget took."""
+        try:
+            self._chatbox.reconfigure(cfg.ip, cfg.port)
+        except OSError:
+            logger.warning(
+                "chatbox retarget to %s:%s failed (address not resolvable "
+                "yet?); keeping the previous target", cfg.ip, cfg.port,
+            )
+            return False
         self._chatbox.reconfigure_rate(cfg.burst, cfg.min_interval_s)
+        return True
 
     def apply_mute_sync(self, enabled: bool) -> None:
         """Start or stop mute sync. Mute sync off at launch means no
@@ -102,6 +116,13 @@ class LiveApply:
         if enabled:
             self._mute.start()
         else:
+            self._mute.stop()
+
+    def stop_mute(self) -> None:
+        """Shutdown hook: stop whichever coordinator exists, including one
+        built lazily by :meth:`apply_mute_sync` after launch (the composition
+        root's own handle is None in that case)."""
+        if self._mute is not None:
             self._mute.stop()
 
     def reload_engine(self, kind: str) -> None:

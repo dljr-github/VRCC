@@ -30,6 +30,9 @@ class _RecordingApply:
     def reload_engine(self, kind):
         self.calls.append(("reload", kind))
 
+    def apply_vad(self, cfg):
+        self.calls.append(("vad", cfg))
+
     # Present so the live-apply façade contract is satisfied if ever reached.
     def apply_audio_device(self, device):
         return True
@@ -38,9 +41,6 @@ class _RecordingApply:
         pass
 
     def apply_mute_sync(self, enabled):
-        pass
-
-    def apply_vad(self, cfg):
         pass
 
 
@@ -183,6 +183,23 @@ def test_each_engine_kind_rebuilds_exactly_once(qapp, tmp_path, monkeypatch):
         for kind in ("stt", "mt"):
             if kind in model_calls:
                 assert ("reload", kind) not in apply.calls
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_yes_pushes_vad_timings_live_exactly_once(qapp, tmp_path, monkeypatch):
+    # The reset's apply_profile changes the VAD timings; the running Segmenter
+    # must get them now, not on the next unrelated VAD edit.
+    apply = _RecordingApply()
+    dlg, store = _dialog(tmp_path, monkeypatch, apply=apply)
+    try:
+        _answer(monkeypatch, QMessageBox.StandardButton.Yes)
+        settings_reset.confirm_and_reset(dlg)
+        assert [c for c in apply.calls if c[0] == "vad"] == [("vad", store.config.vad)]
+        # The re-baseline covers the hand-pushed VAD: the close flush re-fires nothing.
+        dlg._apply_live_changes()
+        assert [c for c in apply.calls if c[0] == "vad"] == [("vad", store.config.vad)]
     finally:
         dlg.close()
         dlg.deleteLater()

@@ -183,17 +183,26 @@ def apply_theme_guarded(app, theme: str, scale: float = 1.0) -> None:
         logger.warning("could not apply theme %r", theme, exc_info=True)
 
 
+# The app's unscaled base font size, captured on the first apply_font_scale
+# call (before any scaling): live re-applies must always set base*scale, or
+# each Settings edit would compound onto the previous scale.
+_BASE_POINT_SIZE: float | None = None
+
+
 def apply_font_scale(app, scale: float) -> None:
-    """Scale the base app font by ``scale`` (clamped). Best-effort: a failure
-    leaves the default font."""
+    """Set the app font to the captured base size times ``scale`` (clamped),
+    including scale 1.0, which restores the base. Best-effort: a failure
+    leaves the current font."""
+    global _BASE_POINT_SIZE
     try:
         scale = max(0.5, min(2.0, float(scale)))
-        if abs(scale - 1.0) < 1e-3:
-            return
         font = app.font()
-        base = font.pointSizeF()
-        if base > 0:
-            font.setPointSizeF(base * scale)
-            app.setFont(font)
+        if _BASE_POINT_SIZE is None:
+            base = font.pointSizeF()
+            if base <= 0:
+                return  # pixel-sized font: nothing safe to scale
+            _BASE_POINT_SIZE = base
+        font.setPointSizeF(_BASE_POINT_SIZE * scale)
+        app.setFont(font)
     except Exception:  # noqa: BLE001 -- font scaling must never block startup
         logger.debug("could not apply font scale", exc_info=True)

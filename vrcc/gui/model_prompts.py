@@ -1,9 +1,11 @@
 """Question prompts and combo greying for the active voice model, shared by
 Settings and the main window: offer the CPU when an onnx-asr model meets an
 explicit CUDA device, grey the spoken languages the active model cannot
-transcribe, and (main window) offer a better downloaded model when a spoken
-language outside the active model's set is chosen anyway. The decision helpers
-are Qt-free; the offer functions build a dialog and the greying edits a combo.
+transcribe, and (main window) offer a better downloaded model when the stored
+spoken language sits outside the active model's set. Greying makes that state
+unreachable interactively, so the nudge fires from config loads. The decision
+helpers are Qt-free; the offer functions build a dialog and the greying edits
+a combo.
 """
 
 from __future__ import annotations
@@ -106,28 +108,83 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
     return candidate
 
 
-def offer_language_switch(parent, cfg, dm, source_display: str) -> str | None:
-    """Ask about a better model for the newly chosen spoken language. Returns
-    the accepted model id, or ``None`` (no candidate, or the user declined).
-    The caller applies the switch through its own model-change path."""
-    candidate = propose_language_switch(cfg, dm, source_display)
-    if candidate is None:
-        return None
+def unsupported_stored_language(cfg) -> bool:
+    """Whether the stored spoken language is outside the active voice model's
+    set (the greying predicate): "auto" is unsupported when the model cannot
+    detect the language itself; an unknown model or language (a hand-edited
+    config) restricts nothing. Qt-free."""
+    spec = WHISPER_MODELS.get(cfg.stt.model)
+    if spec is None:
+        return False
+    if cfg.stt.source_language == _AUTO:
+        return not spec.auto_language
+    lang = LANGUAGES.get(cfg.stt.source_language)
+    return lang is not None and not _covers(spec, lang.whisper)
+
+
+def run_language_nudge(window) -> None:
+    """Offer the best downloaded voice model for the main window's stored
+    spoken language when the active model cannot transcribe it. Yes applies
+    the switch through the window's save/on_model_change pair and re-greys
+    the language combo; a decline is remembered as the (model, language)
+    pair so config reloads do not re-ask until the mismatch changes. No-op
+    without a candidate (including "auto", which names no target language)."""
+    cfg = window._store.config
+    source = cfg.stt.source_language
+    candidate = propose_language_switch(cfg, window._download_manager, source)
+    if candidate is None or window._nudge_declined == (cfg.stt.model, source):
+        return
     from PySide6.QtWidgets import QMessageBox
 
     answer = QMessageBox.question(
-        parent,
+        window,
         tr("Switch voice model?"),
         tr(
             _SWITCH_OFFER,
             name=whisper_display_name(cfg.stt.model),
-            language=source_display,
+            language=source,
             other=whisper_display_name(candidate),
         ),
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.Yes,
     )
-    return candidate if answer == QMessageBox.StandardButton.Yes else None
+    if answer != QMessageBox.StandardButton.Yes:
+        window._nudge_declined = (cfg.stt.model, source)
+        return
+    cfg.stt.model = candidate
+    window._store.save_soon()
+    if window._on_model_change is not None:
+        window._on_model_change("stt")
+    grey_unsupported_languages(window._source_combo, cfg.stt.model)
+
+
+def schedule_language_nudge(window) -> None:
+    """Queue :func:`run_language_nudge` once for a stored language the active
+    model cannot transcribe: greying makes that state unreachable from the
+    combo popup, so without this the user gets a disabled-but-selected entry
+    and silently wrong captions. Zero-delay so it runs after construction or
+    reload settles; the pending flag keeps repeated reloads from stacking
+    prompts. Headless windows (no download manager / model-change hook)
+    never schedule."""
+    if window._download_manager is None or window._on_model_change is None:
+        return
+    if window._nudge_pending or not unsupported_stored_language(window._store.config):
+        return
+    window._nudge_pending = True
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(0, lambda: _run_scheduled_nudge(window))
+
+
+def _run_scheduled_nudge(window) -> None:
+    import shiboken6
+
+    window._nudge_pending = False
+    # The queued shot can outlive the window (the UI-language rebuild closes
+    # it): a dead wrapper must not parent a dialog. Re-check the mismatch too;
+    # a reload may have resolved it while the shot was queued.
+    if shiboken6.isValid(window) and unsupported_stored_language(window._store.config):
+        run_language_nudge(window)
 
 
 def grey_unsupported_languages(combo, model_id: str) -> None:

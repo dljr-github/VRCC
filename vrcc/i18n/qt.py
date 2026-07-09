@@ -11,7 +11,9 @@ import logging
 logger = logging.getLogger("vrcc.i18n.qt")
 
 # Qt owns no reference to an installed QTranslator; keep ours alive here or
-# the built-in dialog buttons snap back to English mid-session.
+# the built-in dialog buttons snap back to English mid-session. The next
+# install_qt_translations call removes these before installing its own, so a
+# live language switch never stacks catalogs.
 _QT_TRANSLATORS: list = []
 
 # Our UI language codes vs the locale names Qt's bundled catalogs use. Only
@@ -50,13 +52,17 @@ def apply_ui_language(app, configured: str) -> str:
 
 def install_qt_translations(app, ui_language: str) -> None:
     """Load Qt's base translations (standard-button texts like Yes/No/Cancel)
-    for ``ui_language``. Best-effort: a missing catalog leaves those buttons
-    English while the app's own strings stay translated. Never raises."""
-    if ui_language == "en":
-        return
+    for ``ui_language``, replacing whatever a previous call installed: without
+    the removal, a live switch back to English keeps the old catalog active
+    for the rest of the session. Best-effort: a missing catalog leaves those
+    buttons English while the app's own strings stay translated. Never raises."""
     try:
-        from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
+        from PySide6.QtCore import QCoreApplication, QLibraryInfo, QLocale, QTranslator
 
+        while _QT_TRANSLATORS:
+            QCoreApplication.removeTranslator(_QT_TRANSLATORS.pop())
+        if ui_language == "en":
+            return
         locale = QLocale(_QT_LOCALE_NAMES.get(ui_language, ui_language.replace("-", "_")))
         translations_dir = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
         translator = QTranslator()

@@ -124,10 +124,10 @@ The interface follows your Windows display language by default and can speak
 18 languages (English, 日本語, 한국어, 简体中文, 繁體中文, Español, Français,
 Deutsch, Italiano, Português (Brasil), Русский, Українська, Polski,
 Nederlands, Türkçe, Bahasa Indonesia, Tiếng Việt, ไทย). Pick a different one
-under **Settings → Simple → Language**; it applies after a restart. This
-only affects VRCC's own interface; caption languages are chosen in the main
-window, and adding a UI translation is a single JSON file in `vrcc/i18n/`
-(copy the keys from any existing catalog).
+under **Settings → Simple → Language**; it applies as soon as the Settings
+window closes. This only affects VRCC's own interface; caption languages are
+chosen in the main window, and adding a UI translation is a single JSON file
+in `vrcc/i18n/` (copy the keys from any existing catalog).
 
 ### Performance modes
 
@@ -172,7 +172,7 @@ why their two WER columns differ slightly; Parakeet is int8 either way.
 One result is worth reading twice. Parakeet is **faster on the CPU than on
 the GPU** (0.13 s vs 0.21 s; its int8 ONNX graph does not suit CUDA), which
 is why VRCC runs it on the CPU when the device is left on Auto. On the CPU
-it reaches 2.3% at 0.13 s, beating the `small` default (3.7% at 0.75 s) on
+it reaches 2.3% at 0.13 s, beating the `small` default (3.7% at 0.74 s) on
 both accuracy and speed, which no other model near that latency manages.
 
 Widening the beam (the Quality mode) is close to free on a GPU and buys
@@ -201,7 +201,7 @@ language.
 On CPU it depends on the language you speak:
 
 - One of the 25 European languages: use `parakeet-tdt-0.6b-v3`. It reaches
-  2.3% at 0.13 s, beating the `small` default (3.7% at 0.75 s) on accuracy
+  2.3% at 0.13 s, beating the `small` default (3.7% at 0.74 s) on accuracy
   *and* latency, and it is not close. It also detects the spoken language
   on its own within that set.
 - Japanese, Korean, Chinese, or anything else outside that set: stay on

@@ -247,12 +247,16 @@ class TokenBucket:
             return (1.0 - self._tokens) * self._refill_interval_s
 
     def reconfigure(self, capacity: int, refill_interval_s: float) -> None:
-        """Retune capacity/refill live without handing out a free burst: clamp
-        the current tokens down to the new capacity (never up) and keep
-        ``_last_refill`` so no phantom elapsed time is credited. A larger
-        capacity therefore does not grant tokens; a smaller one takes them
-        away."""
+        """Retune capacity/refill live without handing out a free burst.
+
+        Time accrued so far is materialized at the OLD rate first: switching
+        the rate with a stale ``_last_refill`` would re-price the elapsed span
+        at the new rate, and a shrink of the interval could mint the whole
+        burst instantly. Tokens then clamp down to the new capacity (never
+        up), so a larger capacity does not grant tokens and a smaller one
+        takes them away."""
         with self._lock:
+            self._refill()
             self._capacity = capacity
             self._refill_interval_s = refill_interval_s
             if self._tokens > capacity:

@@ -80,7 +80,7 @@ def test_resolve_unknown_setting_degrades_to_auto():
 
 def test_resolve_auto_walks_display_language_preference_in_order():
     # QLocale.system().uiLanguages() shapes: BCP-47, ordered by preference.
-    # The first SUPPORTED entry wins — an unsupported first choice must fall
+    # The first SUPPORTED entry wins -- an unsupported first choice must fall
     # through to the next preference, not to English.
     assert resolve_ui_language("auto", ["gd-GB", "fr-FR", "en-US"]) == "fr"
     assert resolve_ui_language("auto", ["ja-JP", "ja", "en-US"]) == "ja"
@@ -194,6 +194,41 @@ def test_apply_ui_language_resolves_and_activates():
     assert apply_ui_language(app, "klingon") in UI_LANGUAGES
 
 
+def test_qt_base_translators_are_removed_on_language_switch(monkeypatch):
+    # Live language switches reuse apply_ui_language; without removal the Qt
+    # base translators stack, and ja -> en keeps Japanese Yes/No/Cancel
+    # buttons for the rest of the session.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QCoreApplication
+    from PySide6.QtWidgets import QApplication
+
+    import vrcc.i18n.qt as qt_mod
+    from vrcc.i18n.qt import apply_ui_language
+
+    app = QApplication.instance() or QApplication([])
+    removed = []
+    real_remove = QCoreApplication.removeTranslator
+
+    def record_remove(translator):
+        removed.append(translator)
+        return real_remove(translator)
+
+    monkeypatch.setattr(QCoreApplication, "removeTranslator", record_remove)
+
+    apply_ui_language(app, "ja")
+    installed = list(qt_mod._QT_TRANSLATORS)
+    if not installed:
+        pytest.skip("this PySide6 build ships no qtbase ja catalog")
+
+    apply_ui_language(app, "ja")
+    assert len(qt_mod._QT_TRANSLATORS) == 1  # re-applying replaces, never stacks
+
+    apply_ui_language(app, "en")
+    assert qt_mod._QT_TRANSLATORS == []
+    # Every translator we ever installed went through removeTranslator.
+    assert installed[0] in removed
+
+
 # -- end-to-end: language reaches widgets ------------------------------------
 
 
@@ -217,7 +252,7 @@ def test_main_window_builds_in_japanese(tmp_path):
     set_language("ja")
     try:
         # Import after set_language is NOT required (no import-time tr()),
-        # which is exactly what this test should prove — import first:
+        # which is exactly what this test should prove -- import first:
         from vrcc.gui.main_window import MainWindow
 
         # A fresh path (not os.devnull): the store's debounced save writes

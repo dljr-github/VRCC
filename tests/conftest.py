@@ -39,10 +39,16 @@ class FakeSegmenter:
     def __init__(self) -> None:
         self.frames: list = []
         self.active = False  # mirrors Segmenter.active (energy-gate contract)
+        self.resets = 0
 
     def process(self, frame):
         self.frames.append(frame)
         return []
+
+    def reset(self) -> None:
+        # Pipeline.start() drops in-flight segmenter state on every run.
+        self.resets += 1
+        self.active = False
 
 
 def make_result(

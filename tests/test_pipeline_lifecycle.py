@@ -55,10 +55,12 @@ def test_energy_gate_passes_loud_frames():
 def test_energy_gate_lets_quiet_frames_flow_mid_utterance():
     # The gate only blocks utterance STARTS: once the segmenter is ACTIVE,
     # every frame flows until finalize (a quiet word tail must not be cut).
+    # Activation happens after start(), which resets in-flight segmenter
+    # state, so the fake goes active only once the pipeline runs.
     cfg = AppConfig(audio=AudioConfig(**_GATED_CFG))
     env = make_pipeline(config=cfg)
-    env.segmenter.active = True
     with running(env.pipeline):
+        env.segmenter.active = True
         env.pipeline._on_frame(sample(v=0.001))
         assert _wait_until(lambda: len(env.segmenter.frames) == 1)
 
