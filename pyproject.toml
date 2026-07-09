@@ -46,7 +46,13 @@ cuda = [
     # path like the cuBLAS wheel's.
     "nvidia-cudnn-cu12>=9,<10",
 ]
-dev = ["pytest>=8.0", "pyinstaller>=6.10"]
+dev = [
+    "pytest>=8.0",
+    "pyinstaller>=6.10",
+    # Builds the synthetic Parakeet/Canary exports for the real-runtime STT
+    # tests (tests/onnx_asr_fakes.py); those tests skip without it.
+    "onnx>=1.15",
+]
 
 [project.scripts]
 vrcc = "vrcc.cli:main"

@@ -48,7 +48,7 @@ jobs:
       - name: Install VRCC + pytest
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pytest
+          python -m pip install -e ".[dev]"
 
       # pyproject's addopts already deselect the integration marker, so this
       # is the pure unit suite: no model downloads, no network, no audio HW.
