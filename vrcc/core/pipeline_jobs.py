@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from vrcc.core import languages
 from vrcc.core.events import AppError, PhraseRecognized, PhraseTranslated
 from vrcc.core.pipeline_state import _MISSING
-from vrcc.osc.chatbox import format_message
 
 if TYPE_CHECKING:
     import threading
@@ -217,8 +216,7 @@ def submit_to_chatbox(
 ) -> None:
     if not p._config.osc.send_to_vrchat:
         return
-    message = format_message(original, translations, p._config.osc)
-    p._chatbox.submit(message, utterance_id)
+    p._chatbox.submit_message(original, translations, utterance_id)
 
 
 def safe_submit(

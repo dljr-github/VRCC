@@ -12,8 +12,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from vrcc.core.bus import EventBus
-from vrcc.core.config import AppConfig
+from vrcc.core.config import AppConfig, OscConfig
 from vrcc.core.pipeline import Pipeline
+from vrcc.osc.chatbox import format_message
 from vrcc.stt.engine import SttResult
 
 
@@ -134,6 +135,13 @@ class FakeChatbox:
             if self.fail_submits:
                 raise RuntimeError("chatbox down")
             self.submits.append((text, utterance_id))
+
+    def submit_message(self, original, translations, utterance_id) -> None:
+        # Recorded as the default-config joined text so assertions read the
+        # same display string the chatbox would show (the pipeline tests all
+        # run with a default OscConfig).
+        text = format_message(original, list(translations), OscConfig())
+        self.submit(text, utterance_id)
 
     def set_typing(self, value) -> None:
         with self._lock:

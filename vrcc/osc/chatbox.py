@@ -32,6 +32,10 @@ _JOIN_TIMEOUT_S = 2.0
 # the drain rate, so depth/lag would grow unbounded. Overflow drops the
 # OLDEST (deque maxlen) -- newest speech is most useful.
 _QUEUE_MAX = 64
+# Cap on how many parallel slices fit_message tries before falling back to
+# greedy word packing: past this a message is degenerate (separator overhead
+# dominates) and unreadable at 2 s a part anyway.
+_MAX_MESSAGE_SLICES = 16
 
 
 class _OscClient(Protocol):
@@ -77,6 +81,91 @@ def fit_chatbox(text: str, mode: str) -> list[str]:
     if mode == "split":
         return _split_words(text, CHATBOX_LIMIT)
     raise ValueError(f"Unknown overflow mode: {mode!r}")
+
+
+def _balanced_slices(text: str, n: int, limit: int) -> list[str]:
+    """Split `text` into exactly `n` ordered slices of near-equal length.
+
+    Word-based whenever the text splits into words that each fit `limit`
+    (fewer words than slices just leaves trailing slices empty): each slice
+    takes whole words greedily toward a running remaining-length/remaining-
+    slices target (last slice takes the rest), so joining the slices with
+    spaces preserves every word in order. Character-based ceil-division runs
+    only for spaceless scripts or a pathological over-long word, where the
+    concatenation reproduces `text` exactly. Callers drop empty slices.
+    """
+    words = text.split()
+    if words and all(len(word) <= limit for word in words):
+        slices: list[str] = []
+        idx = 0
+        for k in range(n - 1):
+            target = len(" ".join(words[idx:])) / (n - k)
+            piece = words[idx]
+            idx += 1
+            while idx < len(words):
+                grown = len(piece) + 1 + len(words[idx])
+                # Take the next word only while it moves the slice at least
+                # as close to the target -- overshoot stays within one word.
+                if abs(grown - target) > abs(len(piece) - target):
+                    break
+                piece = f"{piece} {words[idx]}"
+                idx += 1
+            slices.append(piece)
+            if idx >= len(words):
+                break
+        slices.extend([""] * (n - 1 - len(slices)))
+        slices.append(" ".join(words[idx:]))
+        return slices
+    size = -(-len(text) // n)  # ceil division
+    return [text[i * size : (i + 1) * size] for i in range(n)]
+
+
+def fit_message(
+    original: str, translations: list[tuple[str, str]], cfg: OscConfig
+) -> list[str]:
+    """Fit a caption and its translations into send-ready chatbox parts.
+
+    Non-"split" modes defer to `fit_chatbox` on the `format_message` result.
+    In "split" mode an over-limit message is NOT greedy-packed as one joined
+    string (that carves each language arbitrarily across part boundaries):
+    instead every text is cut into the same number of balanced slices via
+    `_balanced_slices` and part i joins slice i of each text with
+    ``cfg.translation_separator``, so all languages advance together. Empty
+    slices are omitted; a message that already fits comes back as one part.
+    """
+    joined = format_message(original, translations, cfg)
+    if cfg.overflow != "split":
+        return fit_chatbox(joined, cfg.overflow)
+    if not joined:
+        return []
+    if len(joined) <= CHATBOX_LIMIT:
+        return [joined]
+
+    # The same texts format_message joins, in the same order.
+    if translations:
+        texts = [text for _, text in translations]
+        if cfg.include_original:
+            texts.insert(0, original)
+    else:
+        texts = [original]
+    texts = [text.strip() for text in texts]
+    texts = [text for text in texts if text]
+
+    start = max(2, -(-len(joined) // CHATBOX_LIMIT))
+    for n in range(start, _MAX_MESSAGE_SLICES + 1):
+        sliced = [_balanced_slices(text, n, CHATBOX_LIMIT) for text in texts]
+        parts = []
+        for i in range(n):
+            part = cfg.translation_separator.join(
+                s[i] for s in sliced if s[i]
+            ).strip()
+            if part:
+                parts.append(part)
+        if parts and all(len(part) <= CHATBOX_LIMIT for part in parts):
+            return parts
+    # Degenerate input that no slice count could balance: greedy word packing
+    # still delivers everything, just without per-language alignment.
+    return _split_words(joined, CHATBOX_LIMIT)
 
 
 def _split_words(text: str, limit: int) -> list[str]:
@@ -238,6 +327,25 @@ class ChatboxSender:
         # Flag over-limit messages (unless "split", which loses nothing) so the
         # caption log can badge them as truncated.
         truncated = len(text) > CHATBOX_LIMIT and self._cfg.overflow != "split"
+        self._enqueue(chunks, utterance_id, truncated)
+
+    def submit_message(
+        self, original: str, translations: list[tuple[str, str]], utterance_id: int
+    ) -> None:
+        """Queue a caption plus its ``[(name, text), ...]`` translations,
+        shaped by `fit_message`: in "split" mode each queued part carries a
+        balanced slice of EVERY language rather than a greedy cut of the
+        joined string. Queueing semantics (coalescing, capping, per-chunk
+        delay, truncated badging) match `submit()` exactly.
+        """
+        chunks = fit_message(original, translations, self._cfg)
+        if not chunks:
+            return
+        joined = format_message(original, translations, self._cfg)
+        truncated = self._cfg.overflow != "split" and len(joined) > CHATBOX_LIMIT
+        self._enqueue(chunks, utterance_id, truncated)
+
+    def _enqueue(self, chunks: list[str], utterance_id: int, truncated: bool) -> None:
         split_delay_s = self._cfg.split_delay_s
         last = len(chunks) - 1
         items = [
