@@ -57,3 +57,14 @@ def test_whisper_blurb_lead_ins_are_all_distinct():
 
     lead_ins = [model_blurb("whisper", mid).split(" · ")[0] for mid in WHISPER_MODELS]
     assert len(set(lead_ins)) == len(lead_ins)
+
+
+def test_model_blurb_marks_parakeet_language_restriction():
+    blurb = model_blurb("whisper", "parakeet-tdt-0.6b-v3")
+    assert "european languages only" in blurb.lower()
+    assert "english only" not in blurb.lower()
+    assert "MB" in blurb or "GB" in blurb
+
+
+def test_parakeet_display_name():
+    assert whisper_display_name("parakeet-tdt-0.6b-v3") == "Parakeet v3 (European languages)"

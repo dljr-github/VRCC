@@ -32,6 +32,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))  # noqa: F821
 
 datas = collect_data_files("faster_whisper")
+# onnx-asr ships its preprocessor ONNX graphs (nemo128 mel features etc.) as
+# package data; the Parakeet engine needs them at runtime.
+datas += collect_data_files("onnx_asr")
 # UI translation catalogs: vrcc.i18n loads them from the directory of its own
 # __file__, which in a frozen build is _internal/vrcc/i18n/ -- exactly where
 # this lands them.
@@ -55,6 +58,8 @@ hiddenimports = [
     # Imported lazily by vrcc.core.hardware / vrcc.gui.firstrun for VRAM /
     # compute-capability / driver-version queries (nvidia-ml-py).
     "pynvml",
+    # Imported lazily by vrcc.stt.parakeet at engine load time.
+    "onnx_asr",
 ]
 
 a = Analysis(

@@ -54,6 +54,7 @@ def test_whisper_expected_models_present():
         "large-v3-turbo",
         "distil-large-v3.5",
         "distil-small.en",
+        "parakeet-tdt-0.6b-v3",
     }
     assert expected <= set(WHISPER_MODELS)
 
@@ -72,6 +73,39 @@ def test_whisper_spec_is_frozen():
     spec = WHISPER_MODELS["small"]
     with pytest.raises(Exception):
         spec.size_mb = 1  # type: ignore[misc]
+
+
+def test_backends_are_known():
+    for spec in WHISPER_MODELS.values():
+        assert spec.backend in {"whisper", "parakeet"}, f"{spec.id}: {spec.backend!r}"
+
+
+def test_whisper_backed_specs_have_no_repo():
+    for spec in WHISPER_MODELS.values():
+        if spec.backend == "whisper":
+            assert spec.repo is None
+            assert spec.quantization is None
+
+
+def test_english_only_specs_restrict_languages_to_english():
+    for spec in WHISPER_MODELS.values():
+        if spec.english_only:
+            assert spec.languages == ("en",), f"{spec.id} greying needs languages"
+
+
+def test_parakeet_spec_fields():
+    spec = WHISPER_MODELS["parakeet-tdt-0.6b-v3"]
+    assert spec.backend == "parakeet"
+    assert spec.repo == "istupakov/parakeet-tdt-0.6b-v3-onnx"
+    assert spec.quantization == "int8"
+    assert spec.english_only is False
+    assert spec.languages is not None
+    assert len(spec.languages) == 25
+    # The subset of VRCC display languages Parakeet must (not) cover.
+    for code in ("en", "es", "fr", "de", "pt", "ru", "it", "pl", "nl", "uk"):
+        assert code in spec.languages
+    for code in ("ja", "ko", "zh", "ar", "hi", "th", "vi", "tr"):
+        assert code not in spec.languages
 
 
 # --------------------------------------------------------------------------

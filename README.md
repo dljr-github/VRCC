@@ -3,8 +3,11 @@
 Speak into your microphone and your words appear in the VRChat chatbox as
 live captions — with translations into up to three languages underneath.
 Everything runs locally: speech recognition via
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper) and machine
-translation via [CTranslate2](https://github.com/OpenNMT/CTranslate2)
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) or NVIDIA's
+[Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
+(run as an ONNX export via [onnx-asr](https://github.com/istupakov/onnx-asr))
+and machine translation via
+[CTranslate2](https://github.com/OpenNMT/CTranslate2)
 (NLLB / M2M100 / MADLAD models). No cloud services, no API keys.
 
 ```
@@ -80,7 +83,9 @@ downloads them for you. Approximate download sizes:
 | Translation | `nllb-600M-int8` | ~650 MB |
 
 Other options range from whisper `tiny` (~75 MB) up to `large-v3` (~3 GB),
-and MT models from `m2m100-418M-int8` (~480 MB) up to `madlad400-3b`
+plus NVIDIA's `parakeet-tdt-0.6b-v3` (~690 MB) — very accurate and fast, but
+limited to English + 24 other European languages (no Japanese/Korean/Chinese).
+MT models range from `m2m100-418M-int8` (~480 MB) up to `madlad400-3b`
 (~3.5 GB). Models can be added/removed later via the **Models** dialog.
 
 ## Usage

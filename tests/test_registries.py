@@ -374,6 +374,99 @@ def test_ensure_whisper_propagates_errors(
 
 
 # --------------------------------------------------------------------------
+# DownloadManager: Parakeet (onnx-asr backend)
+# --------------------------------------------------------------------------
+
+_PARAKEET_ID = "parakeet-tdt-0.6b-v3"
+_PARAKEET_FILES = (
+    "config.json",
+    "vocab.txt",
+    "encoder-model.int8.onnx",
+    "decoder_joint-model.int8.onnx",
+)
+
+
+def test_parakeet_lives_under_the_whisper_dir(manager: DownloadManager, tmp_path: Path):
+    assert (
+        manager.whisper_model_dir(_PARAKEET_ID)
+        == tmp_path / "models" / "whisper" / _PARAKEET_ID
+    )
+
+
+def test_is_parakeet_downloaded_needs_every_file(manager: DownloadManager):
+    d = manager.whisper_model_dir(_PARAKEET_ID)
+    assert manager.is_whisper_downloaded(_PARAKEET_ID) is False
+    for name in _PARAKEET_FILES[:-1]:
+        _touch(d / name)
+    assert manager.is_whisper_downloaded(_PARAKEET_ID) is False
+    _touch(d / _PARAKEET_FILES[-1])
+    assert manager.is_whisper_downloaded(_PARAKEET_ID) is True
+
+
+def test_is_parakeet_downloaded_ignores_whisper_model_bin(manager: DownloadManager):
+    _touch(manager.whisper_model_dir(_PARAKEET_ID) / "model.bin")
+    assert manager.is_whisper_downloaded(_PARAKEET_ID) is False
+
+
+def test_ensure_parakeet_snapshots_repo_with_needed_files_only(
+    manager: DownloadManager, bus: EventBus, monkeypatch: pytest.MonkeyPatch
+):
+    events: list[DownloadProgress] = []
+    bus.subscribe(DownloadProgress, events.append)
+    calls: dict[str, object] = {}
+
+    def fake_snapshot(repo_id, local_dir=None, allow_patterns=None, tqdm_class=None):
+        calls["repo_id"] = repo_id
+        calls["local_dir"] = local_dir
+        calls["allow_patterns"] = allow_patterns
+        for name in allow_patterns:
+            _touch(Path(local_dir) / name)
+        return local_dir
+
+    monkeypatch.setattr("vrcc.download.manager.snapshot_download", fake_snapshot)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("faster-whisper download_model must not run for parakeet")
+
+    monkeypatch.setattr("vrcc.download.manager.download_model", boom)
+
+    result = manager.ensure_whisper(_PARAKEET_ID)
+
+    assert result == manager.whisper_model_dir(_PARAKEET_ID)
+    assert calls["repo_id"] == "istupakov/parakeet-tdt-0.6b-v3-onnx"
+    assert Path(calls["local_dir"]) == manager.whisper_model_dir(_PARAKEET_ID)
+    assert set(calls["allow_patterns"]) == set(_PARAKEET_FILES)
+    assert manager.is_whisper_downloaded(_PARAKEET_ID) is True
+    done_events = [e for e in events if e.done]
+    assert len(done_events) == 1
+    assert done_events[0].model_id == _PARAKEET_ID
+
+
+def test_ensure_parakeet_short_circuits_when_downloaded(
+    manager: DownloadManager, bus: EventBus, monkeypatch: pytest.MonkeyPatch
+):
+    d = manager.whisper_model_dir(_PARAKEET_ID)
+    for name in _PARAKEET_FILES:
+        _touch(d / name)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("snapshot_download must not be called when present")
+
+    monkeypatch.setattr("vrcc.download.manager.snapshot_download", boom)
+
+    result = manager.ensure_whisper(_PARAKEET_ID)
+
+    assert result == d
+
+
+def test_delete_removes_parakeet_dir(manager: DownloadManager):
+    d = manager.whisper_model_dir(_PARAKEET_ID)
+    _touch(d / "encoder-model.int8.onnx")
+    manager.delete("whisper", _PARAKEET_ID)
+    assert not d.exists()
+
+
+# --------------------------------------------------------------------------
 # Real download (manual verification only; excluded by default)
 # --------------------------------------------------------------------------
 

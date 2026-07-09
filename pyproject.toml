@@ -10,7 +10,10 @@ requires-python = ">=3.10"
 dependencies = [
     "ctranslate2==4.8.1",
     "faster-whisper==1.2.1",
-    "onnxruntime>=1.16,<2",
+    "onnxruntime>=1.18.1,<2",
+    # Runs the NVIDIA Parakeet TDT ONNX export (pure-python; reuses the
+    # onnxruntime/numpy/huggingface_hub deps in this list).
+    "onnx-asr>=0.11,<1",
     "tokenizers>=0.15",
     "sentencepiece>=0.2.0",
     "huggingface_hub>=0.23",

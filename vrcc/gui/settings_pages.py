@@ -170,16 +170,17 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     form.setContentsMargins(24, 16, 24, 16)
 
     dlg._model_combo = QComboBox()
-    # Downloaded voice models only (or all, headless). Rebuild the english-only
-    # index list against this FILTERED order so greying lines up with combo rows.
-    dlg._english_only_indices = []
+    # Downloaded voice models only (or all, headless). Rebuild the language-
+    # limited index list against this FILTERED order so greying lines up with
+    # combo rows.
+    dlg._limited_model_indices = []
     voice_specs = dlg._downloaded_whisper_specs()
     _add_deleted_placeholder_if_needed(dlg._model_combo, voice_specs, dlg._cfg.stt.model)
     for spec in voice_specs:
         i = dlg._model_combo.count()
         dlg._model_combo.addItem(whisper_display_name(spec.id), spec.id)
-        if spec.english_only:
-            dlg._english_only_indices.append(i)
+        if spec.languages is not None:
+            dlg._limited_model_indices.append((i, spec.languages))
     mi = dlg._model_combo.findData(dlg._cfg.stt.model)
     if mi >= 0:
         dlg._model_combo.setCurrentIndex(mi)  # else: index 0 is already the placeholder
@@ -208,7 +209,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     )
 
     def on_source(_i):
-        dlg._update_english_only_items()
+        dlg._update_language_limited_items()
         if dlg._loading:
             return
         dlg._cfg.stt.source_language = dlg._source_combo.currentText()
@@ -292,7 +293,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
 
     form.addRow(adv)
 
-    dlg._update_english_only_items()
+    dlg._update_language_limited_items()
     return page
 
 

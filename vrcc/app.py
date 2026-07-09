@@ -28,6 +28,7 @@ from vrcc.i18n import tr
 from vrcc.osc.chatbox import ChatboxSender
 from vrcc.osc.mutesync import MuteSync
 from vrcc.osc.vrchat_detect import VrchatDetector
+from vrcc.stt import create_stt_engine
 from vrcc.stt.engine import SttEngine
 from vrcc.translate.engine import TranslateEngine
 from vrcc.translate.registry import MT_MODELS
@@ -103,7 +104,7 @@ def build_engine_stack(
     segmenter = Segmenter(cfg.vad, vad.prob)
 
     if stt_engine is None:
-        stt_engine = SttEngine(
+        stt_engine = create_stt_engine(
             cfg.stt, paths.models_dir / "whisper" / cfg.stt.model, bus
         )
 
@@ -333,8 +334,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         if target_id is None:
             return None, None
         if kind == "stt":
+            model_dir = paths.models_dir / "whisper" / target_id
             return (
-                SttEngine(cfg.stt, paths.models_dir / "whisper" / target_id, bus),
+                create_stt_engine(cfg.stt, model_dir, bus, model_id=target_id),
                 target_id,
             )
         spec = MT_MODELS.get(target_id)

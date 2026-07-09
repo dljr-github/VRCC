@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from vrcc.core import languages
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.core.hardware import device_names
 from vrcc.gui import model_fit, settings_advanced, settings_pages
@@ -108,7 +109,9 @@ class SettingsDialog(QDialog):
         self._stt_temp_spin: QDoubleSpinBox | None = None
         self._mt_beam_spin: QSpinBox | None = None
         self._model_combo: QComboBox | None = None
-        self._english_only_indices: list[int] = []
+        # (combo index, supported whisper language codes) for voice models
+        # that can't transcribe every language (distil English-only, Parakeet).
+        self._limited_model_indices: list[tuple[int, tuple[str, ...]]] = []
         # Currently-selected model id per combo, so a cancelled fit-warning
         # switch can revert the combo without re-firing its handler.
         self._voice_selected_id: str | None = None
@@ -194,9 +197,10 @@ class SettingsDialog(QDialog):
                 finally:
                     self._loading = False
                 if combo is self._model_combo:
-                    # Positional english-only greying: shift past the removal.
-                    self._english_only_indices = [
-                        j - 1 if j > i else j for j in self._english_only_indices
+                    # Positional language-limited greying: shift past the removal.
+                    self._limited_model_indices = [
+                        (j - 1 if j > i else j, langs)
+                        for j, langs in self._limited_model_indices
                     ]
                 return
 
@@ -464,13 +468,20 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             combo.setCurrentIndex(idx)
 
-    def _update_english_only_items(self) -> None:
-        """Grey out english-only whisper models unless the source is English."""
+    def _update_language_limited_items(self) -> None:
+        """Grey out voice models that can't transcribe the selected spoken
+        language. "auto" keeps multilingual-but-limited models (Parakeet)
+        enabled -- they auto-detect within their set -- but greys single-
+        language ones (distil), which would force English regardless."""
         if self._model_combo is None:
             return
-        allow_english_only = self._source_combo.currentText() == "English"
+        source = self._source_combo.currentText()
         model = self._model_combo.model()
-        for i in self._english_only_indices:
+        for i, langs in self._limited_model_indices:
+            if source == _AUTO:
+                enabled = len(langs) > 1
+            else:
+                enabled = languages.get(source).whisper in langs
             item = model.item(i)
             if item is not None:
-                item.setEnabled(allow_english_only)
+                item.setEnabled(enabled)

@@ -33,6 +33,7 @@ _WHISPER_LABEL_MARKERS = (
     tr_noop("Large v3 Turbo"),
     tr_noop("Distil-Large v3.5 (English)"),
     tr_noop("Distil-Small (English)"),
+    tr_noop("Parakeet v3 (European languages)"),
 )
 
 
@@ -69,6 +70,7 @@ _WHISPER_LEAD_INS: dict[str, str] = {
     "large-v3-turbo": tr_noop("Most accurate and fast"),
     "distil-large-v3.5": tr_noop("Near-most accurate, fast"),
     "distil-small.en": tr_noop("Fast, small download"),
+    "parakeet-tdt-0.6b-v3": tr_noop("Very accurate and fast"),
 }
 
 _MT_LEAD_INS: dict[str, str] = {
@@ -95,7 +97,8 @@ def model_blurb(kind: str, model_id: str) -> str:
 
     ``kind`` is ``"whisper"`` or ``"mt"``. Includes "· non-commercial use"
     for MT specs whose ``license`` contains "NC"; includes "· English only"
-    for whisper specs with ``english_only`` True. Unknown ids return ``""``.
+    for voice specs with ``english_only`` True and "· European languages only"
+    for other language-restricted voice specs. Unknown ids return ``""``.
     """
     if kind == "whisper":
         spec = WHISPER_MODELS.get(model_id)
@@ -107,6 +110,10 @@ def model_blurb(kind: str, model_id: str) -> str:
         blurb = " · ".join(parts)
         if spec.english_only:
             blurb += " · " + tr("English only")
+        elif spec.languages is not None:
+            # Today the only language-restricted non-English model is Parakeet
+            # (25 European languages); revisit the wording if that changes.
+            blurb += " · " + tr("European languages only")
         return blurb
     if kind == "mt":
         spec = MT_MODELS.get(model_id)

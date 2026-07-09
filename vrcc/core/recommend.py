@@ -20,20 +20,21 @@ PRESETS: dict[str, tuple[str, str]] = {
     "cpu": ("small", "nllb-600M-int8"),
 }
 
-# Per-tier whisper ids, best-first: preset leads, quality descends; distil
-# English-only models trail (every id must appear as a fallback).
+# Per-tier whisper ids, best-first: preset leads, quality descends;
+# language-restricted models trail (every id must appear as a fallback) --
+# Parakeet (European languages) ahead of the distil English-only pair.
 WHISPER_PREFERENCE: dict[str, list[str]] = {
     "gpu_high": [
         "large-v3-turbo", "large-v3", "medium", "small", "base", "tiny",
-        "distil-large-v3.5", "distil-small.en",
+        "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
     ],
     "gpu_low": [
         "large-v3-turbo", "medium", "small", "large-v3", "base", "tiny",
-        "distil-large-v3.5", "distil-small.en",
+        "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
     ],
     "cpu": [
         "small", "base", "tiny", "medium", "large-v3-turbo", "large-v3",
-        "distil-large-v3.5", "distil-small.en",
+        "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
     ],
 }
 
