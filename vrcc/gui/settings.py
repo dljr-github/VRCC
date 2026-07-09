@@ -32,6 +32,7 @@ from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.core.hardware import device_names
 from vrcc.gui import model_fit, settings_advanced, settings_pages
 from vrcc.gui.style import PALETTE, resolve_theme
+from vrcc.i18n import tr
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
@@ -62,6 +63,7 @@ _RESTART_FIELDS = (
     ("mute_sync", "enabled"),
     ("gui", "theme"),
     ("gui", "font_scale"),
+    ("gui", "ui_language"),
     ("vad", "speculative_silence_ms"),
     ("vad", "finalize_silence_ms"),
     ("vad", "min_utterance_ms"),
@@ -96,7 +98,7 @@ class SettingsDialog(QDialog):
         self._on_model_change = on_model_change
         self._loading = True
 
-        self.setWindowTitle("Settings")
+        self.setWindowTitle(tr("Settings"))
         self.resize(660, 600)
 
         self._initial_restart = self._snapshot_restart_fields()
@@ -162,8 +164,8 @@ class SettingsDialog(QDialog):
             return True
         answer = QMessageBox.question(
             self,
-            "Large model",
-            msg + "\n\nSwitch anyway?",
+            tr("Large model"),
+            msg + "\n\n" + tr("Switch anyway?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -242,16 +244,18 @@ class SettingsDialog(QDialog):
         root = QVBoxLayout(self)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._scrolled(settings_pages.build_simple_page(self)), "Simple")
-        self._tabs.addTab(self._scrolled(settings_pages.build_voice_page(self)), "Voice recognition")
-        self._tabs.addTab(self._scrolled(settings_pages.build_translation_page(self)), "Translation")
-        self._tabs.addTab(self._scrolled(settings_advanced.build_vrchat_page(self)), "VRChat")
-        self._tabs.addTab(self._scrolled(settings_advanced.build_advanced_page(self)), "Advanced / Power users")
+        self._tabs.addTab(self._scrolled(settings_pages.build_simple_page(self)), tr("Simple"))
+        self._tabs.addTab(self._scrolled(settings_pages.build_voice_page(self)), tr("Voice recognition"))
+        self._tabs.addTab(self._scrolled(settings_pages.build_translation_page(self)), tr("Translation"))
+        self._tabs.addTab(self._scrolled(settings_advanced.build_vrchat_page(self)), tr("VRChat"))
+        self._tabs.addTab(self._scrolled(settings_advanced.build_advanced_page(self)), tr("Advanced / Power users"))
         root.addWidget(self._tabs)
 
         self._restart_banner = QLabel(
-            "Some changes (device, precision, threads, connection, "
-            "appearance) take effect after restarting VRCC."
+            tr(
+                "Some changes (device, precision, threads, connection, "
+                "appearance) take effect after restarting VRCC."
+            )
         )
         self._restart_banner.setWordWrap(True)
         self._restart_banner.setStyleSheet(self._warn_style)
@@ -260,7 +264,7 @@ class SettingsDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(tr("Close"))
         close_btn.clicked.connect(self.accept)
         buttons.addWidget(close_btn)
         root.addLayout(buttons)
@@ -287,7 +291,7 @@ class SettingsDialog(QDialog):
         return s
 
     def _anchored_slider(self, slider: QSlider, extra: QWidget | None = None):
-        low, high = QLabel("Low"), QLabel("High")
+        low, high = QLabel(tr("Low")), QLabel(tr("High"))
         low.setStyleSheet(self._muted_style)
         high.setStyleSheet(self._muted_style)
         row = QHBoxLayout()
@@ -349,13 +353,13 @@ class SettingsDialog(QDialog):
         combo.currentIndexChanged.connect(on_change)
 
     def _device_choices(self):
-        choices = [("Auto", _AUTO, 0), ("CPU", "cpu", 0)]
+        choices = [(tr("Auto"), _AUTO, 0), (tr("CPU"), "cpu", 0)]
         try:
             names = device_names()
         except Exception:  # noqa: BLE001
             names = []
         for i, name in enumerate(names):
-            choices.append((f"GPU {i}: {name}", "cuda", i))
+            choices.append((tr("GPU {index}: {name}", index=i, name=name), "cuda", i))
         return choices
 
     def _make_device_combo(self, section) -> QComboBox:
@@ -405,7 +409,7 @@ class SettingsDialog(QDialog):
     def _make_input_device_combo(self) -> QComboBox:
         """The microphone picker reused on the Simple page."""
         combo = QComboBox()
-        combo.addItem("Auto (system default)", _AUTO)
+        combo.addItem(tr("Auto (system default)"), _AUTO)
         try:
             from vrcc.audio.devices import list_input_devices
 
@@ -419,7 +423,7 @@ class SettingsDialog(QDialog):
             combo.addItem(cur, cur)
             idx = combo.findData(cur)
         combo.setCurrentIndex(idx)
-        combo.setToolTip("Which microphone to listen to.")
+        combo.setToolTip(tr("Which microphone to listen to."))
 
         def on_device(_i):
             if self._loading:

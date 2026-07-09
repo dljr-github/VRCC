@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from vrcc.i18n import tr
+
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
 
@@ -38,93 +40,99 @@ def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
     outer.setContentsMargins(24, 16, 24, 16)
 
     # Connection.
-    conn = QGroupBox("Connection")
+    conn = QGroupBox(tr("Connection"))
     conn_form = QFormLayout(conn)
-    conn_note = QLabel("Where captions are sent. Most people never change this.")
+    conn_note = QLabel(tr("Where captions are sent. Most people never change this."))
     conn_note.setStyleSheet(dlg._muted_style)
     conn_note.setWordWrap(True)
     conn_form.addRow(conn_note)
 
     ip = QLineEdit(dlg._cfg.osc.ip)
-    ip.setToolTip("Where captions are sent. Most people never change this.")
+    ip.setToolTip(tr("Where captions are sent. Most people never change this."))
     dlg._bind_line(ip, dlg._cfg.osc, "ip")
-    conn_form.addRow("Address", ip)
+    conn_form.addRow(tr("Address"), ip)
 
     port = dlg._spin(0, 65535, dlg._cfg.osc.port)
-    port.setToolTip("Where captions are sent. Most people never change this.")
+    port.setToolTip(tr("Where captions are sent. Most people never change this."))
     dlg._bind_int(port, dlg._cfg.osc, "port")
-    conn_form.addRow("Port", port)
+    conn_form.addRow(tr("Port"), port)
     outer.addWidget(conn)
 
     # Message pacing.
-    pace = QGroupBox("Message pacing")
+    pace = QGroupBox(tr("Message pacing"))
     pace_form = QFormLayout(pace)
     interval = dlg._dspin(0.1, 10.0, dlg._cfg.osc.min_interval_s, 2, 0.1)
-    interval.setToolTip("How quickly messages are sent to the chatbox.")
+    interval.setToolTip(tr("How quickly messages are sent to the chatbox."))
     dlg._bind_float(interval, dlg._cfg.osc, "min_interval_s")
-    pace_form.addRow("Minimum time between messages (s)", interval)
+    pace_form.addRow(tr("Minimum time between messages (s)"), interval)
 
     burst = dlg._spin(1, 20, dlg._cfg.osc.burst)
-    burst.setToolTip("How many messages can be sent quickly in a row.")
+    burst.setToolTip(tr("How many messages can be sent quickly in a row."))
     dlg._bind_int(burst, dlg._cfg.osc, "burst")
-    pace_form.addRow("Burst", burst)
+    pace_form.addRow(tr("Burst"), burst)
 
     split_delay = dlg._dspin(0.5, 10.0, dlg._cfg.osc.split_delay_s, 1, 0.5)
     split_delay.setToolTip(
-        "How long each part of a long caption stays visible before the next "
-        "part replaces it."
+        tr(
+            "How long each part of a long caption stays visible before the "
+            "next part replaces it."
+        )
     )
     dlg._bind_float(split_delay, dlg._cfg.osc, "split_delay_s")
-    pace_form.addRow("Delay between split parts (s)", split_delay)
+    pace_form.addRow(tr("Delay between split parts (s)"), split_delay)
     outer.addWidget(pace)
 
     # Chatbox message format.
-    fmt = QGroupBox("Chatbox message")
+    fmt = QGroupBox(tr("Chatbox message"))
     fmt_form = QFormLayout(fmt)
     overflow = QComboBox()
     for label, value in (
-        ("Send in parts", "split"),
-        ("Shorten to fit", "truncate"),
-        ("Send full (may be cut off in VRChat)", "send"),
+        (tr("Send in parts"), "split"),
+        (tr("Shorten to fit"), "truncate"),
+        (tr("Send full (may be cut off in VRChat)"), "send"),
     ):
         overflow.addItem(label, value)
     oi = overflow.findData(dlg._cfg.osc.overflow)
     if oi >= 0:
         overflow.setCurrentIndex(oi)
-    overflow.setToolTip("What to do when a caption is too long for one message.")
+    overflow.setToolTip(
+        tr("What to do when a caption is too long for one message.")
+    )
     dlg._bind_data_combo(overflow, dlg._cfg.osc, "overflow")
-    fmt_form.addRow("If a message is too long", overflow)
+    fmt_form.addRow(tr("If a message is too long"), overflow)
 
     sep = QLineEdit(dlg._cfg.osc.translation_separator)
-    sep.setToolTip("Text placed between the original and the translation.")
+    sep.setToolTip(tr("Text placed between the original and the translation."))
     dlg._bind_line(sep, dlg._cfg.osc, "translation_separator")
-    fmt_form.addRow("Separator", sep)
+    fmt_form.addRow(tr("Separator"), sep)
 
-    sfx = QCheckBox("Play a sound when the chatbox updates")
+    sfx = QCheckBox(tr("Play a sound when the chatbox updates"))
     sfx.setChecked(dlg._cfg.osc.notification_sfx)
-    sfx.setToolTip("VRChat's chatbox notification sound.")
+    sfx.setToolTip(tr("VRChat's chatbox notification sound."))
     dlg._bind_checkbox(sfx, dlg._cfg.osc, "notification_sfx")
     fmt_form.addRow(sfx)
     outer.addWidget(fmt)
 
     # When I mute in VRChat.
-    mute = QGroupBox("When I mute in VRChat")
+    mute = QGroupBox(tr("When I mute in VRChat"))
     mute_form = QFormLayout(mute)
-    mute_enabled = QCheckBox("React when I mute myself in VRChat")
+    mute_enabled = QCheckBox(tr("React when I mute myself in VRChat"))
     mute_enabled.setChecked(dlg._cfg.mute_sync.enabled)
-    mute_enabled.setToolTip("Let muting yourself in VRChat control captioning.")
+    mute_enabled.setToolTip(
+        tr("Let muting yourself in VRChat control captioning.")
+    )
     dlg._bind_checkbox(mute_enabled, dlg._cfg.mute_sync, "enabled")
     mute_form.addRow(mute_enabled)
 
     mode_labels = {
-        "pause": "Pause captions",
-        "ignore": "Keep captioning",
-        "invert": "Only caption while muted",
+        "pause": tr("Pause captions"),
+        "ignore": tr("Keep captioning"),
+        "invert": tr("Only caption while muted"),
     }
     mode_tips = {
-        "pause": "Stop captioning while you're muted.",
-        "ignore": "Ignore mute — keep captioning either way.",
-        "invert": "Only caption while you're muted.",
+        "pause": tr("Stop captioning while you're muted."),
+        "ignore": tr("Ignore mute — keep captioning either way."),
+        "invert": tr("Only caption while you're muted."),
     }
     mode_row = QHBoxLayout()
     group = QButtonGroup(dlg)
@@ -147,7 +155,7 @@ def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
     mode_row.addStretch(1)
     mode_holder = QWidget()
     mode_holder.setLayout(mode_row)
-    mute_form.addRow("Mode", mode_holder)
+    mute_form.addRow(tr("Mode"), mode_holder)
     outer.addWidget(mute)
 
     outer.addStretch(1)
@@ -160,8 +168,10 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     outer.setContentsMargins(24, 16, 24, 16)
 
     warning = QLabel(
-        "These are power-user settings. The defaults work well for most "
-        "people — change them only if you know what they do."
+        tr(
+            "These are power-user settings. The defaults work well for most "
+            "people — change them only if you know what they do."
+        )
     )
     warning.setWordWrap(True)
     warning.setStyleSheet(dlg._warn_style)
@@ -173,68 +183,79 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     # Run on GPU/CPU + processing precision.
     dlg._stt_device_combo = dlg._make_device_combo(dlg._cfg.stt)
     dlg._stt_device_combo.setToolTip(
-        "Use your graphics card (faster) or the processor."
+        tr("Use your graphics card (faster) or the processor.")
     )
-    form.addRow("Run voice recognition on", dlg._stt_device_combo)
+    form.addRow(tr("Run voice recognition on"), dlg._stt_device_combo)
 
     dlg._stt_compute_combo = dlg._make_compute_combo(dlg._cfg.stt)
     dlg._stt_compute_combo.setToolTip(
-        "Lower precision is faster and uses less memory."
+        tr("Lower precision is faster and uses less memory.")
     )
-    form.addRow("Voice processing precision", dlg._stt_compute_combo)
+    form.addRow(tr("Voice processing precision"), dlg._stt_compute_combo)
 
     dlg._mt_device_combo = dlg._make_device_combo(dlg._cfg.translate)
     dlg._mt_device_combo.setToolTip(
-        "Use your graphics card (faster) or the processor."
+        tr("Use your graphics card (faster) or the processor.")
     )
-    form.addRow("Run translation on", dlg._mt_device_combo)
+    form.addRow(tr("Run translation on"), dlg._mt_device_combo)
 
     dlg._mt_compute_combo = dlg._make_compute_combo(dlg._cfg.translate)
     dlg._mt_compute_combo.setToolTip(
-        "Lower precision is faster and uses less memory."
+        tr("Lower precision is faster and uses less memory.")
     )
-    form.addRow("Translation processing precision", dlg._mt_compute_combo)
+    form.addRow(tr("Translation processing precision"), dlg._mt_compute_combo)
 
     # Threads / workers.
     cpu_threads = dlg._spin(0, 64, dlg._cfg.stt.cpu_threads)
-    cpu_threads.setToolTip("How many processor cores to use (0 = automatic).")
+    cpu_threads.setToolTip(
+        tr("How many processor cores to use (0 = automatic).")
+    )
     dlg._bind_int(cpu_threads, dlg._cfg.stt, "cpu_threads")
-    form.addRow("CPU threads (0 = auto)", cpu_threads)
+    form.addRow(tr("CPU threads (0 = auto)"), cpu_threads)
 
     workers = dlg._spin(1, 8, dlg._cfg.stt.num_workers)
-    workers.setToolTip("How many voice-recognition jobs run at once.")
+    workers.setToolTip(tr("How many voice-recognition jobs run at once."))
     dlg._bind_int(workers, dlg._cfg.stt, "num_workers")
-    form.addRow("Voice recognition workers", workers)
+    form.addRow(tr("Voice recognition workers"), workers)
 
     inter = dlg._spin(1, 8, dlg._cfg.translate.inter_threads)
-    inter.setToolTip("How many processor cores translation may use across jobs.")
+    inter.setToolTip(
+        tr("How many processor cores translation may use across jobs.")
+    )
     dlg._bind_int(inter, dlg._cfg.translate, "inter_threads")
-    form.addRow("Translation threads (between jobs)", inter)
+    form.addRow(tr("Translation threads (between jobs)"), inter)
 
     intra = dlg._spin(0, 64, dlg._cfg.translate.intra_threads)
     intra.setToolTip(
-        "How many processor cores each translation job may use (0 = auto)."
+        tr("How many processor cores each translation job may use (0 = auto).")
     )
     dlg._bind_int(intra, dlg._cfg.translate, "intra_threads")
-    form.addRow("Translation threads (within a job, 0 = auto)", intra)
+    form.addRow(tr("Translation threads (within a job, 0 = auto)"), intra)
 
     queued = dlg._spin(-1, 64, dlg._cfg.translate.max_queued_batches)
     queued.setToolTip(
-        "How many translation batches may wait in line (0 = auto, -1 = unlimited)."
+        tr(
+            "How many translation batches may wait in line "
+            "(0 = auto, -1 = unlimited)."
+        )
     )
     dlg._bind_int(queued, dlg._cfg.translate, "max_queued_batches")
-    form.addRow("Translation queue size (0 = auto, -1 = unlimited)", queued)
+    form.addRow(
+        tr("Translation queue size (0 = auto, -1 = unlimited)"), queued
+    )
 
     # Timing.
     for label, field, lo, hi, tip in (
-        ("Wait before an early caption (ms)", "speculative_silence_ms", 0, 5000,
-         "Pause length that triggers an early, tentative caption."),
-        ("Wait before finishing a caption (ms)", "finalize_silence_ms", 0, 5000,
-         "How long a pause has to be to end a sentence."),
-        ("Shortest caption (ms)", "min_utterance_ms", 0, 5000,
-         "Ignore blips shorter than this."),
-        ("Keep audio before you start (ms)", "pre_roll_ms", 0, 2000,
-         "Include a moment of audio from just before you start speaking."),
+        (tr("Wait before an early caption (ms)"), "speculative_silence_ms",
+         0, 5000,
+         tr("Pause length that triggers an early, tentative caption.")),
+        (tr("Wait before finishing a caption (ms)"), "finalize_silence_ms",
+         0, 5000,
+         tr("How long a pause has to be to end a sentence.")),
+        (tr("Shortest caption (ms)"), "min_utterance_ms", 0, 5000,
+         tr("Ignore blips shorter than this.")),
+        (tr("Keep audio before you start (ms)"), "pre_roll_ms", 0, 2000,
+         tr("Include a moment of audio from just before you start speaking.")),
     ):
         spin = dlg._spin(lo, hi, getattr(dlg._cfg.vad, field))
         spin.setToolTip(tip)
@@ -243,29 +264,29 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         form.addRow(label, spin)
 
     max_utt = dlg._dspin(1.0, 60.0, dlg._cfg.vad.max_utterance_s, 1, 0.5)
-    max_utt.setToolTip("Force a caption to finish after this many seconds.")
+    max_utt.setToolTip(tr("Force a caption to finish after this many seconds."))
     dlg._bind_float(max_utt, dlg._cfg.vad, "max_utterance_s")
     dlg._vad_spins["max_utterance_s"] = max_utt
-    form.addRow("Longest caption (s)", max_utt)
+    form.addRow(tr("Longest caption (s)"), max_utt)
 
     # Raw CTranslate2 kwargs tables (power users only).
-    kw1 = QLabel("Extra transcribe options (CTranslate2)")
+    kw1 = QLabel(tr("Extra transcribe options (CTranslate2)"))
     outer.addWidget(kw1)
     outer.addWidget(
         _make_kwargs_editor(dlg, dlg._cfg.stt, "extra_transcribe_kwargs")
     )
-    kw2 = QLabel("Extra translate options (CTranslate2)")
+    kw2 = QLabel(tr("Extra translate options (CTranslate2)"))
     outer.addWidget(kw2)
     outer.addWidget(
         _make_kwargs_editor(dlg, dlg._cfg.translate, "extra_translate_kwargs")
     )
 
     profile_row = QHBoxLayout()
-    lat = QPushButton("Reset to Speed preset")
-    lat.setToolTip("Fastest captions.")
+    lat = QPushButton(tr("Reset to Speed preset"))
+    lat.setToolTip(tr("Fastest captions."))
     lat.clicked.connect(lambda: dlg._apply_profile("latency"))
-    qual = QPushButton("Reset to Quality preset")
-    qual.setToolTip("Most accurate captions.")
+    qual = QPushButton(tr("Reset to Quality preset"))
+    qual.setToolTip(tr("Most accurate captions."))
     qual.clicked.connect(lambda: dlg._apply_profile("quality"))
     profile_row.addWidget(lat)
     profile_row.addWidget(qual)
@@ -284,7 +305,7 @@ def _make_kwargs_editor(dlg: "SettingsDialog", section, field: str) -> QWidget:
     layout.setContentsMargins(0, 0, 0, 0)
 
     table = QTableWidget(0, 2)
-    table.setHorizontalHeaderLabels(["Key", "Value (JSON)"])
+    table.setHorizontalHeaderLabels([tr("Key"), tr("Value (JSON)")])
     table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     table.setMaximumHeight(120)
@@ -310,9 +331,9 @@ def _make_kwargs_editor(dlg: "SettingsDialog", section, field: str) -> QWidget:
     table.itemChanged.connect(rebuild)
 
     row = QHBoxLayout()
-    add = QPushButton("Add")
+    add = QPushButton(tr("Add"))
     add.clicked.connect(lambda: (_append_kwargs_row(table, "", ""), rebuild()))
-    remove = QPushButton("Remove selected")
+    remove = QPushButton(tr("Remove selected"))
 
     def do_remove():
         r = table.currentRow()

@@ -38,6 +38,9 @@ vrcc = "vrcc.cli:main"
 [tool.setuptools.packages.find]
 include = ["vrcc*"]
 
+[tool.setuptools.package-data]
+"vrcc.i18n" = ["*.json"]
+
 [tool.pytest.ini_options]
 addopts = "-m 'not integration'"
 markers = ["integration: needs models/network/audio hardware"]

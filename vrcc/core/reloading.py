@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Callable
 
 from vrcc.core.bus import EventBus
 from vrcc.core.events import AppError
+from vrcc.i18n import tr, tr_noop
 
 if TYPE_CHECKING:
     from vrcc.stt.engine import SttEngine
@@ -84,8 +85,8 @@ class EngineLoader:
 
 # Status shown while a live model swap is in flight (capture paused).
 _SWITCH_STATUS = {
-    "stt": "Switching voice model…",
-    "mt": "Switching translation model…",
+    "stt": tr_noop("Switching voice model…"),
+    "mt": tr_noop("Switching translation model…"),
 }
 
 # _Reloader._loaded value after a failed swap: equals no target id (not even a
@@ -157,7 +158,7 @@ class _Reloader:
 
     def _start(self, kind: str, target_id) -> None:
         self._set_swapping(True)
-        self._set_status(False, _SWITCH_STATUS[kind])
+        self._set_status(False, tr(_SWITCH_STATUS[kind]))
         self._spawn(lambda: self._run(kind, target_id))
 
     def _run(self, kind: str, target_id) -> None:
@@ -204,7 +205,7 @@ class _Reloader:
             # Some kind is dead: keep captions gated and the status red until
             # a successful swap of that kind (or translate-off) clears it.
             self._set_swapping(True)
-            self._set_status(False, "a model failed to load")
+            self._set_status(False, tr("a model failed to load"))
         with self._lock:
             self._busy = False
             pending = sorted(self._pending)
@@ -230,7 +231,7 @@ def _status_after_swap(ok: bool, reason: str, *, started, start, set_status) -> 
         return
     if not started[0]:
         if not start():
-            set_status(False, "microphone unavailable")
+            set_status(False, tr("microphone unavailable"))
             return
         started[0] = True
     set_status(True, reason)

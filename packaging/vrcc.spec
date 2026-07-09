@@ -20,6 +20,7 @@ Notes:
   build is CPU-only and ``vrcc.core.hardware`` falls back gracefully.
 """
 
+import glob
 import os
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
@@ -31,6 +32,13 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))  # noqa: F821
 
 datas = collect_data_files("faster_whisper")
+# UI translation catalogs: vrcc.i18n loads them from the directory of its own
+# __file__, which in a frozen build is _internal/vrcc/i18n/ -- exactly where
+# this lands them.
+datas += [
+    (path, os.path.join("vrcc", "i18n"))
+    for path in glob.glob(os.path.join(REPO_ROOT, "vrcc", "i18n", "*.json"))
+]
 binaries = collect_dynamic_libs("ctranslate2")
 try:
     binaries += collect_dynamic_libs("nvidia.cublas")

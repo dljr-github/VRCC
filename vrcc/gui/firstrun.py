@@ -30,6 +30,7 @@ from vrcc.gui.model_labels import fmt_size, mt_display_name
 from vrcc.gui.models_dialog import ModelsDialog
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.gui.widgets import SegmentedControl, arrow_svg, icon_label
+from vrcc.i18n import tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
@@ -37,13 +38,13 @@ logger = logging.getLogger("vrcc.gui.firstrun")
 
 _AUTO = "auto"
 
-_DEVICE_TOOLTIP = (
+_DEVICE_TOOLTIP = tr_noop(
     "GPU gives near-instant captions but uses video memory (VRAM) that "
     "VRChat also needs. CPU is a little slower and leaves your graphics "
     "card alone."
 )
 
-_SIZE_TRADEOFF = (
+_SIZE_TRADEOFF = tr_noop(
     "Bigger models caption more accurately, but respond more slowly and use "
     "more memory. The picks below balance that for your choice."
 )
@@ -78,7 +79,7 @@ class FirstRunWizard(QDialog):
         self._p = PALETTE[resolve_theme(self._store.config.gui.theme)]
         self._scale = max(0.5, min(2.0, self._store.config.gui.font_scale))
 
-        self.setWindowTitle("Welcome to VRCC")
+        self.setWindowTitle(tr("Welcome to VRCC"))
         self.setModal(True)
         # Tall enough for the device row + explainer added to the download section.
         self.resize(560, 500)
@@ -114,7 +115,7 @@ class FirstRunWizard(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(14)
 
-        self._headline = QLabel("Welcome to VRCC — let's get you captioning.")
+        self._headline = QLabel(tr("Welcome to VRCC — let's get you captioning."))
         self._headline.setStyleSheet(  # ~1.4em headline, bold
             f"font-size: {round(20 * self._scale)}px; font-weight: 700; "
             f"color: {self._p['text']};"
@@ -123,19 +124,21 @@ class FirstRunWizard(QDialog):
         root.addWidget(self._headline)
 
         subtitle = QLabel(
-            "Pick the languages you'll use, then download the voice and "
-            "translation models VRCC needs to caption (and translate) your "
-            "speech."
+            tr(
+                "Pick the languages you'll use, then download the voice and "
+                "translation models VRCC needs to caption (and translate) your "
+                "speech."
+            )
         )
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         # -- language picker ("You speak" / "They read") -----------------------
-        root.addWidget(self._section_label("Pick your languages"))
+        root.addWidget(self._section_label(tr("Pick your languages")))
 
         lang_row = QHBoxLayout()
         lang_row.setSpacing(8)
-        lang_row.addWidget(QLabel("You speak"))
+        lang_row.addWidget(QLabel(tr("You speak")))
         self._source_combo = QComboBox()
         self._source_combo.addItems([_AUTO, *LANGUAGES.keys()])
         self._set_combo_text(self._source_combo, self._store.config.stt.source_language)
@@ -145,7 +148,7 @@ class FirstRunWizard(QDialog):
         lang_row.addWidget(
             icon_label(arrow_svg(self._p["muted"]), 16, colors=self._p, fallback_text="->")
         )
-        lang_row.addWidget(QLabel("They read"))
+        lang_row.addWidget(QLabel(tr("They read")))
         self._target_combo = QComboBox()
         self._target_combo.addItems(list(LANGUAGES.keys()))
         existing_targets = self._store.config.translate.targets
@@ -158,25 +161,26 @@ class FirstRunWizard(QDialog):
         root.addLayout(lang_row)
 
         # -- model download proposal -------------------------------------------
-        root.addWidget(self._section_label("Download the voice + translation models"))
+        root.addWidget(self._section_label(tr("Download the voice + translation models")))
 
-        explainer = QLabel(_SIZE_TRADEOFF)
+        explainer = QLabel(tr(_SIZE_TRADEOFF))
         explainer.setWordWrap(True)
         explainer.setStyleSheet(f"color: {self._p['muted']};")
         root.addWidget(explainer)
 
         device_row = QHBoxLayout()
         device_row.setSpacing(8)
-        run_on_label = QLabel("Run on")
-        run_on_label.setToolTip(_DEVICE_TOOLTIP)
+        run_on_label = QLabel(tr("Run on"))
+        run_on_label.setToolTip(tr(_DEVICE_TOOLTIP))
         device_row.addWidget(run_on_label)
         self._device_choice = SegmentedControl(
-            ["CPU", "GPU"], "GPU" if self._default_choice == "gpu" else "CPU"
+            [("CPU", tr("CPU")), ("GPU", tr("GPU"))],
+            "GPU" if self._default_choice == "gpu" else "CPU",
         )
-        self._device_choice.setToolTip(_DEVICE_TOOLTIP)
+        self._device_choice.setToolTip(tr(_DEVICE_TOOLTIP))
         if self.tier == "cpu":
             self._device_choice.set_option_enabled(
-                "GPU", False, tooltip="No graphics card detected."
+                "GPU", False, tooltip=tr("No graphics card detected.")
             )
         self._device_choice.changed.connect(self._on_device_changed)
         device_row.addWidget(self._device_choice)
@@ -192,8 +196,11 @@ class FirstRunWizard(QDialog):
             mt = MT_MODELS[self.recommended_mt]
             # The single license mention lives here (the summary above never repeats it).
             note = QLabel(
-                f"Note: the translation model is licensed {mt.license} "
-                "(free for personal, non-commercial use)."
+                tr(
+                    "Note: the translation model is licensed {license} "
+                    "(free for personal, non-commercial use).",
+                    license=mt.license,
+                )
             )
             note.setWordWrap(True)
             note.setStyleSheet(f"color: {self._p['muted']};")
@@ -203,13 +210,13 @@ class FirstRunWizard(QDialog):
         # _on_download_and_start), so the wizard never shows two empty bars up front.
         self._whisper_bar = QProgressBar()
         self._whisper_bar.setRange(0, 100)
-        self._whisper_bar.setFormat("Speech model: %p%")
+        self._whisper_bar.setFormat(tr("Speech model: %p%"))
         self._whisper_bar.setVisible(False)
         root.addWidget(self._whisper_bar)
 
         self._mt_bar = QProgressBar()
         self._mt_bar.setRange(0, 100)
-        self._mt_bar.setFormat("Translation model: %p%")
+        self._mt_bar.setFormat(tr("Translation model: %p%"))
         self._mt_bar.setVisible(False)
         root.addWidget(self._mt_bar)
 
@@ -217,18 +224,18 @@ class FirstRunWizard(QDialog):
 
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
-        self._download_btn = QPushButton("Download && start")
+        self._download_btn = QPushButton(tr("Download && start"))
         self._download_btn.setDefault(True)
         self._download_btn.setProperty("buttonRole", "primary")
         self._download_btn.clicked.connect(self._on_download_and_start)
         buttons.addWidget(self._download_btn)
 
-        self._manual_btn = QPushButton("Choose existing models…")
+        self._manual_btn = QPushButton(tr("Choose existing models…"))
         self._manual_btn.clicked.connect(self._on_choose_manually)
         buttons.addWidget(self._manual_btn)
 
         buttons.addStretch(1)
-        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn = QPushButton(tr("Cancel"))
         self._cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(self._cancel_btn)
         root.addLayout(buttons)
@@ -254,19 +261,21 @@ class FirstRunWizard(QDialog):
         )
         whisper = WHISPER_MODELS[self.recommended_whisper]
         tier_label = {
-            "gpu_high": "fast graphics card",
-            "gpu_low": "graphics card",
-            "cpu": "no graphics card — using your processor",
+            "gpu_high": tr("fast graphics card"),
+            "gpu_low": tr("graphics card"),
+            "cpu": tr("no graphics card — using your processor"),
         }[self.tier]
         lines = [
-            f"Detected: {tier_label}", "",
-            f"Speech: {whisper.label} ({fmt_size(whisper.size_mb)})",
+            tr("Detected: {tier}", tier=tier_label), "",
+            tr("Speech: {label} ({size})",
+               label=tr(whisper.label), size=fmt_size(whisper.size_mb)),
         ]
         if self._translation_enabled():
             mt = MT_MODELS[self.recommended_mt]
-            lines.append(f"Translation: {mt_display_name(mt.id)} ({fmt_size(mt.size_mb)})")
+            lines.append(tr("Translation: {label} ({size})",
+                            label=mt_display_name(mt.id), size=fmt_size(mt.size_mb)))
         lines.append("")
-        lines.append(f"Total download: {fmt_size(self._total_mb())}")
+        lines.append(tr("Total download: {size}", size=fmt_size(self._total_mb())))
         self._summary_label.setText("\n".join(lines))
 
     # -- language picker -----------------------------------------------------
@@ -373,9 +382,12 @@ class FirstRunWizard(QDialog):
 
         QMessageBox.warning(
             self,
-            "Download failed",
-            f"Could not download the recommended models:\n\n{error}\n\n"
-            "You can try again or choose existing models.",
+            tr("Download failed"),
+            tr(
+                "Could not download the recommended models:\n\n{error}\n\n"
+                "You can try again or choose existing models.",
+                error=error,
+            ),
         )
 
     # -- manual path -------------------------------------------------------
@@ -415,13 +427,13 @@ class FirstRunWizard(QDialog):
         from PySide6.QtWidgets import QMessageBox
 
         if not has_whisper:
-            message = "Download at least a voice model to continue."
+            message = tr("Download at least a voice model to continue.")
         else:
-            message = (
+            message = tr(
                 "Download a translation model too, or turn off translation "
                 "in Settings, to continue."
             )
-        QMessageBox.information(self, "Almost there", message)
+        QMessageBox.information(self, tr("Almost there"), message)
 
     # -- helpers -----------------------------------------------------------
 

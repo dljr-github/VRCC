@@ -24,6 +24,7 @@ from vrcc.core.events import AppError
 from vrcc.core.pipeline import Pipeline
 from vrcc.core.reloading import _FAILED, EngineLoader, _Reloader, _status_after_swap
 from vrcc.download.manager import DownloadManager
+from vrcc.i18n import tr
 from vrcc.osc.chatbox import ChatboxSender
 from vrcc.osc.mutesync import MuteSync
 from vrcc.osc.vrchat_detect import VrchatDetector
@@ -229,13 +230,19 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     from PySide6.QtCore import QObject, Signal
     from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
+    app = QApplication.instance() or QApplication([])
+    # The UI language must apply before any GUI module builds a widget
+    # (translated strings are read at construction).
+    from vrcc.i18n.qt import apply_ui_language
+
+    apply_ui_language(app, store.config.gui.ui_language)
+
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.firstrun import FirstRunWizard
     from vrcc.gui.main_window import MainWindow
     from vrcc.gui.models_dialog import ModelsDialog
     from vrcc.gui.settings import SettingsDialog
 
-    app = QApplication.instance() or QApplication([])
     _apply_theme(app, store.config.gui.theme, store.config.gui.font_scale)
     _apply_font_scale(app, store.config.gui.font_scale)
 
@@ -287,18 +294,18 @@ def run(portable: bool = False, verbose: bool = False) -> int:
                     "(open Models to re-download, then restart)"
                 )
                 if not pipeline_started[0]:
-                    window.set_capture_status(False, "an engine failed to load")
+                    window.set_capture_status(False, tr("an engine failed to load"))
                 return
             if not _start_pipeline_guarded(stack.pipeline, bus):
                 # The AppError already flashed the status bar; a dead mic kills
                 # the core function, so also say it loudly. App stays up: fix
                 # the device in Settings > Audio, then restart.
-                window.set_capture_status(False, "microphone unavailable")
+                window.set_capture_status(False, tr("microphone unavailable"))
                 QMessageBox.warning(
                     window,
-                    "Microphone error",
-                    "Could not open the microphone — check Settings > "
-                    "Audio, then restart VRCC.",
+                    tr("Microphone error"),
+                    tr("Could not open the microphone — check Settings > "
+                       "Audio, then restart VRCC."),
                 )
                 return
             pipeline_started[0] = True
