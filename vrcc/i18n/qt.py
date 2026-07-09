@@ -20,23 +20,28 @@ _QT_TRANSLATORS: list = []
 _QT_LOCALE_NAMES = {"zh-Hans": "zh_CN", "zh-Hant": "zh_TW"}
 
 
+def system_locale_preference() -> list[str]:
+    """The user's ordered DISPLAY-language preference: ``uiLanguages()`` (what
+    Windows calls the display language), falling back to the regional-format
+    ``name()``, which can legitimately differ (a Japanese display language
+    with English (US) number/date formats must still read as Japanese). Shared
+    by :func:`apply_ui_language` and the first-launch caption-language default
+    so both read the same OS signal."""
+    from PySide6.QtCore import QLocale
+
+    system = QLocale.system()
+    return list(system.uiLanguages()) or [system.name()]
+
+
 def apply_ui_language(app, configured: str) -> str:
     """Resolve ``configured`` (``"auto"`` follows the OS locale) into a
     supported UI language, activate it for :func:`vrcc.i18n.tr`, and install
     Qt's own translations. Returns the resolved code. Called once by
     :func:`vrcc.app.run`, before any widget is built (the language is
     restart-applied, like the theme)."""
-    from PySide6.QtCore import QLocale
-
     from vrcc.i18n import resolve_ui_language, set_language
 
-    system = QLocale.system()
-    # uiLanguages() is the user's ordered DISPLAY-language preference (what
-    # Windows calls the display language); name() is the regional-format
-    # locale, which can legitimately differ — a Japanese display language
-    # with English (US) number/date formats must still get a Japanese UI.
-    preferred = list(system.uiLanguages()) or [system.name()]
-    code = resolve_ui_language(configured, preferred)
+    code = resolve_ui_language(configured, system_locale_preference())
     set_language(code)
     logger.info("UI language: %s", code)
     install_qt_translations(app, code)

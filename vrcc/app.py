@@ -8,7 +8,6 @@ Qt-free; :func:`run` is the only Qt-aware entry point.
 from __future__ import annotations
 
 import logging
-import logging.handlers
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +20,8 @@ from vrcc.core import hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, Paths, default_paths
 from vrcc.core.events import AppError
+from vrcc.core.languages import match_caption_language
+from vrcc.core.logs import setup_logging
 from vrcc.core.pipeline import Pipeline
 from vrcc.core.reloading import _FAILED, EngineLoader, _Reloader, _status_after_swap
 from vrcc.download.manager import DownloadManager
@@ -34,9 +35,6 @@ from vrcc.translate.engine import TranslateEngine
 from vrcc.translate.registry import MT_MODELS
 
 logger = logging.getLogger("vrcc.app")
-
-_LOG_MAX_BYTES = 5 * 1024 * 1024
-_LOG_BACKUP_COUNT = 2
 
 # Sentinel: "argument not supplied" vs an explicit None (mt/mute are
 # legitimately None when translation / mute sync is disabled).
@@ -148,40 +146,6 @@ def build_engine_stack(
     )
 
 
-def _setup_logging(logs_dir: Path, verbose: bool) -> None:
-    """Configure the root logger: a 5 MB x2 rotating file in ``logs_dir`` plus
-    a console handler when ``verbose``."""
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG if verbose else logging.INFO)
-
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
-    )
-
-    try:
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.handlers.RotatingFileHandler(
-            logs_dir / "vrcc.log",
-            maxBytes=_LOG_MAX_BYTES,
-            backupCount=_LOG_BACKUP_COUNT,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(fmt)
-        root.addHandler(file_handler)
-    except OSError:
-        # Never let a log-file problem stop the app from launching.
-        logging.getLogger("vrcc.app").warning(
-            "could not open log file in %s; continuing without file logging",
-            logs_dir,
-            exc_info=True,
-        )
-
-    if verbose:
-        console = logging.StreamHandler()
-        console.setFormatter(fmt)
-        root.addHandler(console)
-
-
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
     """Start the capture pipeline, turning a failure (usually the mic refusing
     to open) into an ``AppError("MIC_OPEN_FAILED")`` instead of an unhandled
@@ -201,6 +165,18 @@ def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
         return False
 
 
+def _default_source_language(cfg, locales: list[str]) -> None:
+    """Default ``stt.source_language`` to the first OS display language the
+    caption registry covers; an unmatched preference list keeps the "English"
+    default. Callers gate on ``ConfigStore.missing_on_load`` so an existing
+    config is never rewritten."""
+    for name in locales:
+        matched = match_caption_language(name)
+        if matched is not None:
+            cfg.stt.source_language = matched
+            return
+
+
 def _models_ready(cfg, dm: DownloadManager) -> bool:
     """True if the configured STT model (and MT model, when translation is on)
     are already downloaded -- i.e. the app can start without the wizard."""
@@ -216,7 +192,7 @@ def _models_ready(cfg, dm: DownloadManager) -> bool:
 def run(portable: bool = False, verbose: bool = False) -> int:
     """Launch the GUI app. Returns the process exit code."""
     paths = default_paths(portable)
-    _setup_logging(paths.logs_dir, verbose)
+    setup_logging(paths.logs_dir, verbose)
     logger.info("VRCC starting (portable=%s)", portable)
 
     store = ConfigStore(paths.config_file)
@@ -234,18 +210,24 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     # The UI language must apply before any GUI module builds a widget
     # (translated strings are read at construction).
-    from vrcc.i18n.qt import apply_ui_language
+    from vrcc.i18n.qt import apply_ui_language, system_locale_preference
 
     apply_ui_language(app, store.config.gui.ui_language)
+
+    if store.missing_on_load:
+        # First launch only: pre-select the OS display language as the caption
+        # language (the wizard shows it). Never fires for an existing config.
+        _default_source_language(store.config, system_locale_preference())
 
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.firstrun import FirstRunWizard
     from vrcc.gui.main_window import MainWindow
     from vrcc.gui.models_dialog import ModelsDialog
     from vrcc.gui.settings import SettingsDialog
+    from vrcc.gui.style import apply_font_scale, apply_theme_guarded
 
-    _apply_theme(app, store.config.gui.theme, store.config.gui.font_scale)
-    _apply_font_scale(app, store.config.gui.font_scale)
+    apply_theme_guarded(app, store.config.gui.theme, store.config.gui.font_scale)
+    apply_font_scale(app, store.config.gui.font_scale)
 
     bus = EventBus()
     bridge = BusBridge(bus)
@@ -305,7 +287,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
                 QMessageBox.warning(
                     window,
                     tr("Microphone error"),
-                    tr("Could not open the microphone — check Settings > "
+                    tr("Could not open the microphone. Check Settings > "
                        "Audio, then restart VRCC."),
                 )
                 return
@@ -427,6 +409,8 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         on_open_settings=open_settings,
         on_open_models=open_models,
         mt_available=stack.mt is not None,
+        download_manager=dm,
+        on_model_change=on_model_change,
     )
     window.show()
 
@@ -471,30 +455,3 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             os._exit(int(exit_code))
 
     return int(exit_code)
-
-
-def _apply_theme(app, theme: str, scale: float = 1.0) -> None:
-    """Apply the app theme (Fusion + palette + stylesheet). Never raises.
-    ``scale`` bakes the text-size preset into the QSS font-sizes (QSS wins over
-    setFont)."""
-    try:
-        from vrcc.gui.style import apply_theme
-        apply_theme(app, theme, scale)
-    except Exception:  # noqa: BLE001 -- theming must never block startup
-        logger.warning("could not apply theme %r", theme, exc_info=True)
-
-
-def _apply_font_scale(app, scale: float) -> None:
-    """Scale the base font by ``scale`` (clamped). Best-effort: a failure
-    leaves the default font."""
-    try:
-        scale = max(0.5, min(2.0, float(scale)))
-        if abs(scale - 1.0) < 1e-3:
-            return
-        font = app.font()
-        base = font.pointSizeF()
-        if base > 0:
-            font.setPointSizeF(base * scale)
-            app.setFont(font)
-    except Exception:  # noqa: BLE001 -- font scaling must never block startup
-        logger.debug("could not apply font scale", exc_info=True)

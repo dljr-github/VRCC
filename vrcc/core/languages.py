@@ -2,7 +2,9 @@
 
 Maps a display name to a `Language` with `whisper`/`nllb`/`m2m100` codes (the
 `nllb` FLORES-200 token is fed verbatim to NLLB -- must match exactly).
-Insertion order is GUI display order (English first). Zero Qt.
+Insertion order is GUI display order (English first).
+:func:`match_caption_language` resolves an OS locale name to a display name.
+Zero Qt.
 """
 
 from __future__ import annotations
@@ -57,6 +59,56 @@ LANGUAGES: dict[str, Language] = {
         _lang("Romanian", "ro", "ron_Latn", "ro"),
     )
 }
+
+
+# Locale spellings that don't reduce to a whisper-code match: Chinese needs
+# the script or region to pick a display entry (Simplified and Traditional
+# share whisper code "zh"; bare "zh" defaults to Simplified), and Windows
+# spells Norwegian Bokmal "nb-NO" and Filipino "fil-PH" while whisper only
+# knows "no"/"tl".
+_LOCALE_OVERRIDES: dict[str, str] = {
+    "zh": "Chinese Simplified",
+    "zh-cn": "Chinese Simplified",
+    "zh-sg": "Chinese Simplified",
+    "zh-hans": "Chinese Simplified",
+    "zh-tw": "Chinese Traditional",
+    "zh-hk": "Chinese Traditional",
+    "zh-mo": "Chinese Traditional",
+    "zh-hant": "Chinese Traditional",
+    "nb": "Norwegian",
+    "fil": "Filipino",
+}
+
+# whisper code -> display name; setdefault keeps the first registry entry so
+# the duplicate "zh" code resolves through the overrides above instead.
+_BY_WHISPER: dict[str, str] = {}
+for _entry in LANGUAGES.values():
+    _BY_WHISPER.setdefault(_entry.whisper, _entry.display)
+del _entry
+
+
+def match_caption_language(locale: str | None) -> str | None:
+    """Map an OS locale name ("en_US", "ja-JP", "zh-Hans-CN") to the caption
+    language display name `SttConfig.source_language` stores, or ``None``
+    when no `LANGUAGES` entry covers it.
+
+    Case-insensitive; drops any encoding suffix (".UTF-8") and trims
+    region/script subtags until something matches (the same trim-and-retry
+    scheme as `vrcc.i18n.match_locale`, but targeting caption languages,
+    not UI languages).
+    """
+    if not locale:
+        return None
+    norm = locale.replace("_", "-").split(".")[0].strip().lower()
+    while norm:
+        if norm in _LOCALE_OVERRIDES:
+            return _LOCALE_OVERRIDES[norm]
+        if norm in _BY_WHISPER:
+            return _BY_WHISPER[norm]
+        if "-" not in norm:
+            break
+        norm = norm.rsplit("-", 1)[0]
+    return None
 
 
 def get(display: str) -> Language:

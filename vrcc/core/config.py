@@ -240,6 +240,10 @@ class ConfigStore:
         self.debounce_s = debounce_s
         self.config = AppConfig()
         self.load_warnings: list[str] = []
+        # True only when the last load() found no file at all (a fresh
+        # install). A malformed file is an EXISTING config: first-launch
+        # defaulting (OS caption language) must not rewrite the user's choices.
+        self.missing_on_load = False
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
 
@@ -251,8 +255,9 @@ class ConfigStore:
         independently, defaulting any invalid field and warning per fallback.
         """
         self.load_warnings = []
+        self.missing_on_load = not self.path.exists()
 
-        if not self.path.exists():
+        if self.missing_on_load:
             self.config = AppConfig()
             return
 
