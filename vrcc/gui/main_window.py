@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QComboBox, QMainWindow, QMessageBox, QVBoxLayout, 
 
 from vrcc import __version__
 from vrcc.core.config import ConfigStore, apply_profile
+from vrcc.gui import model_prompts
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.caption_log import CaptionModel, empty_state_html, render_rows_html
 from vrcc.gui.icons import FRIENDLY_ERRORS as _FRIENDLY_ERRORS
@@ -27,6 +28,7 @@ from vrcc.gui.main_parts import (
     build_status_strip,
     build_top_bar,
 )
+from vrcc.gui import model_prompts
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.i18n import tr, tr_noop
 
@@ -54,11 +56,17 @@ class MainWindow(QMainWindow):
         on_open_settings: Callable[[], None],
         on_open_models: Callable[[], None],
         mt_available: bool = True,
+        download_manager=None,
+        on_model_change=None,
     ) -> None:
         super().__init__()
         self._bridge = bridge
         self._store = config_store
         self._pipeline = pipeline
+        # Optional collaborators (None when headless): both feed the
+        # language-change model nudge, mirroring SettingsDialog's pair.
+        self._download_manager = download_manager
+        self._on_model_change = on_model_change
         # Resolved once at construction (theme + text size are restart-applied).
         self._p = PALETTE[resolve_theme(config_store.config.gui.theme)]
         self._scale = max(0.5, min(2.0, config_store.config.gui.font_scale))
@@ -231,7 +239,7 @@ class MainWindow(QMainWindow):
             self._vrchat_label.setStyleSheet(f"color: {self._p['good']}; padding: 2px 8px;")
             self._vrchat_label.setToolTip(tr("VRChat's OSC service was found on this network."))
         elif detected is False:
-            self._vrchat_label.setText(tr("VRChat: not detected — enable OSC in-game"))
+            self._vrchat_label.setText(tr("VRChat: not detected - enable OSC in-game"))
             self._vrchat_label.setStyleSheet(f"color: {self._p['warn']}; padding: 2px 8px;")
             self._vrchat_label.setToolTip(tip)
         else:
@@ -247,9 +255,11 @@ class MainWindow(QMainWindow):
         name = tr(_ENGINE_NAMES[event.engine]) if known else event.engine.title()
         if event.state == "fallback_cpu":
             # Transient state (immediately followed by "ready"), so surface the
-            # CPU drop as a status flash before it's overwritten. Plain name, no jargon.
+            # CPU drop as a status flash before it's overwritten. Plain name, no
+            # jargon; cause-neutral -- fallback_cpu also covers a CUDA provider
+            # that failed to initialize, not just VRAM exhaustion.
             self._flash_status(
-                tr("{name} ran out of GPU memory — switched to CPU (slower).", name=name)
+                tr("{name} could not stay on the GPU. Switched to CPU (slower).", name=name)
             )
         if event.state == "failed":
             self.set_capture_status(False, tr("{name} failed to load", name=name))
@@ -299,7 +309,7 @@ class MainWindow(QMainWindow):
                 msg, sub = tr("Getting the voice model ready…"), tr("usually takes a few seconds")
             else:
                 msg, sub = (
-                    tr("Say something — captions appear here"),
+                    tr("Say something - captions appear here"),
                     tr("then in your VRChat chatbox"),
                 )
             self._log.setHtml(empty_state_html(msg, sub, colors, self._scale))
@@ -309,7 +319,7 @@ class MainWindow(QMainWindow):
 
     def _set_mute_chip(self, muted) -> None:
         # None (mute-sync state unknown yet) hides the chip entirely rather than
-        # showing an empty "–" box.
+        # showing an empty "-" box.
         if muted is None:
             self._mute_chip.setVisible(False)
             return
@@ -347,12 +357,12 @@ class MainWindow(QMainWindow):
         elif ok is False:
             reason = getattr(self, "_capture_reason", "")
             if reason:
-                text = tr("Not listening — {reason}", reason=reason)
+                text = tr("Not listening - {reason}", reason=reason)
             else:
                 text = tr("Not listening")
             color = self._p["bad"]
         elif getattr(self, "_captioning_btn", None) is not None and not self._captioning_btn.isChecked():
-            text, color = tr("Paused — not listening"), self._p["warn"]
+            text, color = tr("Paused - not listening"), self._p["warn"]
         else:
             text, color = tr("Listening"), self._p["good"]
         self._capture_label.setText(text)
@@ -376,6 +386,14 @@ class MainWindow(QMainWindow):
         # A target equal to the new source would translate a language into itself
         # (sending the original twice); rebuild drops it (and persists via save_soon).
         self._rebuild_targets()
+        candidate = model_prompts.offer_language_switch(
+            self, self._store.config, self._download_manager, text
+        )
+        if candidate is not None:
+            self._store.config.stt.model = candidate
+            self._store.save_soon()
+            if self._on_model_change is not None:
+                self._on_model_change("stt")
 
     def _on_targets_changed(self, _text: str) -> None:
         self._rebuild_targets()

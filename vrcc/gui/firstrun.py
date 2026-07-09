@@ -73,7 +73,7 @@ class FirstRunWizard(QDialog):
         # (user decision); _refresh_plan re-derives this pair on change.
         self._default_choice = recommend.default_device_choice()
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
-            self._default_choice, tier=self.tier
+            self._default_choice, tier=self.tier, language=self._source_whisper_code()
         )
         # Resolved once at construction (theme + text size are restart-applied).
         self._p = PALETTE[resolve_theme(self._store.config.gui.theme)]
@@ -96,6 +96,12 @@ class FirstRunWizard(QDialog):
     def _translation_enabled(self) -> bool:
         return self._store.config.translate.enabled
 
+    def _source_whisper_code(self) -> str | None:
+        """Whisper code for the configured spoken language; ``None`` for
+        "auto" (or an unknown name), keeping the recommendation language-blind."""
+        lang = LANGUAGES.get(self._store.config.stt.source_language)
+        return None if lang is None else lang.whisper
+
     def _total_mb(self) -> int:
         total = WHISPER_MODELS[self.recommended_whisper].size_mb
         if self._translation_enabled():
@@ -115,7 +121,7 @@ class FirstRunWizard(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(14)
 
-        self._headline = QLabel(tr("Welcome to VRCC — let's get you captioning."))
+        self._headline = QLabel(tr("Welcome to VRCC. Let's get you captioning."))
         self._headline.setStyleSheet(  # ~1.4em headline, bold
             f"font-size: {round(20 * self._scale)}px; font-weight: 700; "
             f"color: {self._p['text']};"
@@ -254,16 +260,19 @@ class FirstRunWizard(QDialog):
         self._refresh_plan()
 
     def _refresh_plan(self) -> None:
-        """Recompute the recommended preset for the device choice and rewrite
-        the Detected/Speech/Translation/Total lines in place."""
+        """Recompute the recommended preset for the device choice + spoken
+        language and rewrite the Detected/Speech/Translation/Total lines in
+        place."""
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
-            "cpu" if self._cpu_chosen() else "gpu", tier=self.tier
+            "cpu" if self._cpu_chosen() else "gpu",
+            tier=self.tier,
+            language=self._source_whisper_code(),
         )
         whisper = WHISPER_MODELS[self.recommended_whisper]
         tier_label = {
             "gpu_high": tr("fast graphics card"),
             "gpu_low": tr("graphics card"),
-            "cpu": tr("no graphics card — using your processor"),
+            "cpu": tr("no graphics card, using your processor"),
         }[self.tier]
         lines = [
             tr("Detected: {tier}", tier=tier_label), "",
@@ -292,6 +301,9 @@ class FirstRunWizard(QDialog):
         # _build_ui, so this only fires on a real user edit -- no _loading guard needed.
         self._store.config.stt.source_language = text
         self._store.save_soon()
+        # The recommendation is language-aware (a restricted model can lead
+        # only when it covers the spoken language), so re-plan on change.
+        self._refresh_plan()
 
     def _on_target_changed(self, text: str) -> None:
         self._store.config.translate.targets = [text]
@@ -414,6 +426,7 @@ class FirstRunWizard(QDialog):
         whisper, mt = recommend.best_downloaded(
             self._dm, translate=cfg.translate.enabled,
             tier="cpu" if self._cpu_chosen() else self.tier,
+            language=self._source_whisper_code(),
         )
         if whisper and (mt or not cfg.translate.enabled):
             cfg.stt.model = whisper

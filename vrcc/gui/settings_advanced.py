@@ -131,7 +131,7 @@ def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
     }
     mode_tips = {
         "pause": tr("Stop captioning while you're muted."),
-        "ignore": tr("Ignore mute — keep captioning either way."),
+        "ignore": tr("Ignore mute and keep captioning either way."),
         "invert": tr("Only caption while you're muted."),
     }
     mode_row = QHBoxLayout()
@@ -170,7 +170,7 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     warning = QLabel(
         tr(
             "These are power-user settings. The defaults work well for most "
-            "people — change them only if you know what they do."
+            "people; change them only if you know what they do."
         )
     )
     warning.setWordWrap(True)

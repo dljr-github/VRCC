@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from vrcc.core import languages
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.core.hardware import device_names
-from vrcc.gui import model_fit, settings_advanced, settings_pages
+from vrcc.gui import model_fit, model_prompts, settings_advanced, settings_pages
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.i18n import tr
 from vrcc.stt.registry import WHISPER_MODELS
@@ -118,6 +118,9 @@ class SettingsDialog(QDialog):
         self._mt_selected_id: str | None = None
         self._mode: SegmentedControl | None = None
         self._mode_desc: QLabel | None = None
+        # Bound by build_simple_page; greys the Mode control for voice models
+        # the Speed/Quality presets can't tune (greedy onnx_asr decoders).
+        self._update_mode_for_model = lambda: None
 
         self._build_ui()
         self._loading = False
@@ -215,6 +218,8 @@ class SettingsDialog(QDialog):
             return
         self._voice_selected_id = new_id
         self._cfg.stt.model = new_id
+        model_prompts.maybe_prefer_cpu(self, new_id)
+        self._update_mode_for_model()
         self._remove_deleted_placeholder(self._model_combo)
         self._changed()
         if self._on_model_change is not None:
@@ -382,6 +387,8 @@ class SettingsDialog(QDialog):
             device, index = combo.currentData()
             section.device = device
             section.device_index = index
+            if device == "cuda" and section is self._cfg.stt:
+                model_prompts.maybe_prefer_cpu(self, self._cfg.stt.model)
             self._changed()
         combo.currentIndexChanged.connect(on_change)
         return combo

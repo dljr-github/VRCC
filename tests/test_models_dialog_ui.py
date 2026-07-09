@@ -232,7 +232,7 @@ def test_delete_active_model_warns_captions_stop_until_reassigned(qapp, tmp_path
         dlg._delete(row)
         assert asked
         assert (
-            "This is the model VRCC is currently using — captions stop until "
+            "This is the model VRCC is currently using. Captions stop until "
             "you choose another in Settings." in asked[0]
         )
         assert "next start" not in asked[0]

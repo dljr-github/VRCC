@@ -13,10 +13,10 @@ from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
 _MT_DISPLAY_NAMES: dict[str, str] = {
-    "nllb-600M-int8": tr_noop("NLLB 600M — balanced"),
-    "nllb-1.3B-int8": tr_noop("NLLB 1.3B — higher quality"),
-    "nllb-3.3B-int8": tr_noop("NLLB 3.3B — best quality (large)"),
-    "m2m100-418M-int8": tr_noop("M2M100 418M — small"),
+    "nllb-600M-int8": tr_noop("NLLB 600M - balanced"),
+    "nllb-1.3B-int8": tr_noop("NLLB 1.3B - higher quality"),
+    "nllb-3.3B-int8": tr_noop("NLLB 3.3B - best quality (large)"),
+    "m2m100-418M-int8": tr_noop("M2M100 418M - small"),
     "m2m100-1.2B-int8": tr_noop("M2M100 1.2B"),
     "madlad400-3b": tr_noop("MADLAD-400 3B"),
 }
@@ -63,16 +63,16 @@ _fmt_size = fmt_size  # old name kept as an alias for existing callers
 # Short quality/speed lead-ins, distinct per model. Unlisted ids fall back to a
 # generic, size-derived lead-in so the blurb never looks broken.
 _WHISPER_LEAD_INS: dict[str, str] = {
-    "tiny": tr_noop("Fastest — rough accuracy"),
-    "base": tr_noop("Fast — basic accuracy"),
+    "tiny": tr_noop("Fastest - rough accuracy"),
+    "base": tr_noop("Fast - basic accuracy"),
     "small": tr_noop("Good balance for most PCs"),
     "medium": tr_noop("More accurate, needs a decent PC"),
-    "large-v3": tr_noop("Most accurate — big download"),
+    "large-v3": tr_noop("Most accurate - big download"),
     "large-v3-turbo": tr_noop("Most accurate and fast"),
     "distil-large-v3.5": tr_noop("Near-most accurate, fast"),
     "distil-small.en": tr_noop("Fast, small download"),
     "parakeet-tdt-0.6b-v3": tr_noop("Very accurate and fast"),
-    "canary-1b-v2": tr_noop("Most accurate, slower captions"),
+    "canary-1b-v2": tr_noop("Very accurate, slower captions"),
 }
 
 _MT_LEAD_INS: dict[str, str] = {

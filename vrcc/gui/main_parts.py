@@ -183,7 +183,7 @@ def build_status_strip(w: "MainWindow") -> QWidget:
 
     row.addStretch(1)
 
-    w._mute_chip = QLabel("–")
+    w._mute_chip = QLabel("-")
     w._mute_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
     w._set_mute_chip(None)
     row.addWidget(w._mute_chip)

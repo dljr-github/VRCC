@@ -244,8 +244,8 @@ class ModelsDialog(QDialog):
         lead = QLabel(
             tr(
                 "VRCC uses two models: one to hear your speech and one to translate "
-                "it. Download the ones you want here — choose which to use in "
-                "Settings."
+                "it. Download the ones you want here, then choose which to use "
+                "in Settings."
             )
         )
         lead.setWordWrap(True)
@@ -447,7 +447,7 @@ class ModelsDialog(QDialog):
         warning = ""
         if self._is_active(row):
             warning = "\n\n" + tr(
-                "This is the model VRCC is currently using — captions "
+                "This is the model VRCC is currently using. Captions "
                 "stop until you choose another in Settings."
             )
         body = tr("Delete the downloaded files for {name}?", name=row.display_name) + warning

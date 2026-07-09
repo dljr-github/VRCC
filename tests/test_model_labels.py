@@ -6,10 +6,10 @@ from vrcc.gui.model_labels import (
 
 
 def test_mt_display_name_known_ids():
-    assert mt_display_name("nllb-600M-int8") == "NLLB 600M — balanced"
-    assert mt_display_name("nllb-1.3B-int8") == "NLLB 1.3B — higher quality"
-    assert mt_display_name("nllb-3.3B-int8") == "NLLB 3.3B — best quality (large)"
-    assert mt_display_name("m2m100-418M-int8") == "M2M100 418M — small"
+    assert mt_display_name("nllb-600M-int8") == "NLLB 600M - balanced"
+    assert mt_display_name("nllb-1.3B-int8") == "NLLB 1.3B - higher quality"
+    assert mt_display_name("nllb-3.3B-int8") == "NLLB 3.3B - best quality (large)"
+    assert mt_display_name("m2m100-418M-int8") == "M2M100 418M - small"
     assert mt_display_name("m2m100-1.2B-int8") == "M2M100 1.2B"
     assert mt_display_name("madlad400-3b") == "MADLAD-400 3B"
 

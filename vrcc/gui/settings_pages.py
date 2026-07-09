@@ -22,9 +22,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from vrcc.core.languages import LANGUAGES
+from vrcc.gui import model_prompts
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
 from vrcc.gui.widgets import SegmentedControl
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
+from vrcc.stt.registry import WHISPER_MODELS
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
@@ -41,6 +43,13 @@ _MODE_DESC = tr_noop(
     "Speed shows captions almost instantly; Quality is more accurate and "
     "clips fewer words, but each caption takes a little longer."
 )
+# Replaces _MODE_TOOLTIP while the active voice model decodes greedily (the
+# onnx_asr backend ignores beam size and temperature, the profile's headline
+# caption-quality effect).
+_MODE_LOCKED_TOOLTIP = tr_noop(
+    "Parakeet and Canary always decode at full accuracy, so Speed / Quality "
+    "does not change their captions."
+)
 
 # Labels double as SegmentedControl values (compared/persisted via scale_map);
 # tr_noop keeps them stable values while making them catalog-extractable for
@@ -50,7 +59,7 @@ _FONT_SCALE_PRESETS = [
     (tr_noop("Normal"), 1.0),
     (tr_noop("Large"), 1.2),
 ]
-_DELETED_MODEL_TEXT = tr_noop("Current model (deleted) — choose another")
+_DELETED_MODEL_TEXT = tr_noop("Current model (deleted) - choose another")
 
 
 def _add_deleted_placeholder_if_needed(combo: QComboBox, specs, configured_id) -> None:
@@ -95,6 +104,21 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     dlg._mode_desc.setWordWrap(True)
     dlg._mode_desc.setStyleSheet(dlg._muted_style)
     form.addRow("", dlg._mode_desc)
+
+    def update_mode_for_model():
+        # onnx_asr models decode greedily, so the profile's beam/temperature
+        # presets can't tune their captions: grey the control in place. The
+        # stored profile is untouched (its VAD/translation parts still apply,
+        # and the Advanced knobs stay usable). The visible description must
+        # not advertise a trade-off the locked control can't deliver, so it
+        # swaps to the locked explanation and back.
+        spec = WHISPER_MODELS.get(dlg._cfg.stt.model)
+        locked = spec is not None and spec.backend == "onnx_asr"
+        dlg._mode.setEnabled(not locked)
+        dlg._mode.setToolTip(tr(_MODE_LOCKED_TOOLTIP if locked else _MODE_TOOLTIP))
+        dlg._mode_desc.setText(tr(_MODE_LOCKED_TOOLTIP if locked else _MODE_DESC))
+    dlg._update_mode_for_model = update_mode_for_model
+    update_mode_for_model()
 
     dlg._send_check = QCheckBox(tr("Send my captions to VRChat"))
     dlg._send_check.setChecked(dlg._cfg.osc.send_to_vrchat)
@@ -194,7 +218,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     if not voice_specs:
         dlg._model_combo.setEnabled(False)
         hint = QLabel(
-            tr("No voice models downloaded yet — get one in the Models window.")
+            tr("No voice models downloaded yet. Get one in the Models window.")
         )
         hint.setStyleSheet(dlg._muted_style)
         hint.setWordWrap(True)
@@ -214,6 +238,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
             return
         dlg._cfg.stt.source_language = dlg._source_combo.currentText()
         dlg._changed()
+        model_prompts.maybe_switch_model_for_language(dlg)
     dlg._source_combo.currentIndexChanged.connect(on_source)
 
     form.addRow(tr("Spoken language"), dlg._source_combo)
@@ -252,7 +277,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
 
     beam = dlg._spin(1, 10, dlg._cfg.stt.beam_size)
     beam.setToolTip(
-        tr("Higher considers more options — a little more accurate, a little slower.")
+        tr("Higher considers more options: a little more accurate, a little slower.")
     )
     dlg._bind_int(beam, dlg._cfg.stt, "beam_size")
     dlg._stt_beam_spin = beam
@@ -324,7 +349,7 @@ def build_translation_page(dlg: "SettingsDialog") -> QWidget:
     if not mt_specs:
         model.setEnabled(False)
         hint = QLabel(
-            tr("No translation models downloaded yet — get one in the Models window.")
+            tr("No translation models downloaded yet. Get one in the Models window.")
         )
         hint.setStyleSheet(dlg._muted_style)
         hint.setWordWrap(True)
@@ -334,7 +359,7 @@ def build_translation_page(dlg: "SettingsDialog") -> QWidget:
     adv_form = QFormLayout(adv)
     beam = dlg._spin(1, 10, dlg._cfg.translate.beam_size)
     beam.setToolTip(
-        tr("Higher considers more options — a little more accurate, a little slower.")
+        tr("Higher considers more options: a little more accurate, a little slower.")
     )
     dlg._bind_int(beam, dlg._cfg.translate, "beam_size")
     dlg._mt_beam_spin = beam

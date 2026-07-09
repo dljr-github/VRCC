@@ -149,6 +149,9 @@ def build_qss(theme: str, scale: float = 1.0) -> str:
     QPushButton[buttonRole="primary"]:focus {{ background: {p['accent_hover']}; border: 1px solid {p['ground']}; }}
     QPushButton[buttonRole="primary"]:disabled {{ background: {p['surface_2']}; color: {p['muted']}; border-color: {p['border']}; }}
     QPushButton[segActive="true"] {{ background: {p['accent']}; border-color: {p['accent']}; color: #ffffff; }}
+    QPushButton:disabled {{ color: {p['muted']}; }}
+    QPushButton[segActive="true"]:disabled {{ background: {p['surface_2']};
+        border-color: {p['border']}; color: {p['muted']}; }}
     QTabWidget::pane {{ border: 1px solid {p['border']}; border-radius: 10px; }}
     QTabBar::tab {{ background: {p['ground']}; color: {p['muted']};
         padding: 8px 14px; border-radius: 8px; margin: 2px; }}
@@ -188,3 +191,29 @@ def apply_theme(app, theme: str, scale: float = 1.0) -> str:
     app.setPalette(pal)
     app.setStyleSheet(build_qss(resolved, scale))
     return resolved
+
+
+def apply_theme_guarded(app, theme: str, scale: float = 1.0) -> None:
+    """:func:`apply_theme` that never raises (theming must never block
+    startup). ``scale`` bakes the text-size preset into the QSS font-sizes
+    (QSS wins over setFont)."""
+    try:
+        apply_theme(app, theme, scale)
+    except Exception:  # noqa: BLE001 -- theming must never block startup
+        logger.warning("could not apply theme %r", theme, exc_info=True)
+
+
+def apply_font_scale(app, scale: float) -> None:
+    """Scale the base app font by ``scale`` (clamped). Best-effort: a failure
+    leaves the default font."""
+    try:
+        scale = max(0.5, min(2.0, float(scale)))
+        if abs(scale - 1.0) < 1e-3:
+            return
+        font = app.font()
+        base = font.pointSizeF()
+        if base > 0:
+            font.setPointSizeF(base * scale)
+            app.setFont(font)
+    except Exception:  # noqa: BLE001 -- font scaling must never block startup
+        logger.debug("could not apply font scale", exc_info=True)

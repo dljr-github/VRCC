@@ -40,8 +40,8 @@ def vram_warning(size_mb: int, device: str = "auto") -> str | None:
     if need <= total - _VRAM_HEADROOM_BYTES:
         return None
     return tr(
-        "This model may be too large for your graphics card (~{gb:.0f} GB) — "
-        "it could run on your processor instead (slower) or fail to load.",
+        "This model may be too large for your graphics card (~{gb:.0f} GB). "
+        "It could run on your processor instead (slower) or fail to load.",
         gb=total / 1024**3,
     )
 
