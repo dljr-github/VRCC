@@ -12,6 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
+from vrcc.core import recommend
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.gui import settings as settings_mod
 from vrcc.gui import settings_reset
@@ -55,6 +56,11 @@ def _answer(monkeypatch, button):
 def _dialog(tmp_path, monkeypatch, *, apply=None, on_model_change=None):
     monkeypatch.setattr(settings_mod, "device_names", lambda: ["Fake GPU"])
     monkeypatch.setattr(settings_mod.model_fit, "vram_warning", lambda *a, **k: None)
+    # Pin the hardware verdict: a CPU verdict makes the reset bind the device
+    # to "cpu" (by design), so unpinned tests would assert different devices
+    # on a GPU dev box and a GPU-less CI runner.
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     cfg = store.config
     cfg.stt.model = "tiny"
