@@ -58,9 +58,13 @@ class Card(QFrame):
 
 
 class SegmentedControl(QWidget):
+    # Emits the segment's VALUE. An option may be a plain string (value ==
+    # label) or a (value, label) pair, so a translated label can sit on a
+    # stable value -- values are what value()/set_value()/changed carry, and
+    # they must never be translated (callers compare and persist them).
     changed = Signal(str)
 
-    def __init__(self, options: list[str], selected: str) -> None:
+    def __init__(self, options: list[str | tuple[str, str]], selected: str) -> None:
         super().__init__()
         self._value = selected
         self._buttons: dict[str, QPushButton] = {}
@@ -68,11 +72,12 @@ class SegmentedControl(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
         for opt in options:
-            b = QPushButton(opt)
+            value, label = opt if isinstance(opt, tuple) else (opt, opt)
+            b = QPushButton(label)
             b.setCheckable(True)
-            b.setChecked(opt == selected)
-            b.clicked.connect(lambda _=False, o=opt: self.set_value(o))
-            self._buttons[opt] = b
+            b.setChecked(value == selected)
+            b.clicked.connect(lambda _=False, o=value: self.set_value(o))
+            self._buttons[value] = b
             row.addWidget(b)
         self._repolish()
 

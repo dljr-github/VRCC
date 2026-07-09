@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from vrcc.core import recommend
 from vrcc.gui.bridge import BusBridge
+from vrcc.i18n import tr
 from vrcc.gui import model_fit
 from vrcc.gui.model_labels import fmt_size, mt_display_name, whisper_display_name, model_blurb
 from vrcc.gui.style import PALETTE, resolve_theme
@@ -91,7 +92,7 @@ class _ModelRow(QWidget):
         name_lbl = QLabel(name)
         name_lbl.setStyleSheet("font-weight: 600; background: transparent;")
         name_row.addWidget(name_lbl)
-        self._badge = QLabel("Recommended for your PC")
+        self._badge = QLabel(tr("Recommended for your PC"))
         accent = colors["accent"]
         self._badge.setStyleSheet(
             f"color: {accent}; border: 1px solid {accent}; border-radius: 8px; "
@@ -117,25 +118,25 @@ class _ModelRow(QWidget):
         self._progress.setVisible(False)
         row.addWidget(self._progress)
 
-        self._download_btn = QPushButton(f"Download · {size_text}")
-        self._download_btn.setToolTip("Download this model")
+        self._download_btn = QPushButton(tr("Download · {size}", size=size_text))
+        self._download_btn.setToolTip(tr("Download this model"))
         self._download_btn.clicked.connect(lambda: self._on_download(self))
         self._download_btn.setVisible(False)
         row.addWidget(self._download_btn)
 
-        self._inuse_pill = QLabel("In use")
+        self._inuse_pill = QLabel(tr("In use"))
         self._inuse_pill.setStyleSheet(f"color: {colors['good']}; font-weight: 600; background: transparent;")
         self._inuse_pill.setVisible(False)
         row.addWidget(self._inuse_pill)
 
         # Shown for a downloaded, non-active model: read-only, no action.
-        self._downloaded_pill = QLabel("Downloaded")
+        self._downloaded_pill = QLabel(tr("Downloaded"))
         self._downloaded_pill.setStyleSheet(f"color: {colors['muted']}; background: transparent;")
         self._downloaded_pill.setVisible(False)
         row.addWidget(self._downloaded_pill)
 
         self._trash_btn = IconButton(
-            _trash_svg(colors["muted"]), "Delete download", fallback_text="Del"
+            _trash_svg(colors["muted"]), tr("Delete download"), fallback_text="Del"
         )
         self._trash_btn.setFixedSize(30, 30)
         self._trash_btn.clicked.connect(lambda: self._on_delete(self))
@@ -169,7 +170,7 @@ class _ModelRow(QWidget):
             # faster-whisper's download exposes no byte-progress hook, so a
             # %-bar would sit frozen at 0%. Use a busy/indeterminate bar.
             self._progress.setRange(0, 0)
-            self._progress.setFormat("Downloading…")
+            self._progress.setFormat(tr("Downloading…"))
         else:
             self._progress.setRange(0, 100)
             self._progress.setValue(0)
@@ -216,7 +217,7 @@ class ModelsDialog(QDialog):
         )
         self._recommended_ids = recommend.PRESETS[tier]
 
-        self.setWindowTitle("Models")
+        self.setWindowTitle(tr("Models"))
         self.resize(660, 620)
 
         self._rows: list[_ModelRow] = []
@@ -232,7 +233,7 @@ class ModelsDialog(QDialog):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
-        title = QLabel("Models")
+        title = QLabel(tr("Models"))
         title.setStyleSheet(
             f"font-weight: 700; font-size: {round(16 * self._scale)}px; "
             f"color: {self._p['text']};"
@@ -241,9 +242,11 @@ class ModelsDialog(QDialog):
         self._title = title  # test seam: scaled-title assertion
 
         lead = QLabel(
-            "VRCC uses two models: one to hear your speech and one to translate "
-            "it. Download the ones you want here — choose which to use in "
-            "Settings."
+            tr(
+                "VRCC uses two models: one to hear your speech and one to translate "
+                "it. Download the ones you want here — choose which to use in "
+                "Settings."
+            )
         )
         lead.setWordWrap(True)
         lead.setStyleSheet(f"color: {self._p['muted']}; background: transparent;")
@@ -260,16 +263,16 @@ class ModelsDialog(QDialog):
         col.addWidget(
             self._build_card(
                 mic_svg(self._p["accent"]),
-                "Voice model",
-                "Recognizes what you say and turns it into text.",
+                tr("Voice model"),
+                tr("Recognizes what you say and turns it into text."),
                 self._voice_rows(),
             )
         )
         col.addWidget(
             self._build_card(
                 _globe_svg(self._p["accent"]),
-                "Translation model",
-                "Translates your speech into the languages you chose.",
+                tr("Translation model"),
+                tr("Translates your speech into the languages you chose."),
                 self._translation_rows(),
             )
         )
@@ -279,7 +282,7 @@ class ModelsDialog(QDialog):
 
         footer = QHBoxLayout()
         footer.addStretch(1)
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(tr("Close"))
         close_btn.clicked.connect(self.reject)
         footer.addWidget(close_btn)
         root.addLayout(footer)
@@ -376,7 +379,7 @@ class ModelsDialog(QDialog):
         msg = model_fit.disk_warning(getattr(self._dm, "models_dir", None), row.spec.size_mb)
         if msg:
             answer = QMessageBox.question(
-                self, "Low disk space", msg + "\n\nDownload anyway?",
+                self, tr("Low disk space"), msg + "\n\n" + tr("Download anyway?"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -425,7 +428,11 @@ class ModelsDialog(QDialog):
         self._render_all()
         if not success:
             name = row.display_name if row is not None else model_id
-            QMessageBox.warning(self, "Download failed", f"Could not download {name}:\n\n{error}")
+            QMessageBox.warning(
+                self,
+                tr("Download failed"),
+                tr("Could not download {name}:\n\n{error}", name=name, error=error),
+            )
 
     # -- delete --------------------------------------------------------------
 
@@ -434,12 +441,13 @@ class ModelsDialog(QDialog):
             return
         warning = ""
         if self._is_active(row):
-            warning = (
-                "\n\nThis is the model VRCC is currently using — captions "
+            warning = "\n\n" + tr(
+                "This is the model VRCC is currently using — captions "
                 "stop until you choose another in Settings."
             )
+        body = tr("Delete the downloaded files for {name}?", name=row.display_name) + warning
         reply = QMessageBox.question(
-            self, "Delete model", f"Delete the downloaded files for {row.display_name}?{warning}",
+            self, tr("Delete model"), body,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -449,7 +457,11 @@ class ModelsDialog(QDialog):
             self._dm.delete(row.kind, row.model_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception("delete failed for %s", row.model_id)
-            QMessageBox.warning(self, "Delete failed", f"Could not delete {row.display_name}:\n\n{exc}")
+            QMessageBox.warning(
+                self,
+                tr("Delete failed"),
+                tr("Could not delete {name}:\n\n{error}", name=row.display_name, error=exc),
+            )
         self._render_all()
 
     # -- lifecycle guards ----------------------------------------------------

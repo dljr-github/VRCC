@@ -96,6 +96,10 @@ class GuiConfig(BaseModel):
     profile: Literal["latency", "quality"] = "latency"
     theme: Literal["dark", "light", "system"] = "system"
     font_scale: float = 1.0
+    # UI language code from vrcc.i18n.UI_LANGUAGES; "auto" follows the OS
+    # locale. Free-form (not Literal) so a catalog added later needs no
+    # schema change; unknown values resolve to English at startup.
+    ui_language: str = "auto"
     window_geometry: str = ""
 
 

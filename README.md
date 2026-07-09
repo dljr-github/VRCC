@@ -100,6 +100,17 @@ and MT models from `m2m100-418M-int8` (~480 MB) up to `madlad400-3b`
    OSCQuery discovery and works **only when VRChat runs on the same PC**
    (localhost); captioning itself works regardless.
 
+### Interface language
+
+The interface follows your Windows display language by default and can speak
+18 languages (English, 日本語, 한국어, 简体中文, 繁體中文, Español, Français,
+Deutsch, Italiano, Português (Brasil), Русский, Українська, Polski,
+Nederlands, Türkçe, Bahasa Indonesia, Tiếng Việt, ไทย). Pick a different one
+under **Settings → Simple → Language** — it applies after a restart. This
+only affects VRCC's own interface; caption languages are chosen in the main
+window, and adding a UI translation is a single JSON file in `vrcc/i18n/`
+(copy the keys from any existing catalog).
+
 ### Performance profiles
 
 The main window has a one-click **Latency / Quality** toggle:

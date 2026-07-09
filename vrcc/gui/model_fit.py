@@ -10,6 +10,7 @@ import shutil
 from pathlib import Path
 
 from vrcc.core import hardware
+from vrcc.i18n import tr
 
 logger = logging.getLogger("vrcc.gui.model_fit")
 
@@ -22,8 +23,8 @@ _DISK_OVERHEAD = 1.1
 
 def _human(size_mb: float) -> str:
     if size_mb >= 1000:
-        return f"about {size_mb / 1000:.1f} GB"
-    return f"about {int(size_mb)} MB"
+        return tr("about {gb:.1f} GB", gb=size_mb / 1000)
+    return tr("about {mb} MB", mb=int(size_mb))
 
 
 def vram_warning(size_mb: int, device: str = "auto") -> str | None:
@@ -38,10 +39,10 @@ def vram_warning(size_mb: int, device: str = "auto") -> str | None:
     need = int(size_mb * 1024**2 * _VRAM_OVERHEAD)
     if need <= total - _VRAM_HEADROOM_BYTES:
         return None
-    gb = total / 1024**3
-    return (
-        f"This model may be too large for your graphics card (~{gb:.0f} GB) — "
-        "it could run on your processor instead (slower) or fail to load."
+    return tr(
+        "This model may be too large for your graphics card (~{gb:.0f} GB) — "
+        "it could run on your processor instead (slower) or fail to load.",
+        gb=total / 1024**3,
     )
 
 
@@ -60,7 +61,9 @@ def disk_warning(models_dir, size_mb: int) -> str | None:
         return None
     if free >= int(size_mb * 1024**2 * _DISK_OVERHEAD):
         return None
-    return (
-        f"Not enough free disk space to download this (needs {_human(size_mb)}, "
-        f"you have about {free / 1024**3:.1f} GB free)."
+    return tr(
+        "Not enough free disk space to download this (needs {size}, "
+        "you have about {gb_free:.1f} GB free).",
+        size=_human(size_mb),
+        gb_free=free / 1024**3,
     )

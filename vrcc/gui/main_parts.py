@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.icons import arrow_svg, dots_svg, gear_svg, mic_svg, x_svg
 from vrcc.gui.widgets import Card, IconButton, MicMeter, icon_label, svg_pixmap
+from vrcc.i18n import tr
 
 if TYPE_CHECKING:
     from vrcc.gui.main_window import MainWindow
@@ -69,7 +70,7 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     card.body.addLayout(bar)
 
     # -- language flow: You speak [src] -> They read [tgt] (+ up to 3) ----
-    bar.addWidget(_flow_label(w, "You speak"))
+    bar.addWidget(_flow_label(w, tr("You speak")))
     w._source_combo = QComboBox()
     w._source_combo.addItems([_AUTO, *LANGUAGES.keys()])
     _compact_combo(w._source_combo)
@@ -79,7 +80,7 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     bar.addWidget(
         icon_label(arrow_svg(w._p["muted"]), 16, colors=w._p, fallback_text="->")
     )
-    bar.addWidget(_flow_label(w, "They read"))
+    bar.addWidget(_flow_label(w, tr("They read")))
 
     # Three target slots. Slot 0 is always on; slots 1-2 add/remove via +/x.
     # Each carries a hidden checkbox as the enabled-state source of truth.
@@ -112,7 +113,7 @@ def build_top_bar(w: "MainWindow") -> QWidget:
             row.addWidget(check)
             row.addWidget(combo)
             remove = IconButton(
-                x_svg(w._p["muted"]), "Remove this language", fallback_text="x"
+                x_svg(w._p["muted"]), tr("Remove this language"), fallback_text="x"
             )
             remove.setFixedSize(34, 34)
             remove.clicked.connect(lambda _=False, s=slot: w._remove_target(s))
@@ -121,9 +122,9 @@ def build_top_bar(w: "MainWindow") -> QWidget:
             w._target_conts.append(cont)
             bar.addWidget(cont)
 
-    w._add_target_btn = QPushButton("+ Language")
+    w._add_target_btn = QPushButton(tr("+ Language"))
     w._add_target_btn.setToolTip(
-        "Add another language your captions are translated into."
+        tr("Add another language your captions are translated into.")
     )
     w._add_target_btn.clicked.connect(w._add_target)
     bar.addWidget(w._add_target_btn)
@@ -134,31 +135,35 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     actions.setSpacing(8)
     card.body.addLayout(actions)
 
-    w._captioning_btn = QPushButton("Start captioning")
+    w._captioning_btn = QPushButton(tr("Start captioning"))
     # One static mic icon; the label text alone carries the on/off state.
     mic_pm = svg_pixmap(mic_svg(w._p["muted"]), 20)
     if mic_pm is not None:
         w._captioning_btn.setIcon(QIcon(mic_pm))
     w._captioning_btn.setCheckable(True)
-    w._captioning_btn.setToolTip("Pause or resume captioning without closing VRCC.")
+    w._captioning_btn.setToolTip(tr("Pause or resume captioning without closing VRCC."))
     w._captioning_btn.toggled.connect(w._on_captions_toggled)
     actions.addWidget(w._captioning_btn)
 
     actions.addStretch(1)
 
-    w._gear_btn = IconButton(gear_svg(w._p["muted"]), "Settings", fallback_text="Set")
+    w._gear_btn = IconButton(
+        gear_svg(w._p["muted"]), tr("Settings"), fallback_text="Set"
+    )
     w._gear_btn.clicked.connect(lambda: w._on_open_settings())
     actions.addWidget(w._gear_btn)
 
     # QMenu via setMenu() makes Fusion draw its own drop-down arrow over the
     # icon, so the menu-indicator is switched off in QSS below.
-    w._overflow_btn = IconButton(dots_svg(w._p["muted"]), "More", fallback_text="...")
+    w._overflow_btn = IconButton(
+        dots_svg(w._p["muted"]), tr("More"), fallback_text="..."
+    )
     w._overflow_btn.setStyleSheet("QPushButton::menu-indicator { width: 0; }")
     menu = QMenu(w)
-    menu.addAction("Models…").triggered.connect(lambda: w._on_open_models())
-    menu.addAction("About").triggered.connect(w._show_about)
+    menu.addAction(tr("Models…")).triggered.connect(lambda: w._on_open_models())
+    menu.addAction(tr("About")).triggered.connect(w._show_about)
     menu.addSeparator()
-    menu.addAction("Exit").triggered.connect(w.close)
+    menu.addAction(tr("Exit")).triggered.connect(w.close)
     w._overflow_btn.setMenu(menu)
     actions.addWidget(w._overflow_btn)
 
@@ -174,7 +179,7 @@ def build_status_strip(w: "MainWindow") -> QWidget:
     # Live mic level (animated while capturing, dimmed when paused).
     w._mic_meter = MicMeter(colors=w._p)
     row.addWidget(w._mic_meter)
-    row.addWidget(_flow_label(w, "Microphone"))
+    row.addWidget(_flow_label(w, tr("Microphone")))
 
     row.addStretch(1)
 
@@ -210,10 +215,10 @@ def build_compose_row(w: "MainWindow") -> QWidget:
     card.body.addLayout(row)
 
     w._text_input = QLineEdit()
-    w._text_input.setPlaceholderText("Type to send to your VRChat chatbox…")
+    w._text_input.setPlaceholderText(tr("Type to send to your VRChat chatbox…"))
     w._text_input.returnPressed.connect(w._on_send_clicked)
     row.addWidget(w._text_input, stretch=1)
-    w._send_button = QPushButton("Send")
+    w._send_button = QPushButton(tr("Send"))
     w._send_button.setProperty("buttonRole", "primary")
     w._send_button.clicked.connect(w._on_send_clicked)
     row.addWidget(w._send_button)

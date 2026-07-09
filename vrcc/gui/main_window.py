@@ -28,6 +28,7 @@ from vrcc.gui.main_parts import (
     build_top_bar,
 )
 from vrcc.gui.style import PALETTE, resolve_theme
+from vrcc.i18n import tr, tr_noop
 
 logger = logging.getLogger("vrcc.gui.main_window")
 
@@ -38,8 +39,10 @@ _TRANSIENT_MS = 5000
 _NUM_TARGET_SLOTS = 3
 
 # Plain, user-facing engine names, so failure/fallback messages never leak
-# "STT"/"MT" jargon.
-_ENGINE_NAMES = {"stt": "Voice model", "mt": "Translation model"}
+# "STT"/"MT" jargon. tr_noop: translated at the point of use, not import time.
+_ENGINE_NAMES = {"stt": tr_noop("Voice model"), "mt": tr_noop("Translation model")}
+# Sentence-internal lowercase forms (never lowercase a translated string in code).
+_ENGINE_NAMES_LOWER = {"stt": tr_noop("voice model"), "mt": tr_noop("translation model")}
 
 
 class MainWindow(QMainWindow):
@@ -219,20 +222,20 @@ class MainWindow(QMainWindow):
     def _on_vrchat_detected(self, event) -> None:
         # event is None only for the initial "checking" render at construction.
         detected = bool(event.detected) if event is not None else None
-        tip = (
+        tip = tr(
             "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. "
             "VRChat must be running on this PC."
         )
         if detected is True:
-            self._vrchat_label.setText("VRChat: connected")
+            self._vrchat_label.setText(tr("VRChat: connected"))
             self._vrchat_label.setStyleSheet(f"color: {self._p['good']}; padding: 2px 8px;")
-            self._vrchat_label.setToolTip("VRChat's OSC service was found on this network.")
+            self._vrchat_label.setToolTip(tr("VRChat's OSC service was found on this network."))
         elif detected is False:
-            self._vrchat_label.setText("VRChat: not detected — enable OSC in-game")
+            self._vrchat_label.setText(tr("VRChat: not detected — enable OSC in-game"))
             self._vrchat_label.setStyleSheet(f"color: {self._p['warn']}; padding: 2px 8px;")
             self._vrchat_label.setToolTip(tip)
         else:
-            self._vrchat_label.setText("VRChat: checking…")
+            self._vrchat_label.setText(tr("VRChat: checking…"))
             self._vrchat_label.setStyleSheet(f"color: {self._p['muted']}; padding: 2px 8px;")
             self._vrchat_label.setToolTip(tip)
 
@@ -240,30 +243,30 @@ class MainWindow(QMainWindow):
         # State drives the caption feed's loading message via _engine_states; it
         # is no longer shown as jargon text on the main screen.
         self._engine_states[event.engine] = event.state
-        name = _ENGINE_NAMES.get(event.engine, event.engine.title())
+        known = event.engine in _ENGINE_NAMES
+        name = tr(_ENGINE_NAMES[event.engine]) if known else event.engine.title()
         if event.state == "fallback_cpu":
             # Transient state (immediately followed by "ready"), so surface the
             # CPU drop as a status flash before it's overwritten. Plain name, no jargon.
             self._flash_status(
-                f"{name} ran out of GPU memory — switched to CPU (slower)."
+                tr("{name} ran out of GPU memory — switched to CPU (slower).", name=name)
             )
         if event.state == "failed":
-            self.set_capture_status(False, f"{name} failed to load")
-            detail = f"\n\n{event.detail}" if event.detail else ""
-            QMessageBox.warning(
-                self,
-                "Model failed to load",
-                f"The {name.lower()} failed to start.{detail}",
-            )
+            self.set_capture_status(False, tr("{name} failed to load", name=name))
+            lower = tr(_ENGINE_NAMES_LOWER[event.engine]) if known else event.engine.title().lower()
+            body = tr("The {name} failed to start.", name=lower)
+            if event.detail:
+                body += f"\n\n{event.detail}"
+            QMessageBox.warning(self, tr("Model failed to load"), body)
 
     def _on_download_progress(self, event) -> None:
         if event.done:
-            self._flash_status(f"Download complete: {event.model_id}")
+            self._flash_status(tr("Download complete: {model_id}", model_id=event.model_id))
             return
         if event.total <= 0:
             return
         pct = int(100 * event.downloaded / event.total)
-        self._flash_status(f"Downloading {event.model_id}: {pct}%")
+        self._flash_status(tr("Downloading {model_id}: {pct}%", model_id=event.model_id, pct=pct))
 
     def _on_app_error(self, event) -> None:
         # All AppErrors are transient status text (5 s); the only modal alert is a
@@ -272,7 +275,7 @@ class MainWindow(QMainWindow):
         friendly = _FRIENDLY_ERRORS.get(event.code)
         if friendly is not None:
             logger.warning("AppError %s: %s", event.code, event.message)
-            self._flash_status(friendly)
+            self._flash_status(tr(friendly))
         else:
             self._flash_status(f"{event.code}: {event.message}")
 
@@ -293,11 +296,11 @@ class MainWindow(QMainWindow):
         else:
             loading = self._engine_states.get("stt") in (None, "loading")
             if loading:
-                msg, sub = "Getting the voice model ready…", "usually takes a few seconds"
+                msg, sub = tr("Getting the voice model ready…"), tr("usually takes a few seconds")
             else:
                 msg, sub = (
-                    "Say something — captions appear here",
-                    "then in your VRChat chatbox",
+                    tr("Say something — captions appear here"),
+                    tr("then in your VRChat chatbox"),
                 )
             self._log.setHtml(empty_state_html(msg, sub, colors, self._scale))
         scrollbar.setValue(scrollbar.maximum() if at_bottom else previous)
@@ -311,10 +314,10 @@ class MainWindow(QMainWindow):
             self._mute_chip.setVisible(False)
             return
         if muted:
-            self._mute_chip.setText("MUTED")
+            self._mute_chip.setText(tr("MUTED"))
             color = self._p["bad"]
         else:
-            self._mute_chip.setText("LIVE")
+            self._mute_chip.setText(tr("LIVE"))
             color = self._p["good"]
         self._mute_chip.setStyleSheet(
             f"color: {self._p['on_badge']}; background: {color}; padding: 2px 8px;"
@@ -340,15 +343,18 @@ class MainWindow(QMainWindow):
     def _render_capture_status(self) -> None:
         ok = getattr(self, "_capture_ok", None)
         if ok is None:
-            text, color = "Starting…", self._p["muted"]
+            text, color = tr("Starting…"), self._p["muted"]
         elif ok is False:
             reason = getattr(self, "_capture_reason", "")
-            text = "Not listening" + (f" — {reason}" if reason else "")
+            if reason:
+                text = tr("Not listening — {reason}", reason=reason)
+            else:
+                text = tr("Not listening")
             color = self._p["bad"]
         elif getattr(self, "_captioning_btn", None) is not None and not self._captioning_btn.isChecked():
-            text, color = "Paused — not listening", self._p["warn"]
+            text, color = tr("Paused — not listening"), self._p["warn"]
         else:
-            text, color = "Listening", self._p["good"]
+            text, color = tr("Listening"), self._p["good"]
         self._capture_label.setText(text)
         self._capture_label.setStyleSheet(f"color: {color}; padding: 2px 8px;")
 
@@ -404,7 +410,7 @@ class MainWindow(QMainWindow):
     def _on_captions_toggled(self, checked: bool) -> None:
         # Pause/resume captioning live: the pipeline and mic keep running, it just
         # stops producing captions. Reflect in the button, meter, and capture status.
-        self._captioning_btn.setText("Captioning on" if checked else "Start captioning")
+        self._captioning_btn.setText(tr("Captioning on") if checked else tr("Start captioning"))
         self._mic_meter.set_active(checked)
         if not self._loading:
             self._pipeline.set_captioning(checked)
@@ -422,12 +428,12 @@ class MainWindow(QMainWindow):
     # -- menu actions ------------------------------------------------------
 
     def _show_about(self) -> None:
+        blurb = tr("Live voice captioning and translation for the VRChat chatbox.")
+        credit = tr('Created by <a href="https://github.com/dljr-github">dljr-github</a>')
         QMessageBox.about(
             self,
-            "About VRCC",
-            f"<p><b>VRCC</b> v{__version__}</p>"
-            "<p>Live voice captioning and translation for the VRChat chatbox.</p>"
-            '<p>Created by <a href="https://github.com/dljr-github">dljr-github</a></p>',
+            tr("About VRCC"),
+            f"<p><b>VRCC</b> v{__version__}</p><p>{blurb}</p><p>{credit}</p>",
         )
 
     # -- geometry persistence ----------------------------------------------

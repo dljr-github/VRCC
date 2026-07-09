@@ -3,11 +3,14 @@
 Single home for every hand-drawn SVG string used as a button/label icon (no
 external asset files) -- rendered via QSvgRenderer elsewhere (see
 ``vrcc.gui.widgets.svg_pixmap``). Colors are explicit hexes: QSvgRenderer
-can't resolve "currentColor". Also holds pure-data copy maps (friendly error
-text) that read naturally as icon/asset-adjacent constants.
+can't resolve "currentColor". Also holds copy maps (friendly error text,
+tr_noop-marked for translation) that read naturally as icon/asset-adjacent
+constants.
 """
 
 from __future__ import annotations
+
+from vrcc.i18n import tr_noop
 
 
 def mic_svg(color: str) -> str:
@@ -71,22 +74,31 @@ def x_svg(color: str) -> str:
 # keeps the raw code+message (see MainWindow._on_app_error). Unknown codes
 # render raw.
 FRIENDLY_ERRORS = {
-    "PIPELINE_NOT_RUNNING": "Engines are still loading — try again in a moment.",
-    "MIC_OPEN_FAILED": "Could not open the microphone — check Settings > Audio.",
-    "MUTE_SYNC_REQUIRES_LOCALHOST": (
+    "PIPELINE_NOT_RUNNING": tr_noop("Engines are still loading — try again in a moment."),
+    "MIC_OPEN_FAILED": tr_noop("Could not open the microphone — check Settings > Audio."),
+    "MUTE_SYNC_REQUIRES_LOCALHOST": tr_noop(
         "Mute sync is off: it only works when OSC points at this machine (127.0.0.1)."
     ),
-    "MUTE_SYNC_MDNS_FAILED": (
+    "MUTE_SYNC_MDNS_FAILED": tr_noop(
         "Mute sync may not work: VRChat could not be notified (network discovery failed)."
     ),
-    "DRIVER_TOO_OLD": (
+    "DRIVER_TOO_OLD": tr_noop(
         "Your NVIDIA driver is too old for GPU mode — running on CPU. Update to driver 570+."
     ),
-    "CHATBOX_SEND_FAILED": "Could not send to the VRChat chatbox — is VRChat running?",
-    "ENGINE_LOAD_FAILED": (
+    "CHATBOX_SEND_FAILED": tr_noop(
+        "Could not send to the VRChat chatbox — is VRChat running?"
+    ),
+    "ENGINE_LOAD_FAILED": tr_noop(
         "An engine failed to load — open Models to re-download, then restart VRCC."
     ),
-    "STT_JOB_FAILED": "Transcription failed for the last utterance.",
-    "MT_JOB_FAILED": "Translation failed — the original text was sent instead.",
-    "HANDLER_ERROR": "An internal error occurred — see the log file for details.",
+    "MODEL_SWITCH_FAILED": tr_noop(
+        "Switching models failed — the previous model is still in use."
+    ),
+    "SEGMENTER_FAILED": tr_noop(
+        "Audio processing hit an error — captioning may have stopped; restart VRCC"
+        " if it doesn't recover."
+    ),
+    "STT_JOB_FAILED": tr_noop("Transcription failed for the last utterance."),
+    "MT_JOB_FAILED": tr_noop("Translation failed — the original text was sent instead."),
+    "HANDLER_ERROR": tr_noop("An internal error occurred — see the log file for details."),
 }

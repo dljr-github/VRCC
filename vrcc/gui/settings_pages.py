@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
 from vrcc.gui.widgets import SegmentedControl
+from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
@@ -31,23 +32,30 @@ if TYPE_CHECKING:
 _AUTO = "auto"
 
 # Plain-language Speed/Quality explanation (Mode tooltip + visible description).
-_MODE_TOOLTIP = (
+_MODE_TOOLTIP = tr_noop(
     "Speed shows captions almost instantly. Quality is more accurate and "
     "clips fewer words off the ends of sentences, but each caption takes a "
     "little longer."
 )
-_MODE_DESC = (
+_MODE_DESC = tr_noop(
     "Speed shows captions almost instantly; Quality is more accurate and "
     "clips fewer words, but each caption takes a little longer."
 )
 
-_FONT_SCALE_PRESETS = [("Small", 0.9), ("Normal", 1.0), ("Large", 1.2)]
-_DELETED_MODEL_TEXT = "Current model (deleted) — choose another"
+# Labels double as SegmentedControl values (compared/persisted via scale_map);
+# tr_noop keeps them stable values while making them catalog-extractable for
+# the dynamic tr(label) at the control build site.
+_FONT_SCALE_PRESETS = [
+    (tr_noop("Small"), 0.9),
+    (tr_noop("Normal"), 1.0),
+    (tr_noop("Large"), 1.2),
+]
+_DELETED_MODEL_TEXT = tr_noop("Current model (deleted) — choose another")
 
 
 def _add_deleted_placeholder_if_needed(combo: QComboBox, specs, configured_id) -> None:
     if specs and not any(s.id == configured_id for s in specs):
-        combo.addItem(_DELETED_MODEL_TEXT, None)
+        combo.addItem(tr(_DELETED_MODEL_TEXT), None)
         combo.model().item(0).setEnabled(False)
 
 
@@ -56,13 +64,13 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     form = QFormLayout(page)
     form.setContentsMargins(24, 16, 24, 16)
 
-    form.addRow("Microphone", dlg._make_input_device_combo())
+    form.addRow(tr("Microphone"), dlg._make_input_device_combo())
 
     dlg._sensitivity = QSlider(Qt.Orientation.Horizontal)
     dlg._sensitivity.setRange(30, 60)
     dlg._sensitivity.setValue(int(round(dlg._cfg.vad.threshold * 100)))
     dlg._sensitivity.setToolTip(
-        "How loud you need to speak before captioning starts."
+        tr("How loud you need to speak before captioning starts.")
     )
 
     def on_sensitivity(v):
@@ -72,67 +80,86 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
         dlg._changed()
     dlg._sensitivity.valueChanged.connect(on_sensitivity)
     sens_row, dlg._sensitivity_low, dlg._sensitivity_high = dlg._anchored_slider(dlg._sensitivity)
-    form.addRow("Microphone sensitivity", sens_row)
+    form.addRow(tr("Microphone sensitivity"), sens_row)
 
     # Mode: Speed <-> Quality (maps to apply_profile), with tooltip + description.
     dlg._mode = SegmentedControl(
-        ["Speed", "Quality"],
+        [("Speed", tr("Speed")), ("Quality", tr("Quality"))],
         "Quality" if dlg._cfg.gui.profile == "quality" else "Speed",
     )
-    dlg._mode.setToolTip(_MODE_TOOLTIP)
+    dlg._mode.setToolTip(tr(_MODE_TOOLTIP))
     dlg._mode.changed.connect(dlg._on_mode_changed)
-    form.addRow("Mode", dlg._mode)
+    form.addRow(tr("Mode"), dlg._mode)
 
-    dlg._mode_desc = QLabel(_MODE_DESC)
+    dlg._mode_desc = QLabel(tr(_MODE_DESC))
     dlg._mode_desc.setWordWrap(True)
     dlg._mode_desc.setStyleSheet(dlg._muted_style)
     form.addRow("", dlg._mode_desc)
 
-    dlg._send_check = QCheckBox("Send my captions to VRChat")
+    dlg._send_check = QCheckBox(tr("Send my captions to VRChat"))
     dlg._send_check.setChecked(dlg._cfg.osc.send_to_vrchat)
-    dlg._send_check.setToolTip("Show your captions in the VRChat chatbox.")
+    dlg._send_check.setToolTip(tr("Show your captions in the VRChat chatbox."))
     dlg._bind_checkbox(dlg._send_check, dlg._cfg.osc, "send_to_vrchat")
     form.addRow(dlg._send_check)
 
-    dlg._translate_check = QCheckBox("Translate my speech")
+    dlg._translate_check = QCheckBox(tr("Translate my speech"))
     dlg._translate_check.setChecked(dlg._cfg.translate.enabled)
-    dlg._translate_check.setToolTip("Also show a translation of what you say.")
+    dlg._translate_check.setToolTip(tr("Also show a translation of what you say."))
     # Translate on/off applies live via a dedicated handler that pokes
     # on_model_change("mt"), not the restart-gated generic binding.
     dlg._translate_check.toggled.connect(dlg._on_translate_toggled)
     form.addRow(dlg._translate_check)
 
-    dlg._include_original_check = QCheckBox("Show my original words in the chatbox")
+    dlg._include_original_check = QCheckBox(tr("Show my original words in the chatbox"))
     dlg._include_original_check.setChecked(dlg._cfg.osc.include_original)
     dlg._include_original_check.setToolTip(
-        "Turn off to send only the translations. If translation is off, "
-        "your words are always sent."
+        tr("Turn off to send only the translations. If translation is off, "
+           "your words are always sent.")
     )
     dlg._bind_checkbox(dlg._include_original_check, dlg._cfg.osc, "include_original")
     form.addRow(dlg._include_original_check)
 
     # Appearance.
     theme = QComboBox()
-    for label, value in (("System", "system"), ("Dark", "dark"), ("Light", "light")):
+    for label, value in (
+        (tr("System"), "system"), (tr("Dark"), "dark"), (tr("Light"), "light")
+    ):
         theme.addItem(label, value)
     ti = theme.findData(dlg._cfg.gui.theme)
     if ti >= 0:
         theme.setCurrentIndex(ti)
-    theme.setToolTip("Dark, light, or match your system.")
+    theme.setToolTip(tr("Dark, light, or match your system."))
     dlg._bind_data_combo(theme, dlg._cfg.gui, "theme")
-    form.addRow("Theme", theme)
+    form.addRow(tr("Theme"), theme)
+
+    # Interface language (restart-applied, like the theme). Data is the code;
+    # labels are each language's own name, so a user stuck in the wrong
+    # language can still find theirs.
+    ui_lang = QComboBox()
+    ui_lang.addItem(tr("Auto (match my system)"), "auto")
+    for code, native_name in UI_LANGUAGES.items():
+        ui_lang.addItem(native_name, code)
+    li = ui_lang.findData(dlg._cfg.gui.ui_language)
+    if li >= 0:
+        ui_lang.setCurrentIndex(li)
+    ui_lang.setToolTip(
+        tr("The language of VRCC's interface. Applies after restarting VRCC.")
+    )
+    dlg._bind_data_combo(ui_lang, dlg._cfg.gui, "ui_language")
+    dlg._ui_language_combo = ui_lang
+    form.addRow(tr("Language"), ui_lang)
 
     scale_map = dict(_FONT_SCALE_PRESETS)
     cur = min(scale_map, key=lambda k: abs(scale_map[k] - dlg._cfg.gui.font_scale))
-    dlg._text_size = SegmentedControl(list(scale_map), cur)
-    dlg._text_size.setToolTip("Make all text larger or smaller.")
+    dlg._text_size = SegmentedControl([(label, tr(label)) for label in scale_map], cur)
+    dlg._text_size.setToolTip(tr("Make all text larger or smaller."))
 
     def on_text_size(label):
         if not dlg._loading:
             dlg._cfg.gui.font_scale = scale_map[label]
             dlg._changed()
     dlg._text_size.changed.connect(on_text_size)
-    form.addRow("Text size", dlg._text_size)
+    form.addRow(tr("Text size"), dlg._text_size)
 
     return page
 
@@ -158,15 +185,15 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         dlg._model_combo.setCurrentIndex(mi)  # else: index 0 is already the placeholder
     dlg._voice_selected_id = dlg._model_combo.currentData()
     dlg._model_combo.setToolTip(
-        "Bigger models are more accurate but slower and larger."
+        tr("Bigger models are more accurate but slower and larger.")
     )
     dlg._model_combo.currentIndexChanged.connect(dlg._on_voice_model_changed)
 
-    form.addRow("Voice model", dlg._model_combo)
+    form.addRow(tr("Voice model"), dlg._model_combo)
     if not voice_specs:
         dlg._model_combo.setEnabled(False)
         hint = QLabel(
-            "No voice models downloaded yet — get one in the Models window."
+            tr("No voice models downloaded yet — get one in the Models window.")
         )
         hint.setStyleSheet(dlg._muted_style)
         hint.setWordWrap(True)
@@ -177,7 +204,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     dlg._source_combo.addItems(list(LANGUAGES.keys()))
     dlg._set_combo_text(dlg._source_combo, dlg._cfg.stt.source_language)
     dlg._source_combo.setToolTip(
-        "The language you speak. Auto tries to detect it."
+        tr("The language you speak. Auto tries to detect it.")
     )
 
     def on_source(_i):
@@ -188,13 +215,13 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         dlg._changed()
     dlg._source_combo.currentIndexChanged.connect(on_source)
 
-    form.addRow("Spoken language", dlg._source_combo)
+    form.addRow(tr("Spoken language"), dlg._source_combo)
 
     # Energy gate.
-    gate = QCheckBox("Ignore quiet background noise")
+    gate = QCheckBox(tr("Ignore quiet background noise"))
     gate.setChecked(dlg._cfg.audio.energy_gate_enabled)
     gate.setToolTip(
-        "Skip very quiet sounds so background noise doesn't trigger captions."
+        tr("Skip very quiet sounds so background noise doesn't trigger captions.")
     )
     dlg._bind_checkbox(gate, dlg._cfg.audio, "energy_gate_enabled")
     form.addRow(gate)
@@ -203,7 +230,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     slider.setRange(0, 2000)
     slider.setValue(dlg._cfg.audio.energy_threshold)
     slider.setToolTip(
-        "How loud a sound must be to count. Higher ignores more background noise."
+        tr("How loud a sound must be to count. Higher ignores more background noise.")
     )
     dlg._noise_value_label = QLabel(str(dlg._cfg.audio.energy_threshold))
     dlg._noise_value_label.setStyleSheet(dlg._muted_style)
@@ -216,49 +243,49 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         dlg._changed()
     slider.valueChanged.connect(on_gate)
     gate_row, dlg._noise_low, dlg._noise_high = dlg._anchored_slider(slider, dlg._noise_value_label)
-    form.addRow("Background noise level", gate_row)
+    form.addRow(tr("Background noise level"), gate_row)
 
     # Advanced fine-tuning (quality gates + prompt).
-    adv = QGroupBox("Advanced (fine-tuning)")
+    adv = QGroupBox(tr("Advanced (fine-tuning)"))
     adv_form = QFormLayout(adv)
 
     beam = dlg._spin(1, 10, dlg._cfg.stt.beam_size)
     beam.setToolTip(
-        "Higher considers more options — a little more accurate, a little slower."
+        tr("Higher considers more options — a little more accurate, a little slower.")
     )
     dlg._bind_int(beam, dlg._cfg.stt, "beam_size")
     dlg._stt_beam_spin = beam
-    adv_form.addRow("Search width", beam)
+    adv_form.addRow(tr("Search width"), beam)
 
     temp = dlg._dspin(0.0, 1.0, dlg._cfg.stt.temperature, 2, 0.1)
-    temp.setToolTip("Higher lets the model guess more freely when it's unsure.")
+    temp.setToolTip(tr("Higher lets the model guess more freely when it's unsure."))
     dlg._bind_float(temp, dlg._cfg.stt, "temperature")
     dlg._stt_temp_spin = temp
-    adv_form.addRow("Guessing", temp)
+    adv_form.addRow(tr("Guessing"), temp)
 
     avg_gate = dlg._dspin(-5.0, 0.0, dlg._cfg.stt.avg_logprob_gate, 2, 0.1)
-    avg_gate.setToolTip("Drop captions the model isn't confident about.")
+    avg_gate.setToolTip(tr("Drop captions the model isn't confident about."))
     dlg._bind_float(avg_gate, dlg._cfg.stt, "avg_logprob_gate")
-    adv_form.addRow("Confidence cutoff", avg_gate)
+    adv_form.addRow(tr("Confidence cutoff"), avg_gate)
 
     ns_gate = dlg._dspin(0.0, 1.0, dlg._cfg.stt.no_speech_gate, 2, 0.05)
     ns_gate.setToolTip(
-        "How sure the model must be that you actually spoke before captioning."
+        tr("How sure the model must be that you actually spoke before captioning.")
     )
     dlg._bind_float(ns_gate, dlg._cfg.stt, "no_speech_gate")
-    adv_form.addRow("Silence sensitivity", ns_gate)
+    adv_form.addRow(tr("Silence sensitivity"), ns_gate)
 
     prompt = QLineEdit(dlg._cfg.stt.initial_prompt)
     prompt.setToolTip(
-        "Optional words to help the model spell names or jargon correctly."
+        tr("Optional words to help the model spell names or jargon correctly.")
     )
     dlg._bind_line(prompt, dlg._cfg.stt, "initial_prompt")
-    adv_form.addRow("Context hint", prompt)
+    adv_form.addRow(tr("Context hint"), prompt)
 
-    cond = QCheckBox("Use earlier speech as context")
+    cond = QCheckBox(tr("Use earlier speech as context"))
     cond.setChecked(dlg._cfg.stt.condition_on_previous_text)
     cond.setToolTip(
-        "Feed previous captions back in for consistency (can drift after a mistake)."
+        tr("Feed previous captions back in for consistency (can drift after a mistake).")
     )
     dlg._bind_checkbox(cond, dlg._cfg.stt, "condition_on_previous_text")
     adv_form.addRow(cond)
@@ -274,7 +301,7 @@ def build_translation_page(dlg: "SettingsDialog") -> QWidget:
     form = QFormLayout(page)
     form.setContentsMargins(24, 16, 24, 16)
 
-    note = QLabel("Turn translation on or off on the Simple tab.")
+    note = QLabel(tr("Turn translation on or off on the Simple tab."))
     note.setStyleSheet(dlg._muted_style)
     note.setWordWrap(True)
     form.addRow(note)
@@ -288,29 +315,29 @@ def build_translation_page(dlg: "SettingsDialog") -> QWidget:
     mi = model.findData(dlg._cfg.translate.model)
     if mi >= 0:
         model.setCurrentIndex(mi)  # else: index 0 is already the placeholder
-    model.setToolTip("The model that translates your speech.")
+    model.setToolTip(tr("The model that translates your speech."))
     dlg._translate_model_combo = model
     dlg._mt_selected_id = model.currentData()
     model.currentIndexChanged.connect(dlg._on_mt_model_changed)
-    form.addRow("Translation model", model)
+    form.addRow(tr("Translation model"), model)
     if not mt_specs:
         model.setEnabled(False)
         hint = QLabel(
-            "No translation models downloaded yet — get one in the Models window."
+            tr("No translation models downloaded yet — get one in the Models window.")
         )
         hint.setStyleSheet(dlg._muted_style)
         hint.setWordWrap(True)
         form.addRow("", hint)
 
-    adv = QGroupBox("Advanced (fine-tuning)")
+    adv = QGroupBox(tr("Advanced (fine-tuning)"))
     adv_form = QFormLayout(adv)
     beam = dlg._spin(1, 10, dlg._cfg.translate.beam_size)
     beam.setToolTip(
-        "Higher considers more options — a little more accurate, a little slower."
+        tr("Higher considers more options — a little more accurate, a little slower.")
     )
     dlg._bind_int(beam, dlg._cfg.translate, "beam_size")
     dlg._mt_beam_spin = beam
-    adv_form.addRow("Search width", beam)
+    adv_form.addRow(tr("Search width"), beam)
     form.addRow(adv)
 
     return page

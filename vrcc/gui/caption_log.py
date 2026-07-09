@@ -12,6 +12,8 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
+from vrcc.i18n import tr
+
 # Status values (also the render key).
 TRANSLATING = "translating"
 QUEUED = "queued"
@@ -130,7 +132,8 @@ def _latency_inline(row: CaptionRow, c: dict) -> str:
     # line EDGE reads as a stray mark, not one sitting between two words.
     if row.latency_ms is None:
         return ""
-    return f' · <span style="color:{c["muted"]};">{row.latency_ms / 1000:.1f}s</span>'
+    secs = tr("{seconds:.1f}s", seconds=row.latency_ms / 1000)
+    return f' · <span style="color:{c["muted"]};">{secs}</span>'
 
 
 def _latency_block(row: CaptionRow, c: dict) -> str:
@@ -140,7 +143,8 @@ def _latency_block(row: CaptionRow, c: dict) -> str:
     # as a stray mark.
     if row.latency_ms is None:
         return ""
-    return f'<br/><span style="color:{c["muted"]};">{row.latency_ms / 1000:.1f}s</span>'
+    secs = tr("{seconds:.1f}s", seconds=row.latency_ms / 1000)
+    return f'<br/><span style="color:{c["muted"]};">{secs}</span>'
 
 
 def status_markup(
@@ -152,19 +156,21 @@ def status_markup(
     status text itself carries no font-size (that lives on the render cell)."""
     c = {**_DEFAULT_COLORS, **(colors or {})}
     if row.status == SENT:
-        return (f"sent{_latency_inline(row, c)}", c["good"])
+        return (tr("sent") + _latency_inline(row, c), c["good"])
     if row.status == TRUNCATED:
         # Still a successful send (just clipped to VRChat's 144-char limit), so it
         # keeps "sent" wording. The explicit <br/> keeps "shortened to fit" whole:
         # Qt ignores nowrap/nbsp, so placing the wrap ourselves is the only
         # reliable way. This is the ONLY status that stays multi-line -- plain
-        # sent/not_sent/queued/translating render on one line.
-        return (f"sent<br/>shortened to fit{_latency_block(row, c)}", c["warn"])
+        # sent/not_sent/queued/translating render on one line. One catalog key
+        # (languages may inflect "sent" before a qualifier); translations must
+        # keep the <br/>.
+        return (tr("sent<br/>shortened to fit") + _latency_block(row, c), c["warn"])
     if row.status == NOT_SENT:
-        return ("not sent", c["bad"])
+        return (tr("not sent"), c["bad"])
     if row.status == QUEUED:
-        return ("queued", c["muted"])
-    return ("translating…", c["muted"])
+        return (tr("queued"), c["muted"])
+    return (tr("translating…"), c["muted"])
 
 
 def _esc(text: str) -> str:
