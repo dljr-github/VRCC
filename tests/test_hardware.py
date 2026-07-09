@@ -165,6 +165,32 @@ class TestGracefulDegradation:
     def test_setup_cuda_dlls_never_raises_and_returns_bool(self):
         assert isinstance(hardware.setup_cuda_dlls(), bool)
 
+    def test_preload_onnxruntime_calls_preload_dlls_when_available(self, monkeypatch):
+        import onnxruntime
+
+        calls = []
+        monkeypatch.setattr(
+            onnxruntime, "preload_dlls", lambda: calls.append(True), raising=False
+        )
+        hardware._preload_onnxruntime_cuda_dlls()
+        assert calls == [True]
+
+    def test_preload_onnxruntime_swallows_preload_failure(self, monkeypatch):
+        import onnxruntime
+
+        def boom():
+            raise OSError("cudnn64_9.dll not found")
+
+        monkeypatch.setattr(onnxruntime, "preload_dlls", boom, raising=False)
+        hardware._preload_onnxruntime_cuda_dlls()  # must not raise
+
+    def test_preload_onnxruntime_noop_without_preload_dlls(self, monkeypatch):
+        # Older onnxruntime (< 1.21) has no preload_dlls attribute.
+        import onnxruntime
+
+        monkeypatch.delattr(onnxruntime, "preload_dlls", raising=False)
+        hardware._preload_onnxruntime_cuda_dlls()  # must not raise
+
     def test_device_names_fallback_without_pynvml(self, monkeypatch):
         monkeypatch.setattr(hardware, "_pynvml", lambda: None)
         monkeypatch.setattr(hardware, "cuda_device_count", lambda: 2)

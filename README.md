@@ -56,12 +56,20 @@ python -m venv .venv
 .venv\Scripts\pip install -e .
 ```
 
-With NVIDIA GPU acceleration (bundles the CUDA 12 cuBLAS runtime as a pip
-wheel — no system CUDA install needed):
+With NVIDIA GPU acceleration (bundles the CUDA 12 cuBLAS + cuDNN runtimes
+as pip wheels — no system CUDA install needed):
 
 ```
 .venv\Scripts\pip install -e .[cuda]
+.venv\Scripts\pip install "onnxruntime-gpu>=1.21,<2"
 ```
+
+The second command swaps in the GPU build of onnxruntime so the Parakeet
+and Canary models also run on the GPU (whisper models use CTranslate2's own
+CUDA path). It must run **after** the first: `onnxruntime-gpu` installs the
+same `onnxruntime` package as the CPU wheel pulled in by faster-whisper,
+and the one installed last wins. Skipping it is fine — those models then
+run on the CPU.
 
 > **GPU note:** CUDA use requires an NVIDIA driver of version **570 or
 > newer**. On older drivers the app detects this at startup and falls back

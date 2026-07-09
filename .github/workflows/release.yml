@@ -52,8 +52,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # CPU-only build (smaller) and the CUDA build (bundles the cuBLAS
-          # runtime wheel), matching the two zips the README documents.
+          # CPU-only build (smaller) and the CUDA build (bundles the cuBLAS +
+          # cuDNN runtime wheels), matching the two zips the README documents.
           - extras: dev
             zip: VRCC-windows-x64
           - extras: dev,cuda
@@ -69,6 +69,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[${{ matrix.extras }}]"
+      - name: Overlay onnxruntime-gpu (CUDA zip only)
+        # onnxruntime-gpu shares the `onnxruntime` import name with the CPU
+        # wheel faster-whisper depends on, so it must be installed LAST, as
+        # its own step, for its CUDA-enabled binaries to win the file overlap
+        # deterministically. Safe here because this env is frozen into the
+        # zip right after and never upgraded. Gives Parakeet/Canary GPU
+        # captions; CTranslate2 (whisper models) has its own CUDA path.
+        if: matrix.zip == 'VRCC-cuda-windows-x64'
+        run: python -m pip install "onnxruntime-gpu>=1.21,<2"
       - name: Build the one-folder app
         # Same invocation the README documents; produces dist/VRCC/VRCC.exe.
         run: pyinstaller packaging/vrcc.spec --noconfirm --distpath dist

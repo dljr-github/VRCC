@@ -15,8 +15,9 @@ Notes:
   ``vrcc.audio.vad`` loads at runtime.
 - ``collect_dynamic_libs("ctranslate2")`` bundles ctranslate2.dll and the
   oneDNN/OpenMP runtimes next to the extension module.
-- ``collect_dynamic_libs("nvidia.cublas")`` is best-effort: the CUDA wheel
-  is an optional extra (``pip install -e .[cuda]``); when it is absent the
+- ``collect_dynamic_libs`` for the ``nvidia.*`` wheels is best-effort: the
+  CUDA wheels (cuBLAS for CTranslate2, cuDNN for onnxruntime's CUDA provider)
+  come from an optional extra (``pip install -e .[cuda]``); when absent the
   build is CPU-only and ``vrcc.core.hardware`` falls back gracefully.
 """
 
@@ -43,10 +44,15 @@ datas += [
     for path in glob.glob(os.path.join(REPO_ROOT, "vrcc", "i18n", "*.json"))
 ]
 binaries = collect_dynamic_libs("ctranslate2")
-try:
-    binaries += collect_dynamic_libs("nvidia.cublas")
-except Exception:
-    pass  # CUDA extra not installed; CPU-only build.
+# onnxruntime's own DLLs -- in the CUDA build this includes the CUDA execution
+# provider libraries from the onnxruntime-gpu overlay (see release.yml), which
+# Parakeet/Canary use for GPU captions.
+binaries += collect_dynamic_libs("onnxruntime")
+for cuda_pkg in ("nvidia.cublas", "nvidia.cudnn"):
+    try:
+        binaries += collect_dynamic_libs(cuda_pkg)
+    except Exception:
+        pass  # CUDA extra not installed; CPU-only build.
 
 hiddenimports = [
     # Imported lazily (inside functions) by vrcc.osc.*; keep them explicit

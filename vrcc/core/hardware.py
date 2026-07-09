@@ -74,20 +74,39 @@ def _pynvml():
 def setup_cuda_dlls() -> bool:
     """On Windows, add each installed `nvidia-*` wheel's `bin` (DLL) dir to the
     process DLL search path so CTranslate2 finds the CUDA runtime without a
-    system-wide install. Returns whether any dir was added; no-op (False) off
-    Windows or without the `nvidia` package. Never raises.
+    system-wide install, then have onnxruntime preload the CUDA/cuDNN DLLs it
+    needs (its execution provider resolves them at session-build time, after
+    this). Returns whether any dir was added; no-op (False) off Windows or
+    without the `nvidia` package. Never raises.
     """
     if sys.platform != "win32":
         return False
 
+    added = False
     try:
-        return _add_nvidia_dll_dirs()
+        added = _add_nvidia_dll_dirs()
     except Exception:
         logger.debug(
             "setup_cuda_dlls failed; continuing without added DLL dirs",
             exc_info=True,
         )
-        return False
+    _preload_onnxruntime_cuda_dlls()
+    return added
+
+
+def _preload_onnxruntime_cuda_dlls() -> None:
+    """Best-effort ``onnxruntime.preload_dlls()`` (ORT >= 1.21): loads the
+    CUDA/cuDNN DLLs from the installed nvidia-* wheels into the process so the
+    CUDA execution provider (Parakeet/Canary on GPU) can build sessions in the
+    packaged app. A no-op on older or CPU-only onnxruntime builds."""
+    try:
+        import onnxruntime
+
+        preload = getattr(onnxruntime, "preload_dlls", None)
+        if preload is not None:
+            preload()
+    except Exception:
+        logger.debug("onnxruntime.preload_dlls failed; continuing", exc_info=True)
 
 
 def _add_nvidia_dll_dirs() -> bool:

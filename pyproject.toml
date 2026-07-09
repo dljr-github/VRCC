@@ -32,7 +32,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cuda = ["nvidia-cublas-cu12>=12.8,<13"]
+# GPU captions for the onnx-asr models additionally need onnxruntime-gpu,
+# which shares the `onnxruntime` import name with the CPU wheel that
+# faster-whisper depends on -- pip's install order within one resolve is
+# undefined, so it CANNOT be listed here. Install it as a second, final step
+# (see README / release.yml) so its CUDA-enabled binaries win the overlap:
+#     pip install -e .[cuda]
+#     pip install "onnxruntime-gpu>=1.21,<2"
+cuda = [
+    "nvidia-cublas-cu12>=12.8,<13",
+    # cuDNN 9 runtime for onnxruntime's CUDA execution provider (Parakeet /
+    # Canary on GPU). hardware.setup_cuda_dlls() puts its DLLs on the search
+    # path like the cuBLAS wheel's.
+    "nvidia-cudnn-cu12>=9,<10",
+]
 dev = ["pytest>=8.0", "pyinstaller>=6.10"]
 
 [project.scripts]
