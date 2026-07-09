@@ -86,16 +86,28 @@ def match_locale(name: str | None) -> str | None:
     return None
 
 
-def resolve_ui_language(configured: str, system_locale: str | None = None) -> str:
+def resolve_ui_language(
+    configured: str, system_locale: str | list[str] | None = None
+) -> str:
     """Turn the ``gui.ui_language`` config value plus the OS locale into a
     supported code. ``"auto"`` (or anything unrecognized) follows the system
-    locale; English when that isn't supported either."""
+    setting; English when that isn't supported either.
+
+    ``system_locale`` may be a single locale name or the OS's ordered
+    display-language preference list (``QLocale.system().uiLanguages()``);
+    the first supported entry wins, so a user whose preferences are
+    ["gd-GB", "fr-FR"] gets French rather than English."""
     if configured != "auto":
         matched = match_locale(configured)
         if matched is not None:
             return matched
         logger.warning("gui.ui_language %r is not a supported UI language; using auto", configured)
-    return match_locale(system_locale) or "en"
+    candidates = [system_locale] if isinstance(system_locale, str) else (system_locale or [])
+    for name in candidates:
+        matched = match_locale(name)
+        if matched is not None:
+            return matched
+    return "en"
 
 
 def _load_catalog(code: str) -> dict[str, str]:

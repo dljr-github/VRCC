@@ -78,6 +78,22 @@ def test_resolve_unknown_setting_degrades_to_auto():
     assert resolve_ui_language("klingon", None) == "en"
 
 
+def test_resolve_auto_walks_display_language_preference_in_order():
+    # QLocale.system().uiLanguages() shapes: BCP-47, ordered by preference.
+    # The first SUPPORTED entry wins — an unsupported first choice must fall
+    # through to the next preference, not to English.
+    assert resolve_ui_language("auto", ["gd-GB", "fr-FR", "en-US"]) == "fr"
+    assert resolve_ui_language("auto", ["ja-JP", "ja", "en-US"]) == "ja"
+    assert resolve_ui_language("auto", ["en-US", "ja-JP"]) == "en"
+    # Script-qualified Chinese as Windows/Qt report it.
+    assert resolve_ui_language("auto", ["zh-Hans-CN", "zh-CN"]) == "zh-Hans"
+    assert resolve_ui_language("auto", ["zh-Hant-TW", "zh-TW"]) == "zh-Hant"
+    assert resolve_ui_language("auto", []) == "en"
+    assert resolve_ui_language("auto", ["C", "POSIX"]) == "en"
+    # An explicit setting still beats the whole preference list.
+    assert resolve_ui_language("ko", ["ja-JP", "en-US"]) == "ko"
+
+
 # -- tr() semantics ----------------------------------------------------------
 
 

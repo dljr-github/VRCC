@@ -28,7 +28,13 @@ def apply_ui_language(app, configured: str) -> str:
 
     from vrcc.i18n import resolve_ui_language, set_language
 
-    code = resolve_ui_language(configured, QLocale.system().name())
+    system = QLocale.system()
+    # uiLanguages() is the user's ordered DISPLAY-language preference (what
+    # Windows calls the display language); name() is the regional-format
+    # locale, which can legitimately differ — a Japanese display language
+    # with English (US) number/date formats must still get a Japanese UI.
+    preferred = list(system.uiLanguages()) or [system.name()]
+    code = resolve_ui_language(configured, preferred)
     set_language(code)
     logger.info("UI language: %s", code)
     install_qt_translations(app, code)
