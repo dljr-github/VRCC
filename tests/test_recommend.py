@@ -245,6 +245,88 @@ def test_recommended_profile_stays_silent_when_unmeasured_but_in_budget(monkeypa
     assert recommend.recommended_profile("small", "cuda") is None
 
 
+# reset_to_recommended(): restore what the benchmarks have an opinion about.
+
+
+def _cfg_with_personal_choices():
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    cfg.stt.model = "tiny"
+    cfg.stt.device = "cuda"
+    cfg.stt.compute_type = "float32"
+    cfg.stt.cpu_threads = 7
+    cfg.translate.device = "cuda"
+    cfg.translate.intra_threads = 5
+    # Personal choices the reset must not touch.
+    cfg.stt.source_language = "German"
+    cfg.translate.targets = ["Japanese", "French"]
+    cfg.audio.device = "Some USB Mic"
+    cfg.osc.port = 9999
+    cfg.gui.theme = "light"
+    cfg.gui.ui_language = "ja"
+    return cfg
+
+
+def test_reset_to_recommended_restores_engine_fields_and_picks_models(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+
+    summary = recommend.reset_to_recommended(cfg)
+
+    assert cfg.stt.device == "auto" and cfg.stt.compute_type == "auto"
+    assert cfg.stt.cpu_threads == 0 and cfg.stt.num_workers == 1
+    assert cfg.translate.device == "auto" and cfg.translate.intra_threads == 0
+    # German is inside canary's set, and on CPU it leads the ranking.
+    assert cfg.stt.model == "canary-1b-v2"
+    assert summary["stt_model"] == "canary-1b-v2"
+    # canary decodes greedily, so it gets no profile advice: Speed stands.
+    assert cfg.gui.profile == "latency"
+
+
+def test_reset_to_recommended_leaves_personal_choices_alone(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+
+    recommend.reset_to_recommended(cfg)
+
+    assert cfg.stt.source_language == "German"
+    assert cfg.translate.targets == ["Japanese", "French"]
+    assert cfg.audio.device == "Some USB Mic"
+    assert cfg.osc.port == 9999
+    assert cfg.gui.theme == "light"
+    assert cfg.gui.ui_language == "ja"
+
+
+def test_reset_to_recommended_prefers_a_downloaded_model(monkeypatch):
+    # The ranking would pick canary for German on CPU, but only small is on
+    # disk: resetting must not leave the app unable to caption.
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+    dm = _FakeDM(whisper=["small"], mt=["nllb-600M-int8"])
+
+    recommend.reset_to_recommended(cfg, dm)
+
+    assert cfg.stt.model == "small"
+    assert cfg.translate.model == "nllb-600M-int8"
+
+
+def test_reset_to_recommended_applies_the_advised_profile(monkeypatch):
+    # base on CPU is the case where Quality earns its keep, so a reset that
+    # lands on it must also switch the mode.
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+    cfg.stt.source_language = "Japanese"  # no NeMo model covers it
+    dm = _FakeDM(whisper=["base"], mt=[])
+
+    summary = recommend.reset_to_recommended(cfg, dm)
+
+    assert cfg.stt.model == "base"
+    assert summary["profile"] == "quality"
+    assert cfg.gui.profile == "quality"
+    assert cfg.stt.beam_size == 5  # the profile bundle actually applied
+
+
 def test_best_downloaded_language_prefers_covering_specialist():
     dm = _FakeDM(whisper={"parakeet-tdt-0.6b-v3", "small"})
     # language-blind: small ranks above the restricted parakeet

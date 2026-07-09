@@ -306,3 +306,67 @@ def best_downloaded(
             None,
         )
     return whisper, mt
+
+
+# Fields reset_to_recommended() restores, with the value it restores them to.
+# Anything absent is a personal choice the recommender has no opinion about
+# (target languages, spoken language, microphone, OSC address, appearance).
+_RECOMMENDED_ENGINE_FIELDS = {
+    "stt": {"device": "auto", "device_index": 0, "compute_type": "auto",
+            "cpu_threads": 0, "num_workers": 1},
+    "translate": {"device": "auto", "device_index": 0, "compute_type": "auto",
+                  "inter_threads": 1, "intra_threads": 0, "max_queued_batches": 0},
+}
+
+
+def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
+    """Restore every setting the benchmarks have an opinion about, in place.
+
+    Picks the voice and translation models for this machine's tier and the
+    configured spoken language, preferring ones already downloaded so the app
+    can still caption afterwards; returns the device/compute/thread fields to
+    automatic; and applies the performance mode :func:`recommended_profile`
+    advises for the chosen model. Personal choices are left alone: target
+    languages, spoken language, microphone, OSC address, theme and interface
+    language. Returns the values it settled on, for the caller to show.
+    """
+    from vrcc.core.config import apply_profile
+
+    for section_name, fields in _RECOMMENDED_ENGINE_FIELDS.items():
+        section = getattr(cfg, section_name)
+        for field, value in fields.items():
+            setattr(section, field, value)
+
+    source = cfg.stt.source_language
+    language = None if source == "auto" else _whisper_code(source)
+    choice = default_device_choice()
+    tier = "cpu" if choice == "cpu" else detect_tier()
+    if tier == "cpu" and choice != "cpu":
+        tier = "gpu_low"
+
+    whisper, mt = preset_for_choice(choice, tier=tier, language=language)
+    if dm is not None:
+        # A recommended model that is not downloaded would leave the app
+        # unable to caption until it is; prefer what is already on disk.
+        have_whisper, have_mt = best_downloaded(
+            dm, translate=cfg.translate.enabled, tier=tier, language=language
+        )
+        whisper = have_whisper or whisper
+        mt = have_mt or mt
+
+    cfg.stt.model = whisper
+    if mt is not None:
+        cfg.translate.model = mt
+
+    device = "cpu" if choice == "cpu" else "cuda"
+    apply_profile(cfg, recommended_profile(whisper, device) or "latency")
+    return {"stt_model": whisper, "mt_model": mt, "profile": cfg.gui.profile}
+
+
+def _whisper_code(display_name: str) -> str | None:
+    """The Whisper code for a caption-language display name, or ``None`` when
+    the registry does not know it (a hand-edited config)."""
+    from vrcc.core.languages import LANGUAGES
+
+    lang = LANGUAGES.get(display_name)
+    return lang.whisper if lang is not None else None
