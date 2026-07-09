@@ -184,6 +184,24 @@ class TestGracefulDegradation:
         monkeypatch.setattr(onnxruntime, "preload_dlls", boom, raising=False)
         hardware._preload_onnxruntime_cuda_dlls()  # must not raise
 
+    def test_preload_onnxruntime_silences_preload_chatter(self, monkeypatch, capsys):
+        # preload_dlls() prints "Failed to load ..." lines for CUDA DLLs the
+        # nvidia-* wheels don't ship; those must land in the debug log, never
+        # on the real stdout/stderr (None in the windowed exe).
+        import sys
+
+        import onnxruntime
+
+        def chatty():
+            print("Failed to load cufft64_11.dll ...")
+            print("Failed to load cudart64_12.dll ...", file=sys.stderr)
+
+        monkeypatch.setattr(onnxruntime, "preload_dlls", chatty, raising=False)
+        hardware._preload_onnxruntime_cuda_dlls()  # must not raise
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
     def test_preload_onnxruntime_noop_without_preload_dlls(self, monkeypatch):
         # Older onnxruntime (< 1.21) has no preload_dlls attribute.
         import onnxruntime

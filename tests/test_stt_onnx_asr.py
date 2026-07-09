@@ -40,14 +40,32 @@ class _FakeModel:
         return self.text
 
 
-class _RecordingFactory:
-    """Fake ``onnx_asr.load_model`` recording every call."""
+class _FakeSession:
+    """Quacks like an onnxruntime InferenceSession for provider inspection."""
 
-    def __init__(self, text: str = "hello there", fail_at=()) -> None:
+    def __init__(self, providers: list[str]) -> None:
+        self._providers = providers
+
+    def get_providers(self) -> list[str]:
+        return list(self._providers)
+
+
+class _RecordingFactory:
+    """Fake ``onnx_asr.load_model`` recording every call.
+
+    ``session_providers`` mimics onnx-asr's adapter nesting: each built model
+    gets an ``asr`` attribute holding a session that reports those providers
+    (what onnxruntime *actually* attached, not what was requested).
+    """
+
+    def __init__(
+        self, text: str = "hello there", fail_at=(), session_providers=None
+    ) -> None:
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeModel] = []
         self._text = text
         self._fail_at = set(fail_at)
+        self._session_providers = session_providers
 
     def __call__(self, model, path, *, quantization, providers):
         idx = len(self.calls)
@@ -59,6 +77,10 @@ class _RecordingFactory:
         if idx in self._fail_at:
             raise RuntimeError("CUDA provider unavailable")
         m = _FakeModel(self._text)
+        if self._session_providers is not None:
+            m.asr = SimpleNamespace(
+                _encoder=_FakeSession(self._session_providers)
+            )
         self.built.append(m)
         return m
 
@@ -152,6 +174,37 @@ def test_load_cuda_without_provider_runs_on_cpu(model_dir, monkeypatch):
     assert events[-1].detail == "cpu:int8"
 
 
+def test_load_auto_device_prefers_cpu_over_available_cuda(model_dir, monkeypatch):
+    # Device "auto" deliberately builds on CPU even when CUDA resolves: the
+    # int8 exports measured no faster on CUDA than CPU and a CUDA session
+    # takes VRAM from VRChat. No fallback_cpu event -- this is a choice, not
+    # a failure. An explicit "cuda" config still gets CUDA.
+    import onnxruntime
+
+    from vrcc.core import hardware
+
+    monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+    monkeypatch.setattr(
+        onnxruntime,
+        "get_available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    bus = EventBus()
+    events = _collect(bus)
+    factory = _RecordingFactory()
+    eng = OnnxAsrEngine(
+        _cfg(device="auto"), PARAKEET, model_dir, bus, model_factory=factory
+    )
+
+    eng.load()
+
+    assert factory.calls[0].providers == ["CPUExecutionProvider"]
+    assert [(e.engine, e.state) for e in events] == [
+        ("stt", "loading"), ("stt", "ready")
+    ]
+    assert events[-1].detail == "cpu:int8"
+
+
 def test_load_cuda_session_failure_falls_back_to_cpu(model_dir, monkeypatch):
     import onnxruntime
 
@@ -180,6 +233,59 @@ def test_load_cuda_session_failure_falls_back_to_cpu(model_dir, monkeypatch):
         ("stt", "loading"), ("stt", "fallback_cpu"), ("stt", "ready")
     ]
     assert events[-1].detail == "cpu:int8"
+
+
+def test_load_cuda_silent_cpu_sessions_reports_cpu(model_dir, monkeypatch):
+    # onnxruntime does NOT raise when the CUDA provider fails to initialize
+    # (e.g. the onnxruntime-gpu build wants CUDA runtime DLLs that aren't
+    # installed): it logs and quietly builds CPU-only sessions. The engine
+    # must inspect the sessions and report cpu, not the requested device.
+    import onnxruntime
+
+    monkeypatch.setattr(
+        onnxruntime,
+        "get_available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    bus = EventBus()
+    events = _collect(bus)
+    factory = _RecordingFactory(session_providers=["CPUExecutionProvider"])
+    eng = OnnxAsrEngine(
+        _cfg(device="cuda"), PARAKEET, model_dir, bus, model_factory=factory
+    )
+
+    eng.load()
+
+    assert len(factory.calls) == 1  # no rebuild: the CPU sessions are kept
+    assert [(e.engine, e.state) for e in events] == [
+        ("stt", "loading"), ("stt", "fallback_cpu"), ("stt", "ready")
+    ]
+    assert events[-1].detail == "cpu:int8"
+
+
+def test_load_cuda_sessions_with_cuda_provider_stay_cuda(model_dir, monkeypatch):
+    import onnxruntime
+
+    monkeypatch.setattr(
+        onnxruntime,
+        "get_available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    bus = EventBus()
+    events = _collect(bus)
+    factory = _RecordingFactory(
+        session_providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+    )
+    eng = OnnxAsrEngine(
+        _cfg(device="cuda"), PARAKEET, model_dir, bus, model_factory=factory
+    )
+
+    eng.load()
+
+    assert [(e.engine, e.state) for e in events] == [
+        ("stt", "loading"), ("stt", "ready")
+    ]
+    assert events[-1].detail == "cuda:int8"
 
 
 def test_load_cpu_build_failure_publishes_failed_and_raises(model_dir):

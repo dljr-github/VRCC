@@ -3,7 +3,11 @@
 Same duck-typed contract as :class:`vrcc.stt.engine.SttEngine` (load /
 warm_up / unload / transcribe), turning mono float32 16 kHz audio into an
 :class:`SttResult`. The ``onnx_asr`` package is imported lazily in
-:meth:`load`; a failed CUDA session build falls back to CPU once. These
+:meth:`load`; a failed CUDA session build falls back to CPU once. Device
+``auto`` runs these models on CPU even when CUDA is available: the int8
+exports measured no faster on CUDA than CPU (see
+benchmarks/rtx-5090-ryzen-9950x3d.json) and a CUDA session takes VRAM from
+VRChat; an explicit ``cuda`` config still builds CUDA sessions. These
 models report no per-segment confidence or no-speech probability, so results
 carry neutral gate values (0.0) and the VAD is the effective quality gate.
 Zero Qt.
@@ -71,9 +75,16 @@ class OnnxAsrEngine:
         """Build the onnx-asr model and announce readiness.
 
         Publishes ``loading`` then ``ready`` (``detail="<device>:<quant>"``).
+        A resolved ``auto`` device builds on CPU even when it resolves to
+        CUDA (deliberate, so no ``fallback_cpu`` event); only an explicit
+        ``cuda`` config builds a CUDA session.
         Any error building a CUDA session triggers one ``fallback_cpu`` +
-        rebuild on CPU (the bundled onnxruntime is usually CPU-only); any
-        other error publishes ``failed`` and re-raises.
+        rebuild on CPU (the bundled onnxruntime is usually CPU-only); a CUDA
+        provider that fails to *initialize* (e.g. missing CUDA runtime DLLs)
+        doesn't raise -- onnxruntime quietly builds CPU sessions -- so the
+        sessions are inspected and the ``ready`` detail reports the device
+        they actually run on. Any other error publishes ``failed`` and
+        re-raises.
         """
         self._bus.publish(EngineStateChanged("stt", "loading"))
         try:
@@ -85,6 +96,13 @@ class OnnxAsrEngine:
             device, index, _compute = resolve(
                 self._cfg.device, self._cfg.device_index, self._cfg.compute_type
             )
+            if device == "cuda" and self._cfg.device == "auto":
+                # Deliberate, not a fallback: the int8 exports measured no
+                # faster on CUDA than CPU (see
+                # benchmarks/rtx-5090-ryzen-9950x3d.json) and a CUDA session
+                # takes VRAM from VRChat. An explicit "cuda" config still
+                # gets CUDA.
+                device = "cpu"
             providers = self._providers(device, index)
             try:
                 self._model = self._build_model(providers)
@@ -99,6 +117,9 @@ class OnnxAsrEngine:
                 self._bus.publish(EngineStateChanged("stt", "fallback_cpu", str(exc)))
                 self._model = self._build_model(_CPU_PROVIDERS)
                 self._device = "cpu"
+            else:
+                if self._device == "cuda":
+                    self._check_cuda_sessions()
 
             self._bus.publish(
                 EngineStateChanged(
@@ -158,6 +179,20 @@ class OnnxAsrEngine:
 
     # -- internals -------------------------------------------------------------
 
+    def _check_cuda_sessions(self) -> None:
+        """Downgrade ``_device`` to cpu when no built session actually got the
+        CUDA provider. onnxruntime doesn't raise when a requested provider
+        fails to initialize (e.g. the onnxruntime-gpu build wants CUDA runtime
+        DLLs the install doesn't ship) -- it logs and builds CPU sessions, so
+        the requested device can't be trusted."""
+        session_providers = _session_providers(self._model)
+        if not session_providers or "CUDAExecutionProvider" in session_providers:
+            return
+        detail = "onnxruntime built CPU-only sessions (CUDA provider failed to initialize)"
+        logger.warning("%s: %s", self._spec.id, detail)
+        self._bus.publish(EngineStateChanged("stt", "fallback_cpu", detail))
+        self._device = "cpu"
+
     def _recognize_kwargs(self) -> dict:
         """Per-utterance ``recognize()`` options: AED models take the
         configured source language (their prompt defaults to English), when it
@@ -203,3 +238,24 @@ class OnnxAsrEngine:
             quantization=self._spec.quantization,
             providers=list(providers),
         )
+
+
+def _session_providers(obj, depth: int = 3) -> set[str]:
+    """Union of the execution providers on every onnxruntime session reachable
+    from ``obj``'s attributes. onnx-asr wraps the model in adapters and keeps
+    sessions in private attrs that vary by model class, so this duck-walks
+    ``vars()`` a few levels for anything with ``get_providers()``. Empty when
+    nothing session-like is found (e.g. test fakes)."""
+    providers: set[str] = set()
+    if depth <= 0 or not hasattr(obj, "__dict__"):
+        return providers
+    for value in vars(obj).values():
+        get_providers = getattr(value, "get_providers", None)
+        if callable(get_providers):
+            try:
+                providers.update(get_providers())
+            except Exception:  # noqa: BLE001 -- session-like fakes may misbehave
+                continue
+        else:
+            providers.update(_session_providers(value, depth - 1))
+    return providers

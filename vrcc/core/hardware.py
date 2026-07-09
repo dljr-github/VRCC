@@ -7,7 +7,9 @@ optional `pynvml` (functions degrade rather than raise when it's absent).
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import logging
 import os
 import sys
@@ -98,13 +100,26 @@ def _preload_onnxruntime_cuda_dlls() -> None:
     """Best-effort ``onnxruntime.preload_dlls()`` (ORT >= 1.21): loads the
     CUDA/cuDNN DLLs from the installed nvidia-* wheels into the process so the
     CUDA execution provider (Parakeet/Canary on GPU) can build sessions in the
-    packaged app. A no-op on older or CPU-only onnxruntime builds."""
+    packaged app. A no-op on older or CPU-only onnxruntime builds. Anything
+    the preload prints is captured and demoted to a debug log entry."""
     try:
         import onnxruntime
 
         preload = getattr(onnxruntime, "preload_dlls", None)
-        if preload is not None:
+        if preload is None:
+            return
+        # preload_dlls() prints "Failed to load ..." per CUDA DLL the wheels
+        # don't ship; VRCC bundles only cuBLAS + cuDNN, so those misses are
+        # expected and belong in the debug log, not on the console. Fresh
+        # StringIO buffers (rather than wrapping the live streams) also keep
+        # the preload's writes safe in the windowed exe, where sys.stdout and
+        # sys.stderr are None.
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             preload()
+        captured = (out.getvalue() + err.getvalue()).strip()
+        if captured:
+            logger.debug("onnxruntime.preload_dlls output:\n%s", captured)
     except Exception:
         logger.debug("onnxruntime.preload_dlls failed; continuing", exc_info=True)
 

@@ -38,7 +38,10 @@ dependencies = [
 # undefined, so it CANNOT be listed here. Install it as a second, final step
 # (see README / release.yml) so its CUDA-enabled binaries win the overlap:
 #     pip install -e .[cuda]
-#     pip install "onnxruntime-gpu>=1.21,<2"
+#     pip install "onnxruntime-gpu>=1.21,<1.23"
+# <1.23: onnxruntime-gpu 1.23+ is built against CUDA 13, but this extra ships
+# the CUDA 12 runtime wheels (CTranslate2 needs them). With a CUDA 13 build
+# the provider fails to initialize and everything silently runs on CPU.
 cuda = [
     "nvidia-cublas-cu12>=12.8,<13",
     # cuDNN 9 runtime for onnxruntime's CUDA execution provider (Parakeet /
@@ -52,6 +55,13 @@ dev = [
     # Builds the synthetic Parakeet/Canary exports for the real-runtime STT
     # tests (tests/onnx_asr_fakes.py); those tests skip without it.
     "onnx>=1.15",
+]
+# tools/bench_stt.py: WER scoring + reading the LibriSpeech FLACs. See
+# benchmarks/README.md for contributing benchmark numbers.
+bench = [
+    "jiwer>=3.0",
+    "whisper-normalizer>=0.1",
+    "soundfile>=0.12",
 ]
 
 [project.scripts]
