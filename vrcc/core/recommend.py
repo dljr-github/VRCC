@@ -220,7 +220,12 @@ def preset_for_choice(
     maps to the detected (or given) GPU tier, with a CPU-only tier falling
     back to the smallest GPU preset so the choice still gets GPU-sized models.
     ``language`` (a Whisper code) reranks the whisper half for a known spoken
-    language; the MT half is language-blind.
+    language; the MT half is language-blind. A model that cannot detect the
+    spoken language (canary-1b-v2) can still be chosen here: it is only
+    reached with a concrete ``language``, which the caller has already written
+    to the config as the spoken language, so the decoder prompt is pinned to
+    the same language the ranking assumed. A ``None`` language falls back to
+    the language-blind presets, where such models never lead.
     """
     if device_choice == "cpu":
         resolved = "cpu"

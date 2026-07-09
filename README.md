@@ -208,8 +208,8 @@ On CPU it depends on the language you speak:
   `parakeet-tdt-0.6b-v3` for speed. Both beat the `small` default on
   accuracy *and* latency, and it is not close. Canary reaches 1.8% at
   0.32 s, better than any whisper model at any speed here; Parakeet gives
-  up half a point for a third of the wait. Canary cannot detect the
-  spoken language, so set it explicitly.
+  up half a point for a third of the wait, and detects the spoken language
+  on its own where Canary must be told it.
 - Japanese, Korean, Chinese, or anything else outside that set: stay on
   `small`. Every whisper model that beats it needs seconds per caption on
   a CPU.
@@ -223,9 +223,11 @@ for you when the device is left on Auto.
 The distil models lost to `large-v3-turbo` on GPU and to the NeMo pair and
 `small` on CPU in these runs, so there's little reason to pick them.
 
-The first-run wizard picks for your hardware and your spoken language, so
-on a CPU it now offers Canary or Parakeet when you speak a language they
-cover, and `small` when you do not.
+The first-run wizard picks for your hardware and your spoken language,
+which it takes from your Windows display language. On a CPU that means
+Canary or Parakeet when you speak a language they cover, and `small` when
+you do not. Set the spoken language to Auto and it stays with the whisper
+models, since Canary cannot detect a language for itself.
 
 ## Where things are stored
 

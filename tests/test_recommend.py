@@ -198,6 +198,13 @@ def test_preset_for_choice_language_reranks_whisper_half_only():
     )
 
 
+def test_preset_without_a_language_never_leads_with_a_non_detecting_model():
+    # No spoken language to pin canary's decoder prompt to, so the
+    # language-blind presets must not name it.
+    for tier in _TIERS:
+        assert WHISPER_MODELS[recommend.PRESETS[tier][0]].auto_language
+
+
 # Per-model performance mode, from the beam-1 vs beam-5 runs (BEAM_BENCH).
 
 
