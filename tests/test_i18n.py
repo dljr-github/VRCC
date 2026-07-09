@@ -201,7 +201,7 @@ def _ja_catalog() -> dict[str, str]:
     return json.loads((_I18N_DIR / "ja.json").read_text(encoding="utf-8"))
 
 
-def test_main_window_builds_in_japanese():
+def test_main_window_builds_in_japanese(tmp_path):
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
 
@@ -220,7 +220,9 @@ def test_main_window_builds_in_japanese():
         # which is exactly what this test should prove — import first:
         from vrcc.gui.main_window import MainWindow
 
-        store = ConfigStore(Path(os.devnull))
+        # A fresh path (not os.devnull): the store's debounced save writes
+        # <path>.json.tmp, and "nul.json.tmp" would land in the repo root.
+        store = ConfigStore(tmp_path / "config.json")
         bridge = BusBridge(EventBus())
 
         class _Pipeline:

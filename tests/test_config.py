@@ -58,6 +58,29 @@ def test_defaults_round_trip_through_save_and_load(tmp_path):
     assert loaded.load_warnings == []
 
 
+def test_missing_on_load_flags_only_a_fresh_install(tmp_path):
+    path = tmp_path / "config.json"
+    store = ConfigStore(path)
+    store.load()
+    assert store.missing_on_load is True
+
+    store.save_now()
+    reloaded = ConfigStore(path)
+    reloaded.load()
+    assert reloaded.missing_on_load is False
+
+
+def test_missing_on_load_false_for_malformed_file(tmp_path):
+    # A corrupt file is an EXISTING config: it loads as defaults, but the
+    # first-launch defaulting gated on this flag must never treat it as fresh.
+    path = tmp_path / "config.json"
+    path.write_text("{not json", encoding="utf-8")
+    store = ConfigStore(path)
+    store.load()
+    assert store.missing_on_load is False
+    assert store.load_warnings
+
+
 def test_write_failure_is_swallowed_not_raised(tmp_path, monkeypatch):
     """Regression: a debounced save runs on a daemon Timer thread; a raise
     there dies to stderr (os.devnull in the windowed exe), i.e. silently, and
