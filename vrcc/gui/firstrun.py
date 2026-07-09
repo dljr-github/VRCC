@@ -26,7 +26,7 @@ from vrcc.core import recommend
 from vrcc.core.config import ConfigStore
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.bridge import BusBridge
-from vrcc.gui.model_labels import fmt_size, mt_display_name
+from vrcc.gui.model_labels import fmt_size, mt_display_name, whisper_display_name
 from vrcc.gui.models_dialog import ModelsDialog
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.gui.widgets import SegmentedControl, arrow_svg, icon_label
@@ -268,7 +268,8 @@ class FirstRunWizard(QDialog):
         lines = [
             tr("Detected: {tier}", tier=tier_label), "",
             tr("Speech: {label} ({size})",
-               label=tr(whisper.label), size=fmt_size(whisper.size_mb)),
+               label=whisper_display_name(self.recommended_whisper),
+               size=fmt_size(whisper.size_mb)),
         ]
         if self._translation_enabled():
             mt = MT_MODELS[self.recommended_mt]

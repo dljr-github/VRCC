@@ -11,10 +11,17 @@ their literals must be marked ``tr_noop`` where they are defined.
 from __future__ import annotations
 
 import ast
-import string
+import re
 from pathlib import Path
 
 _MARKER_FUNCS = {"tr", "tr_noop"}
+
+# One str.format replacement field, verbatim contents between single braces
+# (``{seconds:.1f}`` -> ``seconds:.1f``). Escaped ``{{``/``}}`` are stripped
+# first so they don't match. Qt %-tokens (e.g. QProgressBar's ``%p%``) are a
+# separate placeholder syntax the same UI text uses, captured alongside.
+_FIELD_RE = re.compile(r"\{([^{}]*)\}")
+_QT_TOKEN_RE = re.compile(r"%[A-Za-z]%|%[0-9]+")
 
 
 def extract_from_source(source: str, filename: str = "<string>") -> list[tuple[str, int]]:
@@ -55,14 +62,16 @@ def extract_source_strings(root: Path | None = None) -> dict[str, list[str]]:
     return locations
 
 
-def placeholder_names(text: str) -> set[str]:
-    """The ``str.format`` field names in ``text`` (``"{pct}%"`` -> ``{"pct"}``).
+def placeholder_tokens(text: str) -> list[str]:
+    """The ordered multiset of placeholder tokens in ``text``: each
+    ``str.format`` field verbatim (name AND conversion/format spec, so
+    ``"{seconds:.1f}s"`` yields ``["seconds:.1f"]``) plus any Qt ``%``-token
+    like ``%p%``.
 
-    Raises ``ValueError`` on malformed format syntax, so a test can flag a
-    catalog entry whose braces were mangled in translation.
+    Comparing a translation's tokens against the source key's catches a
+    dropped/renamed placeholder, a lost ``:.1f`` precision spec, and a missing
+    ``%p%`` progress token. Never raises: a literal or unbalanced brace simply
+    contributes no field, matching ``tr()``'s own runtime tolerance.
     """
-    return {
-        field.split(".")[0].split("[")[0]
-        for _, field, _, _ in string.Formatter().parse(text)
-        if field is not None
-    }
+    stripped = text.replace("{{", "").replace("}}", "")
+    return sorted(_FIELD_RE.findall(stripped) + _QT_TOKEN_RE.findall(text))

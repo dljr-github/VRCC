@@ -65,6 +65,15 @@ _LOCALE_OVERRIDES = {
 _current_language = "en"
 _catalog: dict[str, str] = {}
 
+# Case-insensitive UI-language lookup, derived once from the module constant.
+_BY_LOWER = {code.lower(): code for code in UI_LANGUAGES}
+
+# Errors str.format may raise on a mangled placeholder: a missing named field
+# (KeyError), missing positional (IndexError), bad format spec (ValueError), or
+# a field whose attribute/subscript access is invalid for the given value
+# (AttributeError/TypeError). tr() catches all of them to honor "never raises".
+_FORMAT_ERRORS = (KeyError, IndexError, ValueError, AttributeError, TypeError)
+
 
 def match_locale(name: str | None) -> str | None:
     """Map a locale name ("ja_JP.UTF-8", "zh_TW", "pt") to a supported UI
@@ -74,12 +83,11 @@ def match_locale(name: str | None) -> str | None:
     norm = name.replace("_", "-").split(".")[0].strip().lower()
     if not norm:
         return None
-    by_lower = {code.lower(): code for code in UI_LANGUAGES}
     while norm:
         if norm in _LOCALE_OVERRIDES:
             return _LOCALE_OVERRIDES[norm]
-        if norm in by_lower:
-            return by_lower[norm]
+        if norm in _BY_LOWER:
+            return _BY_LOWER[norm]
         if "-" not in norm:
             break
         norm = norm.rsplit("-", 1)[0]
@@ -119,7 +127,10 @@ def _load_catalog(code: str) -> dict[str, str]:
     except FileNotFoundError:
         logger.warning("no catalog for UI language %r; falling back to English", code)
         return {}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+        # ValueError covers json.JSONDecodeError and a non-UTF-8 file's
+        # UnicodeDecodeError (both subclasses); a corrupt catalog must degrade
+        # to English, never crash startup.
         logger.warning("could not read catalog %s; falling back to English", path, exc_info=True)
         return {}
     if not isinstance(raw, dict):
@@ -156,7 +167,7 @@ def tr(text: str, **kwargs) -> str:
         return translated
     try:
         return translated.format(**kwargs)
-    except (KeyError, IndexError, ValueError):
+    except _FORMAT_ERRORS:
         if translated is not text:
             logger.warning(
                 "catalog entry for %r has broken placeholders in %r; using English",
@@ -165,7 +176,7 @@ def tr(text: str, **kwargs) -> str:
             )
             try:
                 return text.format(**kwargs)
-            except (KeyError, IndexError, ValueError):
+            except _FORMAT_ERRORS:
                 pass
         logger.warning("could not format %r with %r", text, sorted(kwargs))
         return translated

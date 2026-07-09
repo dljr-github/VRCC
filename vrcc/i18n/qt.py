@@ -14,8 +14,10 @@ logger = logging.getLogger("vrcc.i18n.qt")
 # the built-in dialog buttons snap back to English mid-session.
 _QT_TRANSLATORS: list = []
 
-# Our UI language codes vs the locale names Qt's bundled catalogs use.
-_QT_LOCALE_NAMES = {"zh-Hans": "zh_CN", "zh-Hant": "zh_TW", "pt-BR": "pt_BR"}
+# Our UI language codes vs the locale names Qt's bundled catalogs use. Only
+# genuine exceptions belong here; codes like "pt-BR" already yield "pt_BR" via
+# the default "-"->"_" transform below.
+_QT_LOCALE_NAMES = {"zh-Hans": "zh_CN", "zh-Hant": "zh_TW"}
 
 
 def apply_ui_language(app, configured: str) -> str:

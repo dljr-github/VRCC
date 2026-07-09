@@ -21,7 +21,7 @@ from vrcc.i18n import (
     tr,
     tr_noop,
 )
-from vrcc.i18n.extract import extract_source_strings, placeholder_names
+from vrcc.i18n.extract import extract_source_strings, placeholder_tokens
 
 _I18N_DIR = Path(i18n.__file__).resolve().parent
 _CATALOGS = sorted(_I18N_DIR.glob("*.json"))
@@ -103,26 +103,21 @@ def test_tr_is_identity_in_english():
     assert tr_noop("Marked") == "Marked"
 
 
-def test_set_language_translates_and_falls_back(tmp_path, monkeypatch):
-    # Route catalog loading at a temp dir so this test owns the content.
-    real = _I18N_DIR / "ja.json"
-    original = real.read_text(encoding="utf-8") if real.exists() else None
-    try:
-        real.write_text(
-            json.dumps({"Hello": "こんにちは", "Hi {name}": "やあ {mangled}"}),
-            encoding="utf-8",
-        )
-        set_language("ja")
-        assert tr("Hello") == "こんにちは"
-        # Untranslated strings fall back to the English source.
-        assert tr("Not in the catalog") == "Not in the catalog"
-        # Mangled placeholders in a translation fall back to formatted English.
-        assert tr("Hi {name}", name="X") == "Hi X"
-    finally:
-        if original is None:
-            real.unlink(missing_ok=True)
-        else:
-            real.write_text(original, encoding="utf-8")
+def test_set_language_translates_and_falls_back(monkeypatch):
+    # Stub the catalog loader so the test owns the content without touching the
+    # real, version-controlled ja.json (a mid-test crash or xdist parallelism
+    # would otherwise corrupt the shipped file for other tests).
+    monkeypatch.setattr(
+        i18n,
+        "_load_catalog",
+        lambda code: {"Hello": "こんにちは", "Hi {name}": "やあ {mangled}"},
+    )
+    set_language("ja")
+    assert tr("Hello") == "こんにちは"
+    # Untranslated strings fall back to the English source.
+    assert tr("Not in the catalog") == "Not in the catalog"
+    # Mangled placeholders in a translation fall back to formatted English.
+    assert tr("Hi {name}", name="X") == "Hi X"
 
 
 def test_unknown_language_degrades_to_english():
@@ -154,12 +149,30 @@ def test_catalog_matches_extracted_source_strings(path):
     assert not stale, f"{path.name} has keys no source string uses: {sorted(stale)[:10]}"
 
 
+def test_registry_labels_are_marked_for_translation():
+    # whisper_display_name()/firstrun render WhisperSpec.label via tr(), but the
+    # labels live in the Qt-free registry, so model_labels._WHISPER_LABEL_MARKERS
+    # mirrors them for the extractor. Guard that mirror: a label the extractor
+    # can't see never reaches a catalog and ships untranslated with green tests.
+    from vrcc.stt.registry import WHISPER_MODELS
+
+    source = set(extract_source_strings())
+    labels = {spec.label for spec in WHISPER_MODELS.values()}
+    missing = labels - source
+    assert not missing, (
+        "whisper labels not marked for translation (add to "
+        f"_WHISPER_LABEL_MARKERS in vrcc/gui/model_labels.py): {sorted(missing)}"
+    )
+
+
 @pytest.mark.parametrize("path", _CATALOGS, ids=lambda p: p.stem)
 def test_catalog_values_are_nonempty_with_intact_placeholders(path):
     catalog = json.loads(path.read_text(encoding="utf-8"))
     for key, value in catalog.items():
         assert isinstance(value, str) and value.strip(), f"{path.name}: empty value for {key!r}"
-        assert placeholder_names(value) == placeholder_names(key), (
+        # Tokens include the format spec ({seconds:.1f}) and Qt %-tokens (%p%),
+        # so a translation that drops a precision spec or a progress token fails.
+        assert placeholder_tokens(value) == placeholder_tokens(key), (
             f"{path.name}: placeholder mismatch for {key!r}: {value!r}"
         )
         # Inline markup (the caption log's explicit line break) must survive.
