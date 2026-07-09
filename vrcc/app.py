@@ -12,7 +12,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from vrcc.audio.devices import list_input_devices
 from vrcc.audio.segmenter import Segmenter
 from vrcc.audio.source import AudioSource, MicSource
 from vrcc.audio.vad import StreamingVad
@@ -20,10 +19,15 @@ from vrcc.core import hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, Paths, default_paths
 from vrcc.core.events import AppError
-from vrcc.core.languages import match_caption_language
+from vrcc.core.live_apply import LiveApply
 from vrcc.core.logs import setup_logging
 from vrcc.core.pipeline import Pipeline
 from vrcc.core.reloading import _FAILED, EngineLoader, _Reloader, _status_after_swap
+from vrcc.core.startup import (
+    default_source_language as _default_source_language,
+    models_ready as _models_ready,
+    resolve_audio_device as _resolve_audio_device,
+)
 from vrcc.download.manager import DownloadManager
 from vrcc.i18n import tr
 from vrcc.osc.chatbox import ChatboxSender
@@ -54,25 +58,6 @@ class EngineStack:
     mt: TranslateEngine | None
     chatbox: ChatboxSender
     mute: MuteSync | None
-
-
-def _resolve_audio_device(device_cfg: str) -> int | None:
-    """Turn ``audio.device`` config into a PortAudio device index (or ``None``).
-
-    ``"auto"`` -> ``None`` (system default); otherwise look the configured
-    device *name* up via :func:`list_input_devices`, falling back to ``None``
-    if absent.
-    """
-    if device_cfg == "auto":
-        return None
-    for index, name in list_input_devices():
-        if name == device_cfg:
-            return index
-    logger.warning(
-        "configured audio device %r not found; using the system default",
-        device_cfg,
-    )
-    return None
 
 
 def build_engine_stack(
@@ -158,35 +143,11 @@ def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
         bus.publish(
             AppError(
                 "MIC_OPEN_FAILED",
-                "Could not open the microphone — check Settings > Audio",
+                "Could not open the microphone. Check Settings > Audio",
                 detail=str(exc),
             )
         )
         return False
-
-
-def _default_source_language(cfg, locales: list[str]) -> None:
-    """Default ``stt.source_language`` to the first OS display language the
-    caption registry covers; an unmatched preference list keeps the "English"
-    default. Callers gate on ``ConfigStore.missing_on_load`` so an existing
-    config is never rewritten."""
-    for name in locales:
-        matched = match_caption_language(name)
-        if matched is not None:
-            cfg.stt.source_language = matched
-            return
-
-
-def _models_ready(cfg, dm: DownloadManager) -> bool:
-    """True if the configured STT model (and MT model, when translation is on)
-    are already downloaded -- i.e. the app can start without the wizard."""
-    if not dm.is_whisper_downloaded(cfg.stt.model):
-        return False
-    if cfg.translate.enabled:
-        spec = MT_MODELS.get(cfg.translate.model)
-        if spec is None or not dm.is_mt_downloaded(spec):
-            return False
-    return True
 
 
 def run(portable: bool = False, verbose: bool = False) -> int:
@@ -381,38 +342,82 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         it into the running pipeline without a restart."""
         reloader.request(kind, _target_for(kind))
 
+    def reload_engine(kind: str) -> None:
+        """Rebuild an engine for a device/compute/thread change that keeps the
+        same model id: forced so the reloader can't no-op on the unchanged id
+        (same hot-swap path as a model switch)."""
+        reloader.request(kind, _target_for(kind), force=True)
+
     # Coalesced (mid-swap) requests recompute their target from current config.
     reloader._on_pending = on_model_change
 
     def open_settings() -> None:
+        lang_before = store.config.gui.ui_language
         dlg = SettingsDialog(
             store,
             parent=window,
             download_manager=dm,
             on_model_change=on_model_change,
+            apply=live_apply,
         )
         dlg.exec()
         dlg.deleteLater()
-        # Settings can edit fields the main-window toolbar also shows (source
-        # language, profile, translate toggle); re-sync so they don't diverge.
-        window.reload_from_config()
+        if store.config.gui.ui_language != lang_before:
+            # tr() is read at widget construction, so rebuild in the new language.
+            rebuild_main_window()
+        else:
+            # Settings can edit fields the toolbar also shows (source language,
+            # profile, translate toggle); re-sync so they don't diverge.
+            window.reload_from_config()
 
     def open_models() -> None:
         dlg = ModelsDialog(dm, bridge, config_store=store, parent=window)
         dlg.exec()
         dlg.deleteLater()
 
-    window = MainWindow(
-        bridge,
-        store,
-        stack.pipeline,
-        on_open_settings=open_settings,
-        on_open_models=open_models,
-        mt_available=stack.mt is not None,
-        download_manager=dm,
-        on_model_change=on_model_change,
+    def make_window() -> MainWindow:
+        return MainWindow(
+            bridge,
+            store,
+            stack.pipeline,
+            on_open_settings=open_settings,
+            on_open_models=open_models,
+            mt_available=stack.mt is not None,
+            download_manager=dm,
+            on_model_change=on_model_change,
+        )
+
+    # Qt-free façade for live Settings changes: the dialog pushes audio/VAD/OSC/
+    # engine edits into the running stack with no restart (rebuilds reuse the reloader).
+    live_apply = LiveApply(
+        pipeline=stack.pipeline,
+        segmenter=stack.segmenter,
+        chatbox=stack.chatbox,
+        bus=bus,
+        reload_engine=reload_engine,
+        make_source=lambda device_cfg: MicSource(_resolve_audio_device(device_cfg)),
+        make_mute=lambda: MuteSync(
+            store.config.mute_sync, store.config.osc.ip, bus
+        ),
+        mute=stack.mute,
     )
+    window = make_window()
     window.show()
+
+    def rebuild_main_window() -> None:
+        """Rebuild MainWindow in the new UI language (tr() is read at widget
+        construction). The old window detaches its bridge slots first so events
+        stop reaching it; geometry carries across for a seamless swap."""
+        nonlocal window
+        apply_ui_language(app, store.config.gui.ui_language)
+        old = window
+        old.disconnect_bridge()
+        fresh = make_window()
+        fresh.restoreGeometry(old.saveGeometry())
+        window = fresh
+        fresh.show()
+        old.hide()
+        old.deleteLater()
 
     # Run the driver-floor check before the loader (its flag drives resolve()'s
     # CPU fallback) but after the window subscribes to the bridge, so a

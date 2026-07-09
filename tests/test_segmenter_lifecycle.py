@@ -334,3 +334,72 @@ class TestConfigFrameCounts:
         assert seg._min_utterance_frames == 16
         assert seg._preroll_frames == 5
         assert seg._max_utterance_frames == 875
+
+
+class TestReconfigure:
+    # frame_ms = 32 at 16 kHz/512; these ms values round to distinct frame
+    # counts so a stale threshold would be caught.
+    _NEW = dict(
+        speculative_silence_ms=64,   # 2 frames
+        finalize_silence_ms=128,     # 4 frames
+        min_utterance_ms=96,         # 3 frames
+        pre_roll_ms=96,              # 3 frames
+        max_utterance_s=1.6,         # 50 frames
+    )
+
+    def test_reconfigure_recomputes_every_frame_count(self):
+        seg = Segmenter(VadConfig(), ScriptedVad([]))
+        seg.reconfigure(VadConfig(**self._NEW))
+        assert seg._speculative_frames == 2
+        assert seg._finalize_frames == 4
+        assert seg._min_utterance_frames == 3
+        assert seg._preroll_frames == 3
+        assert seg._max_utterance_frames == 50
+
+    def test_reconfigure_updates_cfg_so_threshold_applies(self):
+        # Idle before/after; the new (higher) threshold must gate a start.
+        seg = Segmenter(VadConfig(threshold=0.5), ScriptedVad([0.6, 0.9]))
+        seg.reconfigure(VadConfig(threshold=0.8))
+        assert seg.cfg.threshold == 0.8
+        assert _by_type(seg.process(_frame()), SegSpeechStart) == []  # 0.6 < 0.8
+        assert len(_by_type(seg.process(_frame()), SegSpeechStart)) == 1  # 0.9
+
+    def test_reconfigure_does_not_disturb_in_flight_utterance(self):
+        seg = Segmenter(VadConfig(pre_roll_ms=0), ScriptedVad([0.9, 0.9]))
+        seg.process(_frame())  # speech start: ACTIVE, utterance 1
+        seg.process(_frame())  # still speaking
+        assert seg._active is True
+        seg.reconfigure(VadConfig(**self._NEW))
+        # In-flight state is untouched: same utterance, same buffered audio.
+        assert seg._active is True
+        assert seg._utterance_id == 1
+        assert seg._frames_since_start == 2
+        assert len(seg._buffer) == 2
+
+    def test_reconfigure_resizes_preroll_ring_only_on_change(self):
+        seg = Segmenter(VadConfig(pre_roll_ms=150), ScriptedVad([]))
+        assert seg._preroll.maxlen == 5
+        ring = seg._preroll
+        # Same pre_roll_ms: ring object is preserved (accumulated frames kept).
+        seg.reconfigure(VadConfig(pre_roll_ms=150, finalize_silence_ms=800))
+        assert seg._preroll is ring
+        # Changed pre_roll_ms: ring resized to the new maxlen.
+        seg.reconfigure(VadConfig(pre_roll_ms=96))
+        assert seg._preroll.maxlen == 3
+
+    def test_reconfigured_timings_take_effect_next_utterance(self):
+        # Default finalize is 19 frames; drop it to 2 so one speech + two
+        # silence frames finalizes, proving the new timing is live.
+        seg = Segmenter(VadConfig(pre_roll_ms=0), ScriptedVad([0.9, 0.1, 0.1]))
+        seg.reconfigure(
+            VadConfig(
+                pre_roll_ms=0,
+                speculative_silence_ms=32,
+                finalize_silence_ms=64,
+                min_utterance_ms=32,
+            )
+        )
+        finals = []
+        for _ in range(3):
+            finals.extend(_by_type(seg.process(_frame()), SegFinal))
+        assert len(finals) == 1

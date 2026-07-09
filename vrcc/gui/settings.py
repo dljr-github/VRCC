@@ -1,14 +1,19 @@
 """Settings dialog: a tabbed editor bound live to the :class:`ConfigStore`.
 
 Controls write their field immediately and call ``save_soon()`` (a ``_loading``
-guard suppresses this at construction); startup-only fields show a restart
-banner. Page bodies live in ``settings_pages`` / ``settings_advanced``.
+guard suppresses this at construction). Every edit is also pushed into the
+running app so nothing needs a restart: an optional ``apply``
+(:class:`~vrcc.core.live_apply.LiveApply`) handle applies audio/VAD/OSC/mute/
+engine changes live, the text-size preset retints the QApplication, and a
+language change rebuilds the window on dialog close. Page bodies live in
+``settings_pages`` / ``settings_advanced``.
 """
 
 from __future__ import annotations
 
 import logging
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,8 +36,14 @@ from PySide6.QtWidgets import (
 from vrcc.core import languages
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.core.hardware import device_names
-from vrcc.gui import model_fit, model_prompts, settings_advanced, settings_pages
-from vrcc.gui.style import PALETTE, resolve_theme
+from vrcc.gui import (
+    model_fit,
+    model_prompts,
+    settings_advanced,
+    settings_live,
+    settings_pages,
+)
+from vrcc.gui.style import PALETTE, apply_font_scale, apply_theme_guarded, resolve_theme
 from vrcc.i18n import tr
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
@@ -41,36 +52,11 @@ logger = logging.getLogger("vrcc.gui.settings")
 
 _AUTO = "auto"
 
-# Fields read only at startup build time -> changing them needs a restart (drives
-# the banner). Model fields + translate.enabled hotswap live, so are absent here.
-_RESTART_FIELDS = (
-    ("audio", "device"),
-    ("stt", "device"),
-    ("stt", "device_index"),
-    ("stt", "compute_type"),
-    ("stt", "cpu_threads"),
-    ("stt", "num_workers"),
-    ("translate", "device"),
-    ("translate", "device_index"),
-    ("translate", "compute_type"),
-    ("translate", "inter_threads"),
-    ("translate", "intra_threads"),
-    ("translate", "max_queued_batches"),
-    ("osc", "ip"),
-    ("osc", "port"),
-    # The token bucket snapshots these at ChatboxSender construction.
-    ("osc", "min_interval_s"),
-    ("osc", "burst"),
-    ("mute_sync", "enabled"),
-    ("gui", "theme"),
-    ("gui", "font_scale"),
-    ("gui", "ui_language"),
-    ("vad", "speculative_silence_ms"),
-    ("vad", "finalize_silence_ms"),
-    ("vad", "min_utterance_ms"),
-    ("vad", "pre_roll_ms"),
-    ("vad", "max_utterance_s"),
-)
+# Coalesce window (ms) for the live-apply flush: valueChanged fires per keystroke
+# and an engine rebuild is expensive, so an edit only restarts this timer -- the
+# hooks run once when it settles (or immediately on dialog close).
+_APPLY_DEBOUNCE_MS = 400
+
 
 class SettingsDialog(QDialog):
     def __init__(
@@ -80,6 +66,7 @@ class SettingsDialog(QDialog):
         *,
         download_manager=None,
         on_model_change=None,
+        apply=None,
     ) -> None:
         super().__init__(parent)
         self._store = config_store
@@ -97,12 +84,22 @@ class SettingsDialog(QDialog):
         # combos to downloaded-only; on_model_change(kind) hotswaps a model change.
         self._download_manager = download_manager
         self._on_model_change = on_model_change
+        # Qt-free live-apply handle (None when headless / in unit tests that
+        # construct the dialog bare): present -> every edit takes effect in the
+        # running app with no restart.
+        self._apply = apply
         self._loading = True
 
         self.setWindowTitle(tr("Settings"))
         self.resize(660, 600)
 
-        self._initial_restart = self._snapshot_restart_fields()
+        # Values already live in the running stack; the debounced flush diffs
+        # against this so a change applies once and a no-op re-selection doesn't.
+        self._applied = settings_live.snapshot(self._specs())
+        self._apply_timer = QTimer(self)
+        self._apply_timer.setSingleShot(True)
+        self._apply_timer.setInterval(_APPLY_DEBOUNCE_MS)
+        self._apply_timer.timeout.connect(self._apply_live_changes)
         # Widget refs the profile-reset buttons / Mode control rewrite.
         self._vad_spins: dict[str, QSpinBox | QDoubleSpinBox] = {}
         self._stt_beam_spin: QSpinBox | None = None
@@ -110,7 +107,7 @@ class SettingsDialog(QDialog):
         self._mt_beam_spin: QSpinBox | None = None
         self._model_combo: QComboBox | None = None
         # (combo index, spec) for voice models that can't transcribe every
-        # language (distil English-only, Parakeet/Canary European sets).
+        # language (distil English-only, Parakeet's European set).
         self._limited_model_indices: list[tuple[int, object]] = []
         # Currently-selected model id per combo, so a cancelled fit-warning
         # switch can revert the combo without re-firing its handler.
@@ -124,26 +121,44 @@ class SettingsDialog(QDialog):
 
         self._build_ui()
         self._loading = False
-        self._update_restart_banner()
 
     def _changed(self) -> None:
         if self._loading:
             return
         self._store.save_soon()
-        self._update_restart_banner()
+        if self._apply is not None:
+            self._apply_timer.start()  # (re)arm the coalesced live-apply flush
 
-    def _snapshot_restart_fields(self) -> dict[tuple[str, str], object]:
-        return {
-            (sec, field): getattr(getattr(self._cfg, sec), field)
-            for sec, field in _RESTART_FIELDS
-        }
+    def _specs(self):
+        return settings_live.live_specs(self._cfg, self._apply, self._apply_text_size)
 
-    def _update_restart_banner(self) -> None:
-        changed = any(
-            getattr(getattr(self._cfg, sec), field) != self._initial_restart[(sec, field)]
-            for sec, field in _RESTART_FIELDS
-        )
-        self._restart_banner.setVisible(changed)
+    def _apply_live_changes(self) -> None:
+        """Push settled edits into the running stack (GUI thread): each field
+        group whose values moved since the last flush runs its hook exactly
+        once. Inert when constructed headless (``apply is None``)."""
+        if self._apply is None:
+            return
+        settings_live.flush(self._applied, self._specs())
+
+    def _apply_text_size(self) -> None:
+        """Apply the text-size preset to the live QApplication: rebuild the QSS
+        at the current font scale (its baked font-size wins over setFont) and
+        scale the base font, as :func:`vrcc.app.run` does at startup. The
+        palette is fixed, so colors never change."""
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return
+        apply_theme_guarded(app, self._cfg.gui.theme, self._cfg.gui.font_scale)
+        apply_font_scale(app, self._cfg.gui.font_scale)
+
+    def done(self, result: int) -> None:  # noqa: N802 -- Qt override
+        # accept()/reject()/close all funnel through done(); flush any edit still
+        # inside the debounce window before the dialog goes away.
+        self._apply_timer.stop()
+        self._apply_live_changes()
+        super().done(result)
 
     def _downloaded_whisper_specs(self) -> list:
         """Whisper specs to offer: downloaded-only with a manager, else all."""
@@ -220,6 +235,7 @@ class SettingsDialog(QDialog):
         self._cfg.stt.model = new_id
         model_prompts.maybe_prefer_cpu(self, new_id)
         self._update_mode_for_model()
+        model_prompts.grey_unsupported_languages(self._source_combo, self._cfg.stt.model)
         self._remove_deleted_placeholder(self._model_combo)
         self._changed()
         if self._on_model_change is not None:
@@ -259,17 +275,6 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._scrolled(settings_advanced.build_vrchat_page(self)), tr("VRChat"))
         self._tabs.addTab(self._scrolled(settings_advanced.build_advanced_page(self)), tr("Advanced / Power users"))
         root.addWidget(self._tabs)
-
-        self._restart_banner = QLabel(
-            tr(
-                "Some changes (device, precision, threads, connection, "
-                "appearance) take effect after restarting VRCC."
-            )
-        )
-        self._restart_banner.setWordWrap(True)
-        self._restart_banner.setStyleSheet(self._warn_style)
-        self._restart_banner.setVisible(False)
-        root.addWidget(self._restart_banner)
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -479,7 +484,7 @@ class SettingsDialog(QDialog):
         """Grey out voice models that can't transcribe the selected spoken
         language. "auto" keeps models that detect the language within their
         set (Parakeet) enabled, but greys those that can't detect at all
-        (distil, Canary), which would transcribe as English regardless."""
+        (distil), which would transcribe as English regardless."""
         if self._model_combo is None:
             return
         source = self._source_combo.currentText()

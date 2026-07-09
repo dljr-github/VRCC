@@ -209,8 +209,13 @@ class TokenBucket:
         self._clock = clock
         self._tokens = float(capacity)
         self._last_refill = clock()
+        # try_acquire/seconds_until_token run on the sender's worker thread
+        # while reconfigure() runs on the GUI thread, so all token + rate state
+        # is guarded by one lock (the token math is a read-modify-write, not a
+        # single atomic int, so the GIL alone is not enough here).
+        self._lock = threading.Lock()
 
-    def _refill(self) -> None:
+    def _refill(self) -> None:  # caller holds self._lock
         now = self._clock()
         elapsed = now - self._last_refill
         if elapsed <= 0:
@@ -225,19 +230,33 @@ class TokenBucket:
 
     def try_acquire(self) -> bool:
         """Consume one token if available now. Returns whether it did."""
-        self._refill()
-        if self._tokens >= 1.0:
-            self._tokens -= 1.0
-            return True
-        return False
+        with self._lock:
+            self._refill()
+            if self._tokens >= 1.0:
+                self._tokens -= 1.0
+                return True
+            return False
 
     def seconds_until_token(self) -> float:
         """How much longer until `try_acquire()` would succeed; ``0.0`` if
         it would succeed right now."""
-        self._refill()
-        if self._tokens >= 1.0:
-            return 0.0
-        return (1.0 - self._tokens) * self._refill_interval_s
+        with self._lock:
+            self._refill()
+            if self._tokens >= 1.0:
+                return 0.0
+            return (1.0 - self._tokens) * self._refill_interval_s
+
+    def reconfigure(self, capacity: int, refill_interval_s: float) -> None:
+        """Retune capacity/refill live without handing out a free burst: clamp
+        the current tokens down to the new capacity (never up) and keep
+        ``_last_refill`` so no phantom elapsed time is credited. A larger
+        capacity therefore does not grant tokens; a smaller one takes them
+        away."""
+        with self._lock:
+            self._capacity = capacity
+            self._refill_interval_s = refill_interval_s
+            if self._tokens > capacity:
+                self._tokens = float(capacity)
 
 
 class ChatboxSender:
@@ -392,6 +411,12 @@ class ChatboxSender:
         new_client = self._client_factory(ip, port)
         with self._client_lock:
             self._client = new_client
+
+    def reconfigure_rate(self, burst: int, min_interval_s: float) -> None:
+        """Retune the send throttle live to ``burst``/``min_interval_s`` without
+        granting a fresh burst. The bucket is internally locked, so this is safe
+        while the worker thread is draining."""
+        self._bucket.reconfigure(burst, min_interval_s)
 
     # -- worker ------------------------------------------------------------
 

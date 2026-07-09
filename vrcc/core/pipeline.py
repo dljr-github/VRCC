@@ -22,7 +22,7 @@ from vrcc.audio.segmenter import (
     SegSpeculative,
     SegSpeechStart,
 )
-from vrcc.core import languages, pipeline_jobs
+from vrcc.core import energy_gate, languages, pipeline_jobs
 from vrcc.core.events import (
     AppError,
     MicLevel,
@@ -44,15 +44,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("vrcc.core.pipeline")
 
-# Frame queue cap: on overflow the callback drops the OLDEST frame (newer
-# audio is more useful once we're this far behind real time).
+# Frame queue cap: overflow drops the OLDEST frame (newer audio is worth more).
 FRAME_QUEUE_MAX = 100
-# STT/MT job queues: small so a slow engine backpressures up the chain
-# (segmenter blocks, then frames drop) instead of growing latency.
+# STT/MT job queues: small so a slow engine backpressures up the chain.
 JOB_QUEUE_MAX = 4
 JOIN_TIMEOUT_S = 2.0
-# Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock
-# behind a full downstream queue.
+# Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock.
 _PUT_POLL_S = 0.1
 
 
@@ -156,10 +153,9 @@ class Pipeline:
                     self._mt_loop, "PipelineMT", self._mt_queue, stop
                 )
 
-            # Source last (consumers must be ready before frames arrive). On a
-            # mic-open failure, unwind the just-spawned workers so a failed
-            # start leaves nothing running and _started stays False (submit_typed
-            # then reports PIPELINE_NOT_RUNNING instead of feeding dead queues).
+            # Source last (consumers ready before frames arrive). On a mic-open
+            # failure, unwind the just-spawned workers so _started stays False
+            # (submit_typed then reports PIPELINE_NOT_RUNNING, not a dead queue).
             try:
                 self._source.start(self._on_frame)
             except Exception:
@@ -205,21 +201,18 @@ class Pipeline:
         return self._captioning
 
     def set_captioning(self, enabled: bool) -> None:
-        """Master captioning toggle. When off, STT jobs are not created (the
-        meter/``MicLevel`` still flows)."""
+        """Master captioning toggle; when off, STT jobs aren't created."""
         self._captioning = bool(enabled)
 
     # -- live model swap ---------------------------------------------------
 
     def set_swapping(self, value: bool) -> None:
-        """Pause/resume new-caption creation during a model swap (while True,
-        :meth:`_should_caption` returns False)."""
+        """Pause/resume new-caption creation during a model swap."""
         self._swapping = bool(value)
 
     def detach_stt(self) -> "SttEngine | None":
-        """Remove and return the current STT engine. Taking ``_stt_lock``
-        waits for any in-flight ``transcribe`` to finish first, so the engine
-        is never unloaded mid-call."""
+        """Remove and return the current STT engine. Taking ``_stt_lock`` waits
+        for any in-flight ``transcribe`` first, so it's never unloaded mid-call."""
         with self._stt_lock:
             old, self._stt = self._stt, None
             return old
@@ -231,17 +224,35 @@ class Pipeline:
 
     def detach_mt(self) -> "TranslateEngine | None":
         """Remove and return the current MT engine. Taking ``_mt_lock`` waits
-        for any in-flight ``translate`` to finish first, so the engine is
-        never unloaded mid-call."""
+        for any in-flight ``translate`` first, so it's never unloaded mid-call."""
         with self._mt_lock:
             old, self._mt = self._mt, None
             return old
 
     def set_mt(self, engine: "TranslateEngine | None") -> None:
-        """Install a new MT engine (``None`` disables translation: the next
-        MT job sends the original text)."""
+        """Install a new MT engine (``None`` disables translation)."""
         with self._mt_lock:
             self._mt = engine
+
+    def set_mute(self, mute: "MuteSync | None") -> None:
+        """Install a mute-sync coordinator (``None`` removes it). Read by the
+        STT worker between utterances; a plain attribute write is atomic and a
+        swap mid-utterance only decides the next one."""
+        self._mute = mute
+
+    def restart_source(self, new_source: "AudioSource") -> bool:
+        """Swap the audio source live (stop old, install ``new_source``, restart
+        capture if it was running) via the proven stop()/start() path -- queues +
+        workers rebuild, engines untouched. Returns whether capture runs after; a
+        failed device open re-raises after start() unwinds itself (_started
+        False), leaving the pipeline consistent so the caller reports the error."""
+        was_running = self._started
+        if was_running:
+            self.stop()
+        self._source = new_source
+        if was_running:
+            self.start()
+        return self._started
 
     @staticmethod
     def _spawn(target, name: str, *args) -> threading.Thread:
@@ -330,21 +341,15 @@ class Pipeline:
                 self._on_seg_event(event)
 
     def _energy_gated(self, frame: np.ndarray) -> bool:
-        """Cheap RMS pre-gate: when enabled, near-silent frames publish a
-        :class:`MicLevel` (meter keeps moving) but skip the ~1 ms ONNX VAD.
-        Only blocks utterance *starts* -- mid-utterance every frame flows so a
-        quiet tail isn't chopped. Config read per frame, so Settings apply live."""
-        audio_cfg = self._config.audio
-        if not audio_cfg.energy_gate_enabled:
+        """Cheap RMS pre-gate (numeric decision in :mod:`vrcc.core.energy_gate`):
+        a gated near-silent frame still publishes its :class:`MicLevel` here so
+        the meter keeps moving, but skips the ~1 ms ONNX VAD."""
+        level = energy_gate.gated_level(
+            frame, self._config.audio, self._segmenter.active
+        )
+        if level is None:
             return False
-        if self._segmenter.active:
-            return False
-        rms = float(np.sqrt(np.mean(np.square(frame))))
-        # The slider is int16-scaled (0-2000, classic mic-gate convention);
-        # frames are float32 in [-1, 1].
-        if rms >= audio_cfg.energy_threshold / 32768.0:
-            return False
-        self._bus.publish(MicLevel(rms=rms, vad_prob=0.0))
+        self._bus.publish(MicLevel(rms=level, vad_prob=0.0))
         return True
 
     def _on_seg_event(self, event: object) -> None:
@@ -365,8 +370,7 @@ class Pipeline:
     def _should_caption(self) -> bool:
         if not self._captioning:
             return False
-        # Pause new-caption creation while a model swap is in progress.
-        if self._swapping:
+        if self._swapping:  # paused mid model-swap
             return False
         if self._mute is not None and not self._mute.should_caption():
             return False
@@ -389,9 +393,8 @@ class Pipeline:
 
     def _transcribe(self, samples: np.ndarray) -> "SttResult | None | object":
         """Transcribe under _stt_lock so a concurrent detach_stt waits before
-        unloading. Returns ``_NO_ENGINE`` if the engine is being swapped out
-        (job dropped). Only _stt_lock is held here (never the
-        SpecCache/TypingTracker locks), so no lock-order cycle."""
+        unloading (returns ``_NO_ENGINE`` when swapped out). Only _stt_lock is
+        held (never SpecCache/TypingTracker), so no lock-order cycle."""
         with self._stt_lock:
             engine = self._stt
             if engine is None:
@@ -419,16 +422,15 @@ class Pipeline:
 
     def submit_typed(self, text: str) -> bool:
         """Send typed text straight through translation to the chatbox,
-        bypassing STT and mute/captioning gating (utterance id 0). Returns
-        False (refused, publishing ``PIPELINE_NOT_RUNNING``) when not started,
-        so the caller keeps the text; enqueueing then would feed a dead queue."""
+        bypassing STT and mute/captioning gating (utterance id 0). Returns False
+        (``PIPELINE_NOT_RUNNING``) when not started, keeping the text uncaptured."""
         if not text or not text.strip():
             return False
         if not self._started:
             self._bus.publish(
                 AppError(
                     "PIPELINE_NOT_RUNNING",
-                    "Engines are still loading — try again in a moment",
+                    "Engines are still loading. Try again in a moment",
                 )
             )
             return False
@@ -487,9 +489,8 @@ class Pipeline:
             self._set_typing(False)
 
     def _enqueue(self, q: queue.Queue, job) -> None:
-        """Put a job, applying backpressure (blocking) but waking to drop it
-        if stop() is requested, so a full downstream queue never deadlocks
-        shutdown."""
+        """Put a job, applying backpressure (blocking) but waking to drop it if
+        stop() is requested, so a full downstream queue never deadlocks stop."""
         while not self._stop_flag.is_set():
             try:
                 q.put(job, timeout=_PUT_POLL_S)

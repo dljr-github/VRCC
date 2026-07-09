@@ -28,7 +28,6 @@ from vrcc.gui.main_parts import (
     build_status_strip,
     build_top_bar,
 )
-from vrcc.gui import model_prompts
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.i18n import tr, tr_noop
 
@@ -153,6 +152,10 @@ class MainWindow(QMainWindow):
     def _load_from_config(self) -> None:
         cfg = self._store.config
 
+        # Grey the spoken languages the active voice model can't transcribe,
+        # then point the combo at the stored language (re-run on every re-sync
+        # so a model change made in Settings re-enables the right languages).
+        model_prompts.grey_unsupported_languages(self._source_combo, cfg.stt.model)
         self._set_combo_text(self._source_combo, cfg.stt.source_language)
 
         targets = list(cfg.translate.targets)
@@ -179,16 +182,29 @@ class MainWindow(QMainWindow):
 
     # -- bridge signal wiring ----------------------------------------------
 
+    def _bridge_bindings(self):
+        b = self._bridge
+        return (
+            (b.mic_level, self._on_mic_level),
+            (b.phrase_recognized, self._on_phrase_recognized),
+            (b.phrase_translated, self._on_phrase_translated),
+            (b.chatbox_sent, self._on_chatbox_sent),
+            (b.mute_changed, self._on_mute_changed),
+            (b.engine_state, self._on_engine_state),
+            (b.download_progress, self._on_download_progress),
+            (b.app_error, self._on_app_error),
+            (b.vrchat_detected, self._on_vrchat_detected),
+        )
+
     def _connect_bridge(self) -> None:
-        self._bridge.mic_level.connect(self._on_mic_level)
-        self._bridge.phrase_recognized.connect(self._on_phrase_recognized)
-        self._bridge.phrase_translated.connect(self._on_phrase_translated)
-        self._bridge.chatbox_sent.connect(self._on_chatbox_sent)
-        self._bridge.mute_changed.connect(self._on_mute_changed)
-        self._bridge.engine_state.connect(self._on_engine_state)
-        self._bridge.download_progress.connect(self._on_download_progress)
-        self._bridge.app_error.connect(self._on_app_error)
-        self._bridge.vrchat_detected.connect(self._on_vrchat_detected)
+        for signal, slot in self._bridge_bindings():
+            signal.connect(slot)
+
+    def disconnect_bridge(self) -> None:
+        """Detach every bridge slot so a window replaced on a UI-language change
+        stops receiving events (the shared BusBridge outlives this window)."""
+        for signal, slot in self._bridge_bindings():
+            signal.disconnect(slot)
 
     # -- bridge slots (GUI thread) -----------------------------------------
 
@@ -251,6 +267,10 @@ class MainWindow(QMainWindow):
         # State drives the caption feed's loading message via _engine_states; it
         # is no longer shown as jargon text on the main screen.
         self._engine_states[event.engine] = event.state
+        # _render_log reads that state to choose the empty-state text, and only
+        # a caption event would otherwise redraw it: without this the feed still
+        # says the model is loading long after it is ready.
+        self._render_log()
         known = event.engine in _ENGINE_NAMES
         name = tr(_ENGINE_NAMES[event.engine]) if known else event.engine.title()
         if event.state == "fallback_cpu":
