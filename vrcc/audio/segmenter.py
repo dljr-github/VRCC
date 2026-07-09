@@ -69,16 +69,10 @@ class Segmenter:
         vad_fn: Callable[[np.ndarray], float],
         sample_rate: int = 16000,
     ) -> None:
-        self.cfg = cfg
         self._vad_fn = vad_fn
         self.sample_rate = sample_rate
 
-        frame_ms = 1000.0 * FRAME / sample_rate
-        self._speculative_frames = math.ceil(cfg.speculative_silence_ms / frame_ms)
-        self._finalize_frames = math.ceil(cfg.finalize_silence_ms / frame_ms)
-        self._min_utterance_frames = math.ceil(cfg.min_utterance_ms / frame_ms)
-        self._preroll_frames = math.ceil(cfg.pre_roll_ms / frame_ms)
-        self._max_utterance_frames = math.ceil(cfg.max_utterance_s * 1000.0 / frame_ms)
+        self._apply_config(cfg)
 
         self._preroll: deque[np.ndarray] = deque(maxlen=self._preroll_frames)
         self._active = False
@@ -87,6 +81,50 @@ class Segmenter:
         self._frames_since_start = 0
         self._silence_run = 0
         self._pending_spec_samples: np.ndarray | None = None
+
+    def _apply_config(self, cfg: VadConfig) -> None:
+        """Precompute the frame-count thresholds from ``cfg`` + the frame
+        duration. Shared by __init__ and :meth:`reconfigure`; the latter runs on
+        the GUI thread while the audio thread is inside :meth:`process`. No lock
+        is taken: ``cfg`` is a single reference store and each threshold is a
+        plain int, so the GIL makes every write atomic. Each value is computed
+        into a local first and assigned exactly once, so :meth:`process` never
+        observes a half-updated threshold -- at worst one call reads a mix of
+        old/new, which just means the *next* utterance (not one in flight)
+        adopts the new timings."""
+        frame_ms = 1000.0 * FRAME / self.sample_rate
+        speculative = math.ceil(cfg.speculative_silence_ms / frame_ms)
+        finalize = math.ceil(cfg.finalize_silence_ms / frame_ms)
+        min_utterance = math.ceil(cfg.min_utterance_ms / frame_ms)
+        preroll = math.ceil(cfg.pre_roll_ms / frame_ms)
+        max_utterance = math.ceil(cfg.max_utterance_s * 1000.0 / frame_ms)
+        self.cfg = cfg
+        self._speculative_frames = speculative
+        self._finalize_frames = finalize
+        self._min_utterance_frames = min_utterance
+        self._preroll_frames = preroll
+        self._max_utterance_frames = max_utterance
+
+    def reconfigure(self, cfg: VadConfig) -> None:
+        """Apply new VAD timings/threshold live (GUI thread) without dropping an
+        in-flight utterance: the current utterance keeps its state and the next
+        one adopts the new timings (see :meth:`_apply_config` for the lock-free
+        rationale). The idle pre-roll ring is only resized when ``pre_roll_ms``
+        changed -- it holds recent idle frames (not in-flight state), so a fresh
+        ring just refills within ``pre_roll_ms``."""
+        self._apply_config(cfg)
+        if self._preroll.maxlen != self._preroll_frames:
+            self._preroll = deque(maxlen=self._preroll_frames)
+
+    def reset(self) -> None:
+        """Drop all in-flight state: the open utterance, its buffer, the idle
+        pre-roll ring and any pending speculative snapshot. For restarts where
+        buffered audio belongs to a previous run (a device swap must not
+        prefix the old microphone's audio onto the new one's first caption).
+        Call only while no audio thread is feeding :meth:`process`; the
+        utterance id advances so a dropped utterance never shares its id."""
+        self._reset_to_idle()
+        self._preroll.clear()
 
     @property
     def active(self) -> bool:

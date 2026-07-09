@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vrcc"
-version = "1.0.1"
+version = "1.1.1"
 description = "Live-caption your voice into the VRChat chatbox, translated locally via CTranslate2"
 requires-python = ">=3.10"
 dependencies = [
     "ctranslate2==4.8.1",
     "faster-whisper==1.2.1",
-    "onnxruntime>=1.16,<2",
+    "onnxruntime>=1.18.1,<2",
+    # Runs the NVIDIA Parakeet TDT ONNX export (pure-python; reuses the
+    # onnxruntime/numpy/huggingface_hub deps in this list).
+    "onnx-asr>=0.11,<1",
     "tokenizers>=0.15",
     "sentencepiece>=0.2.0",
     "huggingface_hub>=0.23",
@@ -29,8 +32,37 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cuda = ["nvidia-cublas-cu12>=12.8,<13"]
-dev = ["pytest>=8.0", "pyinstaller>=6.10"]
+# GPU captions for the onnx-asr models additionally need onnxruntime-gpu,
+# which shares the `onnxruntime` import name with the CPU wheel that
+# faster-whisper depends on -- pip's install order within one resolve is
+# undefined, so it CANNOT be listed here. Install it as a second, final step
+# (see README / release.yml) so its CUDA-enabled binaries win the overlap:
+#     pip install -e .[cuda]
+#     pip install "onnxruntime-gpu>=1.21,<1.23"
+# <1.23: onnxruntime-gpu 1.23+ is built against CUDA 13, but this extra ships
+# the CUDA 12 runtime wheels (CTranslate2 needs them). With a CUDA 13 build
+# the provider fails to initialize and everything silently runs on CPU.
+cuda = [
+    "nvidia-cublas-cu12>=12.8,<13",
+    # cuDNN 9 runtime for onnxruntime's CUDA execution provider (Parakeet on
+    # GPU). hardware.setup_cuda_dlls() puts its DLLs on the search path like
+    # the cuBLAS wheel's.
+    "nvidia-cudnn-cu12>=9,<10",
+]
+dev = [
+    "pytest>=8.0",
+    "pyinstaller>=6.10",
+    # Builds the synthetic Parakeet export for the real-runtime STT tests
+    # (tests/onnx_asr_fakes.py); those tests skip without it.
+    "onnx>=1.15",
+]
+# tools/bench_stt.py: WER scoring + reading the LibriSpeech FLACs. See
+# benchmarks/README.md for contributing benchmark numbers.
+bench = [
+    "jiwer>=3.0",
+    "whisper-normalizer>=0.1",
+    "soundfile>=0.12",
+]
 
 [project.scripts]
 vrcc = "vrcc.cli:main"

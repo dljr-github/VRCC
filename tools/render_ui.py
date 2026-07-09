@@ -173,11 +173,10 @@ def build_main(theme, populated):
 
 
 def render_main():
-    for theme in ("dark", "light"):
-        w, bridge = build_main(theme, populated=True)
-        shot(w, f"main-{theme}-populated", size=(760, 560))
-        bridge.detach()
-        w.deleteLater()
+    w, bridge = build_main("dark", populated=True)
+    shot(w, "main-dark-populated", size=(760, 560))
+    bridge.detach()
+    w.deleteLater()
     w, bridge = build_main("dark", populated=False)
     shot(w, "main-dark-empty", size=(760, 560))
     bridge.detach()
@@ -187,37 +186,34 @@ def render_main():
 def render_models():
     from vrcc.gui.models_dialog import ModelsDialog
 
-    for theme in ("dark", "light"):
-        set_theme(theme)
-        bridge = BusBridge(EventBus())
-        dlg = ModelsDialog(FakeDM(), bridge, config_store=store)
-        shot(dlg, f"models-{theme}", size=(700, 640))
-        dlg.deleteLater()
-        bridge.detach()
+    set_theme("dark")
+    bridge = BusBridge(EventBus())
+    dlg = ModelsDialog(FakeDM(), bridge, config_store=store)
+    shot(dlg, "models-dark", size=(700, 640))
+    dlg.deleteLater()
+    bridge.detach()
 
 
 def render_settings():
     from vrcc.gui.settings import SettingsDialog
 
-    for theme in ("dark", "light"):
-        set_theme(theme)
-        dlg = SettingsDialog(store, download_manager=FakeDM(), on_model_change=lambda kind: None)
-        shot(dlg, f"settings-simple-{theme}", size=(680, 600))
-        dlg._tabs.setCurrentIndex(1)  # Voice recognition
-        shot(dlg, f"settings-voice-{theme}", size=(680, 600))
-        dlg.deleteLater()
+    set_theme("dark")
+    dlg = SettingsDialog(store, download_manager=FakeDM(), on_model_change=lambda kind: None)
+    shot(dlg, "settings-simple-dark", size=(680, 600))
+    dlg._tabs.setCurrentIndex(1)  # Voice recognition
+    shot(dlg, "settings-voice-dark", size=(680, 600))
+    dlg.deleteLater()
 
 
 def render_firstrun():
     from vrcc.gui.firstrun import FirstRunWizard
 
-    for theme in ("dark", "light"):
-        set_theme(theme)
-        bridge = BusBridge(EventBus())
-        wiz = FirstRunWizard(store, WizardDM(), bridge)
-        shot(wiz, f"firstrun-{theme}", size=(640, 620))
-        wiz.deleteLater()
-        bridge.detach()
+    set_theme("dark")
+    bridge = BusBridge(EventBus())
+    wiz = FirstRunWizard(store, WizardDM(), bridge)
+    shot(wiz, "firstrun-dark", size=(640, 620))
+    wiz.deleteLater()
+    bridge.detach()
 
 
 render_main()

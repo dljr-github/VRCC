@@ -48,9 +48,12 @@ def test_card_uses_provided_palette(qapp):
     from vrcc.gui.style import PALETTE
     from vrcc.gui.widgets import Card
 
-    card = Card(colors=PALETTE["light"])
+    # A fake palette proves Card renders from the dict it is given, not a
+    # hardcoded constant -- the wiring, independent of any one palette.
+    fake = dict(PALETTE["dark"], surface="#0b0c0d")
+    card = Card(colors=fake)
     sheet = card.styleSheet().lower()
-    assert PALETTE["light"]["surface"].lower() in sheet
+    assert "#0b0c0d" in sheet
     assert PALETTE["dark"]["surface"].lower() not in sheet
     card.deleteLater()
 
@@ -72,8 +75,11 @@ def test_mic_meter_uses_provided_palette(qapp):
     from vrcc.gui.style import PALETTE
     from vrcc.gui.widgets import MicMeter
 
-    m = MicMeter(colors=PALETTE["light"])
-    assert m._colors["accent"] == PALETTE["light"]["accent"]
+    # A fake palette proves the meter reads the accent from the dict it was
+    # given, not a hardcoded constant.
+    fake = dict(PALETTE["dark"], accent="#0b0c0d")
+    m = MicMeter(colors=fake)
+    assert m._colors["accent"] == "#0b0c0d"
     m.set_level(0.03)  # paint path still works with the injected palette
     m.deleteLater()
 
@@ -158,7 +164,10 @@ def test_icon_label_falls_back_to_plain_text_when_svg_invalid(qapp):
     from vrcc.gui.style import PALETTE
     from vrcc.gui.widgets import icon_label
 
-    lbl = icon_label("", 18, colors=PALETTE["light"], fallback_text="->")
+    # A fake palette proves the fallback text is tinted from the given dict's
+    # muted token, not a hardcoded constant.
+    fake = dict(PALETTE["dark"], muted="#0b0c0d")
+    lbl = icon_label("", 18, colors=fake, fallback_text="->")
     assert lbl.text() == "->"
-    assert PALETTE["light"]["muted"].lower() in lbl.styleSheet().lower()
+    assert "#0b0c0d" in lbl.styleSheet().lower()
     lbl.deleteLater()

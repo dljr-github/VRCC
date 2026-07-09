@@ -1,6 +1,6 @@
 import pytest
 
-from vrcc.core.languages import LANGUAGES, Language, get
+from vrcc.core.languages import LANGUAGES, Language, get, match_caption_language
 
 
 def test_languages_has_around_30_entries():
@@ -90,3 +90,44 @@ def test_seed_entries_match_brief(display, whisper, nllb, m2m100):
     assert lang.whisper == whisper
     assert lang.nllb == nllb
     assert lang.m2m100 == m2m100
+
+
+@pytest.mark.parametrize(
+    "locale,expected",
+    [
+        ("en_US", "English"),
+        ("en", "English"),
+        ("EN-us", "English"),
+        ("ja-JP", "Japanese"),
+        ("ja_JP.UTF-8", "Japanese"),
+        ("pt-BR", "Portuguese"),
+        ("pt_PT", "Portuguese"),
+        ("de-DE", "German"),
+        ("zh-Hans-CN", "Chinese Simplified"),
+        ("zh_CN", "Chinese Simplified"),
+        ("zh", "Chinese Simplified"),
+        ("zh-Hant", "Chinese Traditional"),
+        ("zh_TW", "Chinese Traditional"),
+        ("ZH-HK", "Chinese Traditional"),
+        # Windows spellings that don't share whisper's code for the language
+        ("nb-NO", "Norwegian"),
+        ("fil-PH", "Filipino"),
+    ],
+)
+def test_match_caption_language_resolves_os_locales(locale, expected):
+    assert match_caption_language(locale) == expected
+
+
+def test_match_caption_language_unknown_or_empty_returns_none():
+    assert match_caption_language("xx_XX") is None
+    assert match_caption_language("tlh") is None  # Klingon stays unsupported
+    assert match_caption_language("") is None
+    assert match_caption_language(None) is None
+
+
+def test_match_caption_language_results_are_valid_source_languages():
+    # Every whisper code in the registry resolves to a display name that
+    # SttConfig.source_language can store.
+    for lang in LANGUAGES.values():
+        display = match_caption_language(lang.whisper)
+        assert display in LANGUAGES

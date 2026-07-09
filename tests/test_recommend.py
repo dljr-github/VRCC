@@ -1,6 +1,6 @@
 """Tests for the Qt-free model-recommendation module (``vrcc.core.recommend``):
-tier detection passthrough, preset-first ordering, and the ``best_downloaded``
-picker.
+tier detection passthrough, benchmark-derived orderings, and the
+``best_downloaded`` picker.
 """
 
 from __future__ import annotations
@@ -32,6 +32,341 @@ class _FakeDM:
 
 def test_presets_cover_all_tiers():
     assert set(recommend.PRESETS) == set(_TIERS)
+
+
+# These document the benchmark-derived outcome (STT_BENCH, measured on the
+# reference machine recorded in benchmarks/rtx-5090-ryzen-9950x3d.json): a
+# registry or benchmark change that reorders a tier must show up here as a
+# conscious diff, not silently reshuffle the recommendations.
+_EXPECTED_WHISPER_PREFERENCE = {
+    # parakeet is language-restricted, so a language-blind walk trails it
+    # behind every unrestricted model, accurate and in-budget though it is.
+    "gpu_high": [
+        "large-v3-turbo", "large-v3", "medium", "small", "base", "tiny",
+        "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
+    ],
+    # large-v3 (3090 MB) fails the gpu_low VRAM cap and drops to the
+    # unrestricted tail.
+    "gpu_low": [
+        "large-v3-turbo", "medium", "small", "base", "tiny", "large-v3",
+        "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
+    ],
+    # On CPU parakeet stays inside the 1.0 s budget and beats every
+    # unrestricted model on accuracy, but it is language-restricted, so a
+    # language-blind walk still keeps it behind small/base/tiny.
+    "cpu": [
+        "small", "base", "tiny", "medium", "large-v3-turbo", "large-v3",
+        "parakeet-tdt-0.6b-v3",
+        "distil-small.en", "distil-large-v3.5",
+    ],
+}
+
+
+@pytest.mark.parametrize("tier", _TIERS)
+def test_derived_whisper_preference_matches_benchmark_outcome(tier):
+    assert recommend.WHISPER_PREFERENCE[tier] == _EXPECTED_WHISPER_PREFERENCE[tier]
+
+
+def test_preset_whisper_ids_lead_their_derived_lists():
+    # _validate() already enforces preset-leads; pin the concrete ids so a
+    # benchmark edit that changes a tier's default is an explicit test diff.
+    assert recommend.PRESETS["gpu_high"][0] == "large-v3-turbo"
+    assert recommend.PRESETS["gpu_low"][0] == "large-v3-turbo"
+    assert recommend.PRESETS["cpu"][0] == "small"
+    for tier in _TIERS:
+        assert recommend.WHISPER_PREFERENCE[tier][0] == recommend.PRESETS[tier][0]
+
+
+def test_rank_whisper_synthetic_ordering_rules():
+    """The ranking rules on a synthetic table: WER-band ties resolve by
+    latency, unrestricted precede restricted, over-budget models sink to the
+    partition tail, and unbenchmarked ids trail everything in their partition.
+    """
+    specs = {
+        "slow-sharp": SimpleNamespace(size_mb=400, languages=None),
+        "fast-loose": SimpleNamespace(size_mb=300, languages=None),
+        "over-budget": SimpleNamespace(size_mb=200, languages=None),
+        "unbenched-big": SimpleNamespace(size_mb=500, languages=None),
+        "unbenched-small": SimpleNamespace(size_mb=100, languages=None),
+        "restricted": SimpleNamespace(size_mb=50, languages=("en",)),
+    }
+    bench = {
+        # same WER band (0.030 and 0.032 both band 10): the faster model must
+        # win even though the slower one has strictly lower WER
+        "slow-sharp": (0.030, 0.030, 0.30, 0.30),
+        "fast-loose": (0.032, 0.032, 0.10, 0.10),
+        # best WER of the partition, but over every latency budget
+        "over-budget": (0.010, 0.010, 5.0, 5.0),
+        # best numbers overall, but language-restricted
+        "restricted": (0.001, 0.001, 0.01, 0.01),
+    }
+    got = recommend._rank_whisper("gpu_high", specs=specs, bench=bench)
+    assert got == [
+        "fast-loose", "slow-sharp",          # usable: band tie -> latency
+        "over-budget",                       # gate failure -> after usable
+        "unbenched-small", "unbenched-big",  # no data -> partition tail, by size
+        "restricted",                        # trails every unrestricted id
+    ]
+
+
+def test_rank_whisper_gpu_low_size_cap():
+    specs = {
+        "big": SimpleNamespace(size_mb=2500, languages=None),
+        "little": SimpleNamespace(size_mb=400, languages=None),
+    }
+    bench = {
+        "big": (0.010, 0.010, 0.05, 0.05),  # best WER and latency, but...
+        "little": (0.050, 0.050, 0.10, 0.10),
+    }
+    # ...over 2000 MB cannot be trusted beside VRChat in < 8 GB VRAM
+    assert recommend._rank_whisper("gpu_low", specs=specs, bench=bench) == ["little", "big"]
+    # the cap is gpu_low-only: gpu_high ranks purely on the measurements
+    assert recommend._rank_whisper("gpu_high", specs=specs, bench=bench) == ["big", "little"]
+
+
+# Language-aware ranking: a known spoken language (Whisper code) lets a
+# restricted specialist compete against the unrestricted models. Exact
+# outcomes below come from the same STT_BENCH reference run.
+
+
+@pytest.mark.parametrize("tier", _TIERS)
+def test_rank_whisper_language_none_is_byte_identical_to_blind_lists(tier):
+    assert recommend._rank_whisper(tier, language=None) == _EXPECTED_WHISPER_PREFERENCE[tier]
+
+
+def test_rank_whisper_cpu_english_puts_parakeet_first():
+    # Once "en" is known, parakeet beats every whisper model on CPU: 2.3
+    # percent at 0.13 s, against small's 3.7 percent at 0.75 s.
+    assert recommend._rank_whisper("cpu", language="en") == [
+        "parakeet-tdt-0.6b-v3",
+        "small", "distil-small.en", "base", "tiny",
+        "medium", "distil-large-v3.5", "large-v3-turbo", "large-v3",
+    ]
+
+
+def test_rank_whisper_cpu_japanese_matches_language_blind_order():
+    # No restricted model covers "ja", so every specialist trails and the
+    # list is identical to the language-blind cpu ordering.
+    assert recommend._rank_whisper("cpu", language="ja") == _EXPECTED_WHISPER_PREFERENCE["cpu"]
+
+
+def test_rank_whisper_gpu_high_german_keeps_turbo_first():
+    # GPU WER bands: turbo/large-v3 band 5, parakeet band 7, medium band 9,
+    # so parakeet slots after large-v3 and before medium. The english-only
+    # distil pair cannot serve "de", so it trails.
+    assert recommend._rank_whisper("gpu_high", language="de") == [
+        "large-v3-turbo", "large-v3", "parakeet-tdt-0.6b-v3",
+        "medium", "small", "base", "tiny",
+        "distil-large-v3.5", "distil-small.en",
+    ]
+
+
+def test_rank_whisper_english_only_flag_trails_without_languages_tuple():
+    # english_only is honored even when a spec forgets its languages tuple:
+    # the flag alone must keep the model out of a non-English leading group.
+    specs = {
+        "plain": SimpleNamespace(size_mb=300, languages=None, english_only=False),
+        "en-flag-only": SimpleNamespace(size_mb=300, languages=None, english_only=True),
+    }
+    bench = {
+        "plain": (0.050, 0.050, 0.10, 0.10),
+        "en-flag-only": (0.010, 0.010, 0.01, 0.01),
+    }
+    got = recommend._rank_whisper("gpu_high", specs=specs, bench=bench, language="de")
+    assert got == ["plain", "en-flag-only"]
+
+
+def test_parakeet_competes_only_with_concrete_language():
+    blind = recommend._rank_whisper("cpu")
+    with_de = recommend._rank_whisper("cpu", language="de")
+    # language-blind: parakeet trails every unrestricted id
+    assert blind.index("parakeet-tdt-0.6b-v3") > blind.index("tiny")
+    # concrete "de" on CPU, where parakeet is inside the budget: it leads
+    assert with_de[0] == "parakeet-tdt-0.6b-v3"
+
+
+def test_preset_for_choice_language_reranks_whisper_half_only():
+    assert recommend.preset_for_choice("cpu", language="en") == (
+        "parakeet-tdt-0.6b-v3", "nllb-600M-int8",
+    )
+    assert recommend.preset_for_choice("gpu", tier="gpu_high", language="de") == (
+        "large-v3-turbo", "nllb-1.3B-int8",
+    )
+
+
+def test_preset_without_a_language_never_leads_with_a_non_detecting_model():
+    # No spoken language to pin a non-detecting model to, so the
+    # language-blind presets must not name one.
+    for tier in _TIERS:
+        assert WHISPER_MODELS[recommend.PRESETS[tier][0]].auto_language
+
+
+# Per-model performance mode, from the beam-1 vs beam-5 runs (BEAM_BENCH).
+
+
+@pytest.mark.parametrize(
+    ("model_id", "device", "expected"),
+    [
+        # Real gains for a cost too small to feel: 5.7 -> 4.7 percent for
+        # 20 ms on GPU, 5.9 -> 4.9 percent for 10 ms on CPU.
+        ("base", "cuda", "quality"),
+        ("base", "cpu", "quality"),
+        ("tiny", "cuda", "quality"),
+        ("medium", "cuda", "quality"),
+        # No accuracy to gain: turbo and large-v3 are unchanged or worse at
+        # beam 5, and small's 0.2 point is below the noise floor.
+        ("large-v3-turbo", "cuda", "latency"),
+        ("large-v3", "cuda", "latency"),
+        ("small", "cuda", "latency"),
+        ("distil-small.en", "cuda", "latency"),
+        # Already past the CPU budget at beam 1: widening only costs more.
+        ("medium", "cpu", "latency"),
+        ("large-v3", "cpu", "latency"),
+    ],
+)
+def test_recommended_profile_follows_the_beam_measurements(model_id, device, expected):
+    assert recommend.recommended_profile(model_id, device) == expected
+
+
+def test_recommended_profile_is_silent_for_greedy_decoders():
+    # The onnx-asr export has no beam to widen, which is why the Mode control
+    # greys out for it: there is nothing to recommend.
+    assert recommend.recommended_profile("parakeet-tdt-0.6b-v3", "cuda") is None
+    assert recommend.recommended_profile("parakeet-tdt-0.6b-v3", "cpu") is None
+
+
+def test_recommended_profile_is_silent_for_unknown_ids():
+    assert recommend.recommended_profile("not-a-model", "cuda") is None
+
+
+def test_recommended_profile_stays_silent_when_unmeasured_but_in_budget(monkeypatch):
+    # A whisper model with no beam-5 row, comfortably inside its budget: no
+    # evidence either way, so no advice.
+    monkeypatch.setitem(recommend.STT_BENCH, "small", (0.03, 0.03, 0.05, 0.05))
+    monkeypatch.delitem(recommend.BEAM_BENCH, "small")
+    assert recommend.recommended_profile("small", "cuda") is None
+
+
+# reset_to_recommended(): restore what the benchmarks have an opinion about.
+
+
+def _cfg_with_personal_choices():
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    cfg.stt.model = "tiny"
+    cfg.stt.device = "cuda"
+    cfg.stt.compute_type = "float32"
+    cfg.stt.cpu_threads = 7
+    cfg.translate.device = "cuda"
+    cfg.translate.intra_threads = 5
+    # Personal choices the reset must not touch.
+    cfg.stt.source_language = "German"
+    cfg.translate.targets = ["Japanese", "French"]
+    cfg.audio.device = "Some USB Mic"
+    cfg.osc.port = 9999
+    cfg.gui.font_scale = 1.5
+    cfg.gui.ui_language = "ja"
+    return cfg
+
+
+def test_reset_to_recommended_restores_engine_fields_and_picks_models(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+
+    summary = recommend.reset_to_recommended(cfg)
+
+    # A CPU wizard verdict binds the device explicitly: "auto" would resolve
+    # to cuda on a CUDA machine and run the CPU-tier picks on the GPU the
+    # verdict chose to spare.
+    assert cfg.stt.device == "cpu" and cfg.stt.compute_type == "auto"
+    assert cfg.stt.cpu_threads == 0 and cfg.stt.num_workers == 1
+    assert cfg.translate.device == "cpu" and cfg.translate.intra_threads == 0
+    # German is inside parakeet's set, and on CPU it leads the ranking.
+    assert cfg.stt.model == "parakeet-tdt-0.6b-v3"
+    assert summary["stt_model"] == "parakeet-tdt-0.6b-v3"
+    # parakeet decodes greedily, so it gets no profile advice: Speed stands.
+    assert cfg.gui.profile == "latency"
+
+
+def test_reset_to_recommended_keeps_auto_device_for_a_gpu_verdict(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    cfg = _cfg_with_personal_choices()
+
+    recommend.reset_to_recommended(cfg)
+
+    assert cfg.stt.device == "auto"
+    assert cfg.translate.device == "auto"
+    assert cfg.stt.model == "large-v3-turbo"
+
+
+def test_reset_to_recommended_leaves_mt_model_alone_when_translation_off(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+    cfg.translate.enabled = False
+    cfg.translate.model = "m2m100-418M-int8"
+
+    recommend.reset_to_recommended(cfg)
+
+    # The stored MT choice is not visible while translation is off; replacing
+    # it with a possibly-missing preset would surprise on the next enable.
+    assert cfg.translate.model == "m2m100-418M-int8"
+
+
+def test_reset_to_recommended_leaves_personal_choices_alone(monkeypatch):
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+
+    recommend.reset_to_recommended(cfg)
+
+    assert cfg.stt.source_language == "German"
+    assert cfg.translate.targets == ["Japanese", "French"]
+    assert cfg.audio.device == "Some USB Mic"
+    assert cfg.osc.port == 9999
+    assert cfg.gui.font_scale == 1.5
+    assert cfg.gui.ui_language == "ja"
+
+
+def test_reset_to_recommended_prefers_a_downloaded_model(monkeypatch):
+    # The ranking would pick parakeet for German on CPU, but only small is on
+    # disk: resetting must not leave the app unable to caption.
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+    dm = _FakeDM(whisper=["small"], mt=["nllb-600M-int8"])
+
+    recommend.reset_to_recommended(cfg, dm)
+
+    assert cfg.stt.model == "small"
+    assert cfg.translate.model == "nllb-600M-int8"
+
+
+def test_reset_to_recommended_applies_the_advised_profile(monkeypatch):
+    # base on CPU is the case where Quality earns its keep, so a reset that
+    # lands on it must also switch the mode.
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    cfg = _cfg_with_personal_choices()
+    cfg.stt.source_language = "Japanese"  # no NeMo model covers it
+    dm = _FakeDM(whisper=["base"], mt=[])
+
+    summary = recommend.reset_to_recommended(cfg, dm)
+
+    assert cfg.stt.model == "base"
+    assert summary["profile"] == "quality"
+    assert cfg.gui.profile == "quality"
+    assert cfg.stt.beam_size == 5  # the profile bundle actually applied
+
+
+def test_best_downloaded_language_prefers_covering_specialist():
+    dm = _FakeDM(whisper={"parakeet-tdt-0.6b-v3", "small"})
+    # language-blind: small ranks above the restricted parakeet
+    assert recommend.best_downloaded(dm, translate=False, tier="cpu")[0] == "small"
+    # with "en" known, parakeet leads the cpu tier
+    got = recommend.best_downloaded(dm, translate=False, tier="cpu", language="en")
+    assert got[0] == "parakeet-tdt-0.6b-v3"
+    # a language parakeet does not cover keeps the blind pick
+    got = recommend.best_downloaded(dm, translate=False, tier="cpu", language="ja")
+    assert got[0] == "small"
 
 
 @pytest.mark.parametrize("tier", _TIERS)

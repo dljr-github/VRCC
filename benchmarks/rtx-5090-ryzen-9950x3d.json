@@ -1,0 +1,797 @@
+{
+  "schema": 1,
+  "dataset": "LibriSpeech test-clean",
+  "machine": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor",
+    "cpu_threads": 32,
+    "gpus": [
+      "NVIDIA GeForce RTX 5090"
+    ],
+    "driver": "610.62",
+    "vram_gb": 31.8
+  },
+  "results": [
+    {
+      "model": "base",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 145,
+      "load_s": 0.19,
+      "warmup_s": 0.22,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 26.1,
+      "rtf": 0.0347,
+      "latency_median_s": 0.251,
+      "latency_p90_s": 0.31,
+      "wer": 0.059,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "base",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 145,
+      "load_s": 0.19,
+      "warmup_s": 0.22,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 28.1,
+      "rtf": 0.0374,
+      "latency_median_s": 0.263,
+      "latency_p90_s": 0.346,
+      "wer": 0.0493,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "base",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 145,
+      "load_s": 0.15,
+      "warmup_s": 0.02,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 5.3,
+      "rtf": 0.007,
+      "latency_median_s": 0.044,
+      "latency_p90_s": 0.092,
+      "wer": 0.057,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "base",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 145,
+      "load_s": 0.2,
+      "warmup_s": 0.02,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 7.2,
+      "rtf": 0.0096,
+      "latency_median_s": 0.06,
+      "latency_p90_s": 0.13,
+      "wer": 0.0474,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "distil-large-v3.5",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1510,
+      "load_s": 1.54,
+      "warmup_s": 2.68,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 299.4,
+      "rtf": 0.3977,
+      "latency_median_s": 2.777,
+      "latency_p90_s": 3.769,
+      "wer": 0.0227,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "distil-large-v3.5",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1510,
+      "load_s": 1.03,
+      "warmup_s": 0.04,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 5.9,
+      "rtf": 0.0078,
+      "latency_median_s": 0.055,
+      "latency_p90_s": 0.077,
+      "wer": 0.0242,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "distil-large-v3.5",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1510,
+      "load_s": 1.12,
+      "warmup_s": 0.04,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 6.2,
+      "rtf": 0.0083,
+      "latency_median_s": 0.058,
+      "latency_p90_s": 0.083,
+      "wer": 0.0227,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "distil-small.en",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 332,
+      "load_s": 0.37,
+      "warmup_s": 0.57,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 65.1,
+      "rtf": 0.0864,
+      "latency_median_s": 0.635,
+      "latency_p90_s": 0.704,
+      "wer": 0.0401,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "distil-small.en",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 332,
+      "load_s": 0.38,
+      "warmup_s": 0.59,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 79.0,
+      "rtf": 0.1049,
+      "latency_median_s": 0.808,
+      "latency_p90_s": 0.972,
+      "wer": 0.0396,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "distil-small.en",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 332,
+      "load_s": 0.27,
+      "warmup_s": 0.02,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 4.4,
+      "rtf": 0.0059,
+      "latency_median_s": 0.038,
+      "latency_p90_s": 0.073,
+      "wer": 0.0401,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "distil-small.en",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 332,
+      "load_s": 0.28,
+      "warmup_s": 0.02,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 5.1,
+      "rtf": 0.0068,
+      "latency_median_s": 0.043,
+      "latency_p90_s": 0.083,
+      "wer": 0.0406,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "large-v3-turbo",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1620,
+      "load_s": 1.65,
+      "warmup_s": 2.71,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 298.3,
+      "rtf": 0.3962,
+      "latency_median_s": 2.813,
+      "latency_p90_s": 3.705,
+      "wer": 0.0164,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "large-v3-turbo",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1620,
+      "load_s": 1.12,
+      "warmup_s": 0.05,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 7.3,
+      "rtf": 0.0097,
+      "latency_median_s": 0.067,
+      "latency_p90_s": 0.103,
+      "wer": 0.0174,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "large-v3-turbo",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1620,
+      "load_s": 1.36,
+      "warmup_s": 0.18,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 7.6,
+      "rtf": 0.01,
+      "latency_median_s": 0.069,
+      "latency_p90_s": 0.108,
+      "wer": 0.0184,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "large-v3",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 3090,
+      "load_s": 3.09,
+      "warmup_s": 3.11,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 410.9,
+      "rtf": 0.5458,
+      "latency_median_s": 3.905,
+      "latency_p90_s": 4.939,
+      "wer": 0.0179,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "large-v3",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 3090,
+      "load_s": 2.3,
+      "warmup_s": 0.07,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 27.4,
+      "rtf": 0.0363,
+      "latency_median_s": 0.24,
+      "latency_p90_s": 0.473,
+      "wer": 0.0174,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "large-v3",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 3090,
+      "load_s": 2.44,
+      "warmup_s": 0.09,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 29.6,
+      "rtf": 0.0393,
+      "latency_median_s": 0.262,
+      "latency_p90_s": 0.49,
+      "wer": 0.0174,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "medium",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1530,
+      "load_s": 1.92,
+      "warmup_s": 2.35,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 246.0,
+      "rtf": 0.3267,
+      "latency_median_s": 2.41,
+      "latency_p90_s": 3.153,
+      "wer": 0.0261,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "medium",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1530,
+      "load_s": 1.15,
+      "warmup_s": 0.06,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 20.9,
+      "rtf": 0.0278,
+      "latency_median_s": 0.172,
+      "latency_p90_s": 0.368,
+      "wer": 0.0271,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "medium",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 1530,
+      "load_s": 1.13,
+      "warmup_s": 0.05,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 20.9,
+      "rtf": 0.0277,
+      "latency_median_s": 0.177,
+      "latency_p90_s": 0.36,
+      "wer": 0.0237,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "parakeet-tdt-0.6b-v3",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 690,
+      "load_s": 1.25,
+      "warmup_s": 0.07,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 15.7,
+      "rtf": 0.0208,
+      "latency_median_s": 0.127,
+      "latency_p90_s": 0.275,
+      "wer": 0.0232,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "parakeet-tdt-0.6b-v3",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 690,
+      "load_s": 1.81,
+      "warmup_s": 0.43,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 24.7,
+      "rtf": 0.0328,
+      "latency_median_s": 0.21,
+      "latency_p90_s": 0.434,
+      "wer": 0.0232,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:int8"
+        ]
+      ]
+    },
+    {
+      "model": "small",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 484,
+      "load_s": 0.54,
+      "warmup_s": 0.69,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 78.4,
+      "rtf": 0.1042,
+      "latency_median_s": 0.745,
+      "latency_p90_s": 0.912,
+      "wer": 0.0372,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "small",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 484,
+      "load_s": 0.54,
+      "warmup_s": 0.68,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 82.5,
+      "rtf": 0.1096,
+      "latency_median_s": 0.776,
+      "latency_p90_s": 0.989,
+      "wer": 0.0382,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "small",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 484,
+      "load_s": 0.37,
+      "warmup_s": 0.03,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 10.5,
+      "rtf": 0.0139,
+      "latency_median_s": 0.088,
+      "latency_p90_s": 0.176,
+      "wer": 0.0367,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "small",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 484,
+      "load_s": 0.41,
+      "warmup_s": 0.03,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 10.6,
+      "rtf": 0.0141,
+      "latency_median_s": 0.087,
+      "latency_p90_s": 0.186,
+      "wer": 0.0353,
+      "gated": 1,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "tiny",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 75,
+      "load_s": 0.12,
+      "warmup_s": 0.11,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 13.4,
+      "rtf": 0.0178,
+      "latency_median_s": 0.129,
+      "latency_p90_s": 0.156,
+      "wer": 0.0793,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "tiny",
+      "device": "cpu",
+      "resolved_device": "cpu",
+      "compute": "int8",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 75,
+      "load_s": 0.12,
+      "warmup_s": 0.12,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 14.5,
+      "rtf": 0.0193,
+      "latency_median_s": 0.138,
+      "latency_p90_s": 0.175,
+      "wer": 0.0701,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cpu:int8"
+        ]
+      ]
+    },
+    {
+      "model": "tiny",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 1,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 75,
+      "load_s": 0.19,
+      "warmup_s": 0.13,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 3.7,
+      "rtf": 0.005,
+      "latency_median_s": 0.033,
+      "latency_p90_s": 0.065,
+      "wer": 0.0744,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    },
+    {
+      "model": "tiny",
+      "device": "cuda",
+      "resolved_device": "cuda",
+      "compute": "float16",
+      "beam": 5,
+      "utterance_set": "a0ad13b7b284",
+      "size_mb": 75,
+      "load_s": 0.14,
+      "warmup_s": 0.02,
+      "n_utterances": 100,
+      "audio_s": 752.9,
+      "proc_s": 5.1,
+      "rtf": 0.0067,
+      "latency_median_s": 0.043,
+      "latency_p90_s": 0.094,
+      "wer": 0.071,
+      "gated": 0,
+      "empty": 0,
+      "engine_events": [
+        [
+          "ready",
+          "cuda:float16"
+        ]
+      ]
+    }
+  ]
+}

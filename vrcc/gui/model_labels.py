@@ -13,10 +13,10 @@ from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
 _MT_DISPLAY_NAMES: dict[str, str] = {
-    "nllb-600M-int8": tr_noop("NLLB 600M — balanced"),
-    "nllb-1.3B-int8": tr_noop("NLLB 1.3B — higher quality"),
-    "nllb-3.3B-int8": tr_noop("NLLB 3.3B — best quality (large)"),
-    "m2m100-418M-int8": tr_noop("M2M100 418M — small"),
+    "nllb-600M-int8": tr_noop("NLLB 600M - balanced"),
+    "nllb-1.3B-int8": tr_noop("NLLB 1.3B - higher quality"),
+    "nllb-3.3B-int8": tr_noop("NLLB 3.3B - best quality (large)"),
+    "m2m100-418M-int8": tr_noop("M2M100 418M - small"),
     "m2m100-1.2B-int8": tr_noop("M2M100 1.2B"),
     "madlad400-3b": tr_noop("MADLAD-400 3B"),
 }
@@ -33,6 +33,7 @@ _WHISPER_LABEL_MARKERS = (
     tr_noop("Large v3 Turbo"),
     tr_noop("Distil-Large v3.5 (English)"),
     tr_noop("Distil-Small (English)"),
+    tr_noop("Parakeet v3 (European languages)"),
 )
 
 
@@ -61,14 +62,15 @@ _fmt_size = fmt_size  # old name kept as an alias for existing callers
 # Short quality/speed lead-ins, distinct per model. Unlisted ids fall back to a
 # generic, size-derived lead-in so the blurb never looks broken.
 _WHISPER_LEAD_INS: dict[str, str] = {
-    "tiny": tr_noop("Fastest — rough accuracy"),
-    "base": tr_noop("Fast — basic accuracy"),
+    "tiny": tr_noop("Fastest - rough accuracy"),
+    "base": tr_noop("Fast - basic accuracy"),
     "small": tr_noop("Good balance for most PCs"),
     "medium": tr_noop("More accurate, needs a decent PC"),
-    "large-v3": tr_noop("Most accurate — big download"),
+    "large-v3": tr_noop("Most accurate - big download"),
     "large-v3-turbo": tr_noop("Most accurate and fast"),
     "distil-large-v3.5": tr_noop("Near-most accurate, fast"),
     "distil-small.en": tr_noop("Fast, small download"),
+    "parakeet-tdt-0.6b-v3": tr_noop("Very accurate and fast"),
 }
 
 _MT_LEAD_INS: dict[str, str] = {
@@ -95,7 +97,8 @@ def model_blurb(kind: str, model_id: str) -> str:
 
     ``kind`` is ``"whisper"`` or ``"mt"``. Includes "· non-commercial use"
     for MT specs whose ``license`` contains "NC"; includes "· English only"
-    for whisper specs with ``english_only`` True. Unknown ids return ``""``.
+    for voice specs with ``english_only`` True and "· European languages only"
+    for other language-restricted voice specs. Unknown ids return ``""``.
     """
     if kind == "whisper":
         spec = WHISPER_MODELS.get(model_id)
@@ -107,6 +110,11 @@ def model_blurb(kind: str, model_id: str) -> str:
         blurb = " · ".join(parts)
         if spec.english_only:
             blurb += " · " + tr("English only")
+        elif spec.languages is not None:
+            # Today every language-restricted non-English model (Parakeet)
+            # covers the same 25 European languages; revisit the wording if
+            # that changes.
+            blurb += " · " + tr("European languages only")
         return blurb
     if kind == "mt":
         spec = MT_MODELS.get(model_id)

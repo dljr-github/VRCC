@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QComboBox, QDoubleSpinBox, QLabel, Q
 
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.gui import settings as settings_mod
-from vrcc.gui.settings import SettingsDialog, _RESTART_FIELDS
+from vrcc.gui.settings import SettingsDialog
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
@@ -227,11 +227,16 @@ def test_empty_voice_combo_disabled_when_none_downloaded(qapp, tmp_path):
         dlg.deleteLater()
 
 
-def test_model_fields_not_restart_gated():
-    flat = set(_RESTART_FIELDS)
-    assert ("stt", "model") not in flat
-    assert ("translate", "model") not in flat
-    assert ("translate", "enabled") not in flat
+def test_no_restart_banner(qapp, tmp_path):
+    """Every setting applies live now, so the restart banner is gone entirely."""
+    dlg, _ = _dlg(tmp_path)
+    try:
+        assert not hasattr(dlg, "_restart_banner")
+        for label in dlg.findChildren(QLabel):
+            assert "restart" not in label.text().lower()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
 
 
 # -- Task 5: dialog fits a laptop screen, plain labels, presets, placeholder --
@@ -369,24 +374,6 @@ def test_hint_style_scales_with_font_scale(qapp, tmp_path):
     dlg = SettingsDialog(store)
     try:
         assert f"font-size: {round(11 * 1.2)}px" in dlg._muted_style
-    finally:
-        dlg.close()
-        dlg.deleteLater()
-
-
-def test_light_theme_dialog_uses_no_hardcoded_dark_colors(qapp, tmp_path):
-    """Hint labels and the restart/warning banners must be themed, so a
-    light-theme dialog carries none of the old dark-only hex literals."""
-    from PySide6.QtWidgets import QWidget
-
-    store = _store(tmp_path)
-    store.config.gui.theme = "light"
-    dlg = SettingsDialog(store)
-    try:
-        for w in dlg.findChildren(QWidget):
-            ss = w.styleSheet()
-            assert "#98a2b3" not in ss  # dark muted
-            assert "#fdf2e0" not in ss  # cream warn background
     finally:
         dlg.close()
         dlg.deleteLater()

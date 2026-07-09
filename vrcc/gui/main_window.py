@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QComboBox, QMainWindow, QMessageBox, QVBoxLayout, 
 
 from vrcc import __version__
 from vrcc.core.config import ConfigStore, apply_profile
+from vrcc.gui import model_prompts
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.caption_log import CaptionModel, empty_state_html, render_rows_html
 from vrcc.gui.icons import FRIENDLY_ERRORS as _FRIENDLY_ERRORS
@@ -54,11 +55,21 @@ class MainWindow(QMainWindow):
         on_open_settings: Callable[[], None],
         on_open_models: Callable[[], None],
         mt_available: bool = True,
+        download_manager=None,
+        on_model_change=None,
     ) -> None:
         super().__init__()
         self._bridge = bridge
         self._store = config_store
         self._pipeline = pipeline
+        # Optional collaborators (None when headless): both feed the
+        # language-change model nudge, mirroring SettingsDialog's pair.
+        self._download_manager = download_manager
+        self._on_model_change = on_model_change
+        # Language-nudge state: one queued prompt at a time, and the declined
+        # (model, language) pair so config reloads do not re-ask it.
+        self._nudge_pending = False
+        self._nudge_declined: tuple[str, str] | None = None
         # Resolved once at construction (theme + text size are restart-applied).
         self._p = PALETTE[resolve_theme(config_store.config.gui.theme)]
         self._scale = max(0.5, min(2.0, config_store.config.gui.font_scale))
@@ -145,7 +156,14 @@ class MainWindow(QMainWindow):
     def _load_from_config(self) -> None:
         cfg = self._store.config
 
+        # Grey the spoken languages the active voice model can't transcribe,
+        # then point the combo at the stored language (re-run on every re-sync
+        # so a model change made in Settings re-enables the right languages).
+        model_prompts.grey_unsupported_languages(self._source_combo, cfg.stt.model)
         self._set_combo_text(self._source_combo, cfg.stt.source_language)
+        # A stored language the greying just disabled would caption wrongly in
+        # silence; offer a better downloaded model once construction settles.
+        model_prompts.schedule_language_nudge(self)
 
         targets = list(cfg.translate.targets)
         for slot, combo in enumerate(self._target_combos):
@@ -171,16 +189,29 @@ class MainWindow(QMainWindow):
 
     # -- bridge signal wiring ----------------------------------------------
 
+    def _bridge_bindings(self):
+        b = self._bridge
+        return (
+            (b.mic_level, self._on_mic_level),
+            (b.phrase_recognized, self._on_phrase_recognized),
+            (b.phrase_translated, self._on_phrase_translated),
+            (b.chatbox_sent, self._on_chatbox_sent),
+            (b.mute_changed, self._on_mute_changed),
+            (b.engine_state, self._on_engine_state),
+            (b.download_progress, self._on_download_progress),
+            (b.app_error, self._on_app_error),
+            (b.vrchat_detected, self._on_vrchat_detected),
+        )
+
     def _connect_bridge(self) -> None:
-        self._bridge.mic_level.connect(self._on_mic_level)
-        self._bridge.phrase_recognized.connect(self._on_phrase_recognized)
-        self._bridge.phrase_translated.connect(self._on_phrase_translated)
-        self._bridge.chatbox_sent.connect(self._on_chatbox_sent)
-        self._bridge.mute_changed.connect(self._on_mute_changed)
-        self._bridge.engine_state.connect(self._on_engine_state)
-        self._bridge.download_progress.connect(self._on_download_progress)
-        self._bridge.app_error.connect(self._on_app_error)
-        self._bridge.vrchat_detected.connect(self._on_vrchat_detected)
+        for signal, slot in self._bridge_bindings():
+            signal.connect(slot)
+
+    def disconnect_bridge(self) -> None:
+        """Detach every bridge slot so a window replaced on a UI-language change
+        stops receiving events (the shared BusBridge outlives this window)."""
+        for signal, slot in self._bridge_bindings():
+            signal.disconnect(slot)
 
     # -- bridge slots (GUI thread) -----------------------------------------
 
@@ -231,7 +262,7 @@ class MainWindow(QMainWindow):
             self._vrchat_label.setStyleSheet(f"color: {self._p['good']}; padding: 2px 8px;")
             self._vrchat_label.setToolTip(tr("VRChat's OSC service was found on this network."))
         elif detected is False:
-            self._vrchat_label.setText(tr("VRChat: not detected — enable OSC in-game"))
+            self._vrchat_label.setText(tr("VRChat: not detected - enable OSC in-game"))
             self._vrchat_label.setStyleSheet(f"color: {self._p['warn']}; padding: 2px 8px;")
             self._vrchat_label.setToolTip(tip)
         else:
@@ -243,13 +274,19 @@ class MainWindow(QMainWindow):
         # State drives the caption feed's loading message via _engine_states; it
         # is no longer shown as jargon text on the main screen.
         self._engine_states[event.engine] = event.state
+        # _render_log reads that state to choose the empty-state text, and only
+        # a caption event would otherwise redraw it: without this the feed still
+        # says the model is loading long after it is ready.
+        self._render_log()
         known = event.engine in _ENGINE_NAMES
         name = tr(_ENGINE_NAMES[event.engine]) if known else event.engine.title()
         if event.state == "fallback_cpu":
             # Transient state (immediately followed by "ready"), so surface the
-            # CPU drop as a status flash before it's overwritten. Plain name, no jargon.
+            # CPU drop as a status flash before it's overwritten. Plain name, no
+            # jargon; cause-neutral -- fallback_cpu also covers a CUDA provider
+            # that failed to initialize, not just VRAM exhaustion.
             self._flash_status(
-                tr("{name} ran out of GPU memory — switched to CPU (slower).", name=name)
+                tr("{name} could not stay on the GPU. Switched to CPU (slower).", name=name)
             )
         if event.state == "failed":
             self.set_capture_status(False, tr("{name} failed to load", name=name))
@@ -299,7 +336,7 @@ class MainWindow(QMainWindow):
                 msg, sub = tr("Getting the voice model ready…"), tr("usually takes a few seconds")
             else:
                 msg, sub = (
-                    tr("Say something — captions appear here"),
+                    tr("Say something - captions appear here"),
                     tr("then in your VRChat chatbox"),
                 )
             self._log.setHtml(empty_state_html(msg, sub, colors, self._scale))
@@ -309,7 +346,7 @@ class MainWindow(QMainWindow):
 
     def _set_mute_chip(self, muted) -> None:
         # None (mute-sync state unknown yet) hides the chip entirely rather than
-        # showing an empty "–" box.
+        # showing an empty "-" box.
         if muted is None:
             self._mute_chip.setVisible(False)
             return
@@ -347,12 +384,12 @@ class MainWindow(QMainWindow):
         elif ok is False:
             reason = getattr(self, "_capture_reason", "")
             if reason:
-                text = tr("Not listening — {reason}", reason=reason)
+                text = tr("Not listening - {reason}", reason=reason)
             else:
                 text = tr("Not listening")
             color = self._p["bad"]
         elif getattr(self, "_captioning_btn", None) is not None and not self._captioning_btn.isChecked():
-            text, color = tr("Paused — not listening"), self._p["warn"]
+            text, color = tr("Paused - not listening"), self._p["warn"]
         else:
             text, color = tr("Listening"), self._p["good"]
         self._capture_label.setText(text)
@@ -376,6 +413,7 @@ class MainWindow(QMainWindow):
         # A target equal to the new source would translate a language into itself
         # (sending the original twice); rebuild drops it (and persists via save_soon).
         self._rebuild_targets()
+        model_prompts.run_language_nudge(self)
 
     def _on_targets_changed(self, _text: str) -> None:
         self._rebuild_targets()

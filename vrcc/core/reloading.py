@@ -93,6 +93,12 @@ _SWITCH_STATUS = {
 # legitimate None MT target), so ANY re-selection triggers a fresh swap.
 _FAILED = object()
 
+# _Reloader._loaded value written when a forced request() starts a swap: a
+# device/compute/thread change keeps the same model id, so the cached id is
+# invalidated (it equals no target) and the "already installed" short-circuit
+# cannot skip the rebuild.
+_REBUILD = object()
+
 
 def _spawn_daemon(fn: Callable[[], None]) -> None:
     """Default :class:`_Reloader` swap runner: run ``fn`` on a fresh daemon
@@ -140,19 +146,35 @@ class _Reloader:
         self._busy = False
         self._pending: set[str] = set()
         self._failed: set[str] = set()  # kinds whose last swap failed
+        # Kinds a forced request() asked to rebuild, held until that rebuild
+        # starts so a swap finishing in between cannot cancel it.
+        self._forced: set[str] = set()
 
-    def request(self, kind: str, target_id) -> None:
-        """(GUI thread) Ensure ``kind`` ends up installed as ``target_id``."""
+    def request(self, kind: str, target_id, force: bool = False) -> None:
+        """(GUI thread) Ensure ``kind`` ends up installed as ``target_id``.
+        ``force`` rebuilds even when ``target_id`` is already installed -- for a
+        device/compute/thread change that keeps the model id, where a plain
+        request would wrongly no-op (see ``_REBUILD``)."""
         with self._lock:
-            # No-op if the desired model is already installed and idle (covers
-            # same-value re-selection and change-then-change-back).
-            if self._loaded.get(kind) == target_id and not self._busy:
-                return
+            if force:
+                # Remembered until the rebuild actually starts. Writing the
+                # sentinel here would not survive a same-kind swap in flight:
+                # _finish records that swap's id over it, and the replay it
+                # then triggers is a plain request that would no-op.
+                self._forced.add(kind)
             if self._busy:
                 # A swap is already running; remember this kind and re-check it
                 # against the current config when that swap finishes.
                 self._pending.add(kind)
                 return
+            if kind in self._forced:
+                self._loaded[kind] = _REBUILD
+            # No-op if the desired model is already installed and idle (covers
+            # same-value re-selection and change-then-change-back).
+            if self._loaded.get(kind) == target_id:
+                self._forced.discard(kind)
+                return
+            self._forced.discard(kind)
             self._busy = True
         self._start(kind, target_id)
 

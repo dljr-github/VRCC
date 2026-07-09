@@ -281,3 +281,30 @@ def test_fallback_cpu_engine_state_flashes_status(qapp, tmp_path):
         window.close()
         window.deleteLater()
         bridge.detach()
+
+
+def test_stt_ready_clears_the_loading_message_without_a_caption(qapp, tmp_path):
+    # The empty-state text is chosen from _engine_states, and only a caption
+    # event would otherwise redraw the feed: a ready engine must clear the
+    # "getting the voice model ready" line by itself.
+    from types import SimpleNamespace
+
+    store = _store(tmp_path)
+    window, bridge = _main_window(store)
+    try:
+        window._on_engine_state(
+            SimpleNamespace(engine="stt", state="loading", detail="")
+        )
+        assert "ready" in window._log.toPlainText().lower()
+
+        window._on_engine_state(
+            SimpleNamespace(engine="stt", state="ready", detail="cpu:int8")
+        )
+
+        text = window._log.toPlainText()
+        assert "Say something" in text
+        assert "ready" not in text.lower()
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()

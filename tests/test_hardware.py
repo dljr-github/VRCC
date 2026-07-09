@@ -98,6 +98,47 @@ class TestResolve:
         assert index == 3
 
 
+class TestResolvedDevice:
+    _PARAKEET = "parakeet-tdt-0.6b-v3"
+
+    def test_auto_gpu_whisper_is_cuda(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("auto", 0, "small") == "cuda"
+
+    def test_auto_gpu_parakeet_is_cpu(self, monkeypatch):
+        # onnx-asr auto override: a GPU is present but the int8 graph runs on CPU.
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("auto", 0, self._PARAKEET) == "cpu"
+
+    def test_explicit_cuda_parakeet_stays_cuda(self, monkeypatch):
+        # The override only applies to "auto"; a pinned "cuda" is honored.
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("cuda", 0, self._PARAKEET) == "cuda"
+
+    def test_explicit_cpu_stays_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("cpu", 0, "small") == "cpu"
+
+    def test_auto_without_gpu_is_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
+        assert hardware.resolved_device("auto", 0, "small") == "cpu"
+
+    def test_auto_gpu_unknown_model_mirrors_resolve(self, monkeypatch):
+        # No / unknown model id: no onnx override, so it matches resolve()'s cuda.
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("auto", 0, None) == "cuda"
+
+    def test_failed_driver_floor_degrades_auto_to_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "_driver_floor_failed", True)
+        assert hardware.resolved_device("auto", 0, "small") == "cpu"
+
+    def test_failed_driver_floor_degrades_explicit_cuda_to_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "_driver_floor_failed", True)
+        assert hardware.resolved_device("cuda", 0, "small") == "cpu"
+
+
 class TestDriverFloor:
     def test_no_cuda_device_never_publishes(self, monkeypatch):
         monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
@@ -164,6 +205,50 @@ class TestGracefulDegradation:
 
     def test_setup_cuda_dlls_never_raises_and_returns_bool(self):
         assert isinstance(hardware.setup_cuda_dlls(), bool)
+
+    def test_preload_onnxruntime_calls_preload_dlls_when_available(self, monkeypatch):
+        import onnxruntime
+
+        calls = []
+        monkeypatch.setattr(
+            onnxruntime, "preload_dlls", lambda: calls.append(True), raising=False
+        )
+        hardware._preload_onnxruntime_cuda_dlls()
+        assert calls == [True]
+
+    def test_preload_onnxruntime_swallows_preload_failure(self, monkeypatch):
+        import onnxruntime
+
+        def boom():
+            raise OSError("cudnn64_9.dll not found")
+
+        monkeypatch.setattr(onnxruntime, "preload_dlls", boom, raising=False)
+        hardware._preload_onnxruntime_cuda_dlls()  # must not raise
+
+    def test_preload_onnxruntime_silences_preload_chatter(self, monkeypatch, capsys):
+        # preload_dlls() prints "Failed to load ..." lines for CUDA DLLs the
+        # nvidia-* wheels don't ship; those must land in the debug log, never
+        # on the real stdout/stderr (None in the windowed exe).
+        import sys
+
+        import onnxruntime
+
+        def chatty():
+            print("Failed to load cufft64_11.dll ...")
+            print("Failed to load cudart64_12.dll ...", file=sys.stderr)
+
+        monkeypatch.setattr(onnxruntime, "preload_dlls", chatty, raising=False)
+        hardware._preload_onnxruntime_cuda_dlls()  # must not raise
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_preload_onnxruntime_noop_without_preload_dlls(self, monkeypatch):
+        # Older onnxruntime (< 1.21) has no preload_dlls attribute.
+        import onnxruntime
+
+        monkeypatch.delattr(onnxruntime, "preload_dlls", raising=False)
+        hardware._preload_onnxruntime_cuda_dlls()  # must not raise
 
     def test_device_names_fallback_without_pynvml(self, monkeypatch):
         monkeypatch.setattr(hardware, "_pynvml", lambda: None)

@@ -58,6 +58,29 @@ def test_defaults_round_trip_through_save_and_load(tmp_path):
     assert loaded.load_warnings == []
 
 
+def test_missing_on_load_flags_only_a_fresh_install(tmp_path):
+    path = tmp_path / "config.json"
+    store = ConfigStore(path)
+    store.load()
+    assert store.missing_on_load is True
+
+    store.save_now()
+    reloaded = ConfigStore(path)
+    reloaded.load()
+    assert reloaded.missing_on_load is False
+
+
+def test_missing_on_load_false_for_malformed_file(tmp_path):
+    # A corrupt file is an EXISTING config: it loads as defaults, but the
+    # first-launch defaulting gated on this flag must never treat it as fresh.
+    path = tmp_path / "config.json"
+    path.write_text("{not json", encoding="utf-8")
+    store = ConfigStore(path)
+    store.load()
+    assert store.missing_on_load is False
+    assert store.load_warnings
+
+
 def test_write_failure_is_swallowed_not_raised(tmp_path, monkeypatch):
     """Regression: a debounced save runs on a daemon Timer thread; a raise
     there dies to stderr (os.devnull in the windowed exe), i.e. silently, and
@@ -158,6 +181,27 @@ def test_invalid_literal_field_falls_back_to_default_with_warning(tmp_path):
 
     assert store.config.gui.theme == GuiConfig().theme
     assert store.config.gui.font_scale == 2.0
+    assert len(store.load_warnings) == 1
+    assert "gui.theme" in store.load_warnings[0]
+
+
+@pytest.mark.parametrize("stored", ["light", "system"])
+def test_stored_light_or_system_theme_loads_as_dark(tmp_path, stored):
+    # Only the dark palette survives; a config written by an older build that
+    # stored "light"/"system" must still load, dropping the field back to
+    # "dark". It is no longer a valid Literal value, so the field-by-field
+    # fallback records a benign gui.theme warning (the good fields are kept).
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"gui": {"theme": stored, "font_scale": 1.25}}),
+        encoding="utf-8",
+    )
+
+    store = ConfigStore(path)
+    store.load()
+
+    assert store.config.gui.theme == "dark"
+    assert store.config.gui.font_scale == 1.25
     assert len(store.load_warnings) == 1
     assert "gui.theme" in store.load_warnings[0]
 

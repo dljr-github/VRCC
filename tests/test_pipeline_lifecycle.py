@@ -55,10 +55,12 @@ def test_energy_gate_passes_loud_frames():
 def test_energy_gate_lets_quiet_frames_flow_mid_utterance():
     # The gate only blocks utterance STARTS: once the segmenter is ACTIVE,
     # every frame flows until finalize (a quiet word tail must not be cut).
+    # Activation happens after start(), which resets in-flight segmenter
+    # state, so the fake goes active only once the pipeline runs.
     cfg = AppConfig(audio=AudioConfig(**_GATED_CFG))
     env = make_pipeline(config=cfg)
-    env.segmenter.active = True
     with running(env.pipeline):
+        env.segmenter.active = True
         env.pipeline._on_frame(sample(v=0.001))
         assert _wait_until(lambda: len(env.segmenter.frames) == 1)
 
@@ -191,3 +193,50 @@ def test_start_wires_source_callback():
     with running(env.pipeline):
         assert env.source.started is True
         assert env.source.on_frame is not None
+
+
+# -- live source swap -------------------------------------------------------
+
+
+def test_restart_source_swaps_live_source_and_keeps_capturing():
+    env = make_pipeline()
+    p = env.pipeline
+    p.start()
+    old, new = env.source, FakeSource()
+    try:
+        assert p.restart_source(new) is True  # capture still running afterwards
+        assert old.stopped is True
+        assert new.started is True
+        assert new.on_frame is not None
+        assert p._source is new
+    finally:
+        p.stop()
+
+
+def test_restart_source_while_stopped_installs_without_capturing():
+    env = make_pipeline()
+    p = env.pipeline
+    new = FakeSource()
+    assert p.restart_source(new) is False  # not running -> stays stopped
+    assert new.started is False
+    assert p._source is new
+    p.start()  # a later start() uses the newly installed source
+    assert new.started is True
+    p.stop()
+
+
+def test_restart_source_failed_open_reraises_and_leaves_pipeline_consistent():
+    class BoomSource(FakeSource):
+        def start(self, on_frame) -> None:
+            raise RuntimeError("device gone")
+
+    env = make_pipeline()
+    p = env.pipeline
+    p.start()
+    with pytest.raises(RuntimeError, match="device gone"):
+        p.restart_source(BoomSource())
+    # start() unwound itself: consistent, not running, workers torn down.
+    assert p._started is False
+    assert p._seg_thread is None
+    assert p._stt_thread is None
+    p.stop()  # safe no-op

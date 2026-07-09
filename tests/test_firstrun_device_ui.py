@@ -64,8 +64,14 @@ def test_firstrun_cpu_choice_shows_cpu_preset_despite_gpu_tier(
 ):
     wiz, _store_, _dm, bridge = _wizard(tmp_path, monkeypatch, tier="gpu_high")
     try:
-        cpu_label = WHISPER_MODELS[recommend.PRESETS["cpu"][0]].label
-        gpu_label = WHISPER_MODELS[recommend.PRESETS["gpu_high"][0]].label
+        # The fresh-config source language is English, so the plan is the
+        # language-aware CPU pick, never the gpu_high one.
+        cpu_label = WHISPER_MODELS[
+            recommend.preset_for_choice("cpu", tier="gpu_high", language="en")[0]
+        ].label
+        gpu_label = WHISPER_MODELS[
+            recommend.preset_for_choice("gpu", tier="gpu_high", language="en")[0]
+        ].label
         text = wiz._summary_label.text()
         assert f"Speech: {cpu_label}" in text
         assert gpu_label not in text
@@ -227,6 +233,89 @@ def test_firstrun_defaults_to_gpu_on_16gb_card(qapp, tmp_path, monkeypatch):
         assert (wiz.recommended_whisper, wiz.recommended_mt) == recommend.PRESETS[
             "gpu_high"
         ]
+    finally:
+        _teardown(wiz, bridge)
+
+
+# -- language-aware recommendation -------------------------------------------
+
+
+def _wizard_with_language(tmp_path, monkeypatch, tier, language, default_choice="cpu"):
+    from vrcc.gui.firstrun import FirstRunWizard
+
+    monkeypatch.setattr(recommend, "detect_tier", lambda: tier)
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: default_choice)
+    store = _store(tmp_path)
+    store.config.stt.source_language = language
+    dm = _FakeDownloadManager(tmp_path / "models")
+    bridge = _bridge()
+    return FirstRunWizard(store, dm, bridge), store, dm, bridge
+
+
+@pytest.mark.parametrize("language", ["German", "English"])
+def test_firstrun_cpu_tier_recommends_parakeet_for_covered_language(
+    qapp, tmp_path, monkeypatch, language
+):
+    # Parakeet covers the language and beats every Whisper model on CPU
+    # (WER band + latency), so it must lead the CPU-tier recommendation.
+    wiz, _store_, _dm, bridge = _wizard_with_language(
+        tmp_path, monkeypatch, "cpu", language
+    )
+    try:
+        assert wiz.recommended_whisper == "parakeet-tdt-0.6b-v3"
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_firstrun_gpu_tier_keeps_turbo_for_german(qapp, tmp_path, monkeypatch):
+    wiz, _store_, _dm, bridge = _wizard_with_language(
+        tmp_path, monkeypatch, "gpu_high", "German", default_choice="gpu"
+    )
+    try:
+        assert wiz._device_choice.value() == "GPU"
+        assert wiz.recommended_whisper == "large-v3-turbo"
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_firstrun_source_change_refreshes_recommendation(qapp, tmp_path, monkeypatch):
+    wiz, store, _dm, bridge = _wizard_with_language(
+        tmp_path, monkeypatch, "cpu", "German"
+    )
+    try:
+        assert wiz.recommended_whisper == "parakeet-tdt-0.6b-v3"
+        # Japanese is outside Parakeet's set: the plan must re-rank live.
+        wiz._source_combo.setCurrentText("Japanese")
+        assert store.config.stt.source_language == "Japanese"
+        assert wiz.recommended_whisper == "small"
+        assert "Parakeet" not in wiz._summary_label.text()
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_choose_manually_auto_select_prefers_language_capable_model(
+    qapp, tmp_path, monkeypatch
+):
+    # German + both Parakeet and Small on disk: the language-aware walk must
+    # pick Parakeet (the language-blind order would pick Small).
+    wiz, store, dm, bridge = _wizard_with_language(
+        tmp_path, monkeypatch, "cpu", "German"
+    )
+    store.config.stt.model = "large-v3"  # configured, but NOT downloaded
+    store.config.translate.model = "nllb-3.3B-int8"
+
+    def fake_exec(self):
+        dm.downloaded.update({"small", "parakeet-tdt-0.6b-v3", "nllb-600M-int8"})
+        return 0
+
+    monkeypatch.setattr("vrcc.gui.models_dialog.ModelsDialog.exec", fake_exec)
+    accepted: list[bool] = []
+    monkeypatch.setattr(wiz, "accept", lambda: accepted.append(True))
+    try:
+        wiz._on_choose_manually()
+        assert accepted == [True]
+        assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
+        assert store.config.translate.model == "nllb-600M-int8"
     finally:
         _teardown(wiz, bridge)
 

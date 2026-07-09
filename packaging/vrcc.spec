@@ -15,8 +15,9 @@ Notes:
   ``vrcc.audio.vad`` loads at runtime.
 - ``collect_dynamic_libs("ctranslate2")`` bundles ctranslate2.dll and the
   oneDNN/OpenMP runtimes next to the extension module.
-- ``collect_dynamic_libs("nvidia.cublas")`` is best-effort: the CUDA wheel
-  is an optional extra (``pip install -e .[cuda]``); when it is absent the
+- ``collect_dynamic_libs`` for the ``nvidia.*`` wheels is best-effort: the
+  CUDA wheels (cuBLAS for CTranslate2, cuDNN for onnxruntime's CUDA provider)
+  come from an optional extra (``pip install -e .[cuda]``); when absent the
   build is CPU-only and ``vrcc.core.hardware`` falls back gracefully.
 """
 
@@ -32,6 +33,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))  # noqa: F821
 
 datas = collect_data_files("faster_whisper")
+# onnx-asr ships its preprocessor ONNX graphs (nemo128 mel features etc.) as
+# package data; the Parakeet engine needs them at runtime.
+datas += collect_data_files("onnx_asr")
 # UI translation catalogs: vrcc.i18n loads them from the directory of its own
 # __file__, which in a frozen build is _internal/vrcc/i18n/ -- exactly where
 # this lands them.
@@ -40,10 +44,15 @@ datas += [
     for path in glob.glob(os.path.join(REPO_ROOT, "vrcc", "i18n", "*.json"))
 ]
 binaries = collect_dynamic_libs("ctranslate2")
-try:
-    binaries += collect_dynamic_libs("nvidia.cublas")
-except Exception:
-    pass  # CUDA extra not installed; CPU-only build.
+# onnxruntime's own DLLs -- in the CUDA build this includes the CUDA execution
+# provider libraries from the onnxruntime-gpu overlay (see release.yml), which
+# Parakeet uses for GPU captions.
+binaries += collect_dynamic_libs("onnxruntime")
+for cuda_pkg in ("nvidia.cublas", "nvidia.cudnn"):
+    try:
+        binaries += collect_dynamic_libs(cuda_pkg)
+    except Exception:
+        pass  # CUDA extra not installed; CPU-only build.
 
 hiddenimports = [
     # Imported lazily (inside functions) by vrcc.osc.*; keep them explicit
@@ -55,6 +64,8 @@ hiddenimports = [
     # Imported lazily by vrcc.core.hardware / vrcc.gui.firstrun for VRAM /
     # compute-capability / driver-version queries (nvidia-ml-py).
     "pynvml",
+    # Imported lazily by vrcc.stt.parakeet at engine load time.
+    "onnx_asr",
 ]
 
 a = Analysis(

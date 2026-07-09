@@ -8,12 +8,10 @@ Qt-free; :func:`run` is the only Qt-aware entry point.
 from __future__ import annotations
 
 import logging
-import logging.handlers
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from vrcc.audio.devices import list_input_devices
 from vrcc.audio.segmenter import Segmenter
 from vrcc.audio.source import AudioSource, MicSource
 from vrcc.audio.vad import StreamingVad
@@ -21,21 +19,26 @@ from vrcc.core import hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, Paths, default_paths
 from vrcc.core.events import AppError
+from vrcc.core.live_apply import LiveApply
+from vrcc.core.logs import setup_logging
 from vrcc.core.pipeline import Pipeline
 from vrcc.core.reloading import _FAILED, EngineLoader, _Reloader, _status_after_swap
+from vrcc.core.startup import (
+    default_source_language as _default_source_language,
+    models_ready as _models_ready,
+    resolve_audio_device as _resolve_audio_device,
+)
 from vrcc.download.manager import DownloadManager
 from vrcc.i18n import tr
 from vrcc.osc.chatbox import ChatboxSender
 from vrcc.osc.mutesync import MuteSync
 from vrcc.osc.vrchat_detect import VrchatDetector
+from vrcc.stt import create_stt_engine
 from vrcc.stt.engine import SttEngine
 from vrcc.translate.engine import TranslateEngine
 from vrcc.translate.registry import MT_MODELS
 
 logger = logging.getLogger("vrcc.app")
-
-_LOG_MAX_BYTES = 5 * 1024 * 1024
-_LOG_BACKUP_COUNT = 2
 
 # Sentinel: "argument not supplied" vs an explicit None (mt/mute are
 # legitimately None when translation / mute sync is disabled).
@@ -55,25 +58,6 @@ class EngineStack:
     mt: TranslateEngine | None
     chatbox: ChatboxSender
     mute: MuteSync | None
-
-
-def _resolve_audio_device(device_cfg: str) -> int | None:
-    """Turn ``audio.device`` config into a PortAudio device index (or ``None``).
-
-    ``"auto"`` -> ``None`` (system default); otherwise look the configured
-    device *name* up via :func:`list_input_devices`, falling back to ``None``
-    if absent.
-    """
-    if device_cfg == "auto":
-        return None
-    for index, name in list_input_devices():
-        if name == device_cfg:
-            return index
-    logger.warning(
-        "configured audio device %r not found; using the system default",
-        device_cfg,
-    )
-    return None
 
 
 def build_engine_stack(
@@ -103,7 +87,7 @@ def build_engine_stack(
     segmenter = Segmenter(cfg.vad, vad.prob)
 
     if stt_engine is None:
-        stt_engine = SttEngine(
+        stt_engine = create_stt_engine(
             cfg.stt, paths.models_dir / "whisper" / cfg.stt.model, bus
         )
 
@@ -147,40 +131,6 @@ def build_engine_stack(
     )
 
 
-def _setup_logging(logs_dir: Path, verbose: bool) -> None:
-    """Configure the root logger: a 5 MB x2 rotating file in ``logs_dir`` plus
-    a console handler when ``verbose``."""
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG if verbose else logging.INFO)
-
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
-    )
-
-    try:
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.handlers.RotatingFileHandler(
-            logs_dir / "vrcc.log",
-            maxBytes=_LOG_MAX_BYTES,
-            backupCount=_LOG_BACKUP_COUNT,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(fmt)
-        root.addHandler(file_handler)
-    except OSError:
-        # Never let a log-file problem stop the app from launching.
-        logging.getLogger("vrcc.app").warning(
-            "could not open log file in %s; continuing without file logging",
-            logs_dir,
-            exc_info=True,
-        )
-
-    if verbose:
-        console = logging.StreamHandler()
-        console.setFormatter(fmt)
-        root.addHandler(console)
-
-
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
     """Start the capture pipeline, turning a failure (usually the mic refusing
     to open) into an ``AppError("MIC_OPEN_FAILED")`` instead of an unhandled
@@ -193,29 +143,17 @@ def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
         bus.publish(
             AppError(
                 "MIC_OPEN_FAILED",
-                "Could not open the microphone — check Settings > Audio",
+                "Could not open the microphone. Check Settings > Audio",
                 detail=str(exc),
             )
         )
         return False
 
 
-def _models_ready(cfg, dm: DownloadManager) -> bool:
-    """True if the configured STT model (and MT model, when translation is on)
-    are already downloaded -- i.e. the app can start without the wizard."""
-    if not dm.is_whisper_downloaded(cfg.stt.model):
-        return False
-    if cfg.translate.enabled:
-        spec = MT_MODELS.get(cfg.translate.model)
-        if spec is None or not dm.is_mt_downloaded(spec):
-            return False
-    return True
-
-
 def run(portable: bool = False, verbose: bool = False) -> int:
     """Launch the GUI app. Returns the process exit code."""
     paths = default_paths(portable)
-    _setup_logging(paths.logs_dir, verbose)
+    setup_logging(paths.logs_dir, verbose)
     logger.info("VRCC starting (portable=%s)", portable)
 
     store = ConfigStore(paths.config_file)
@@ -233,18 +171,24 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     # The UI language must apply before any GUI module builds a widget
     # (translated strings are read at construction).
-    from vrcc.i18n.qt import apply_ui_language
+    from vrcc.i18n.qt import apply_ui_language, system_locale_preference
 
     apply_ui_language(app, store.config.gui.ui_language)
+
+    if store.missing_on_load:
+        # First launch only: pre-select the OS display language as the caption
+        # language (the wizard shows it). Never fires for an existing config.
+        _default_source_language(store.config, system_locale_preference())
 
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.firstrun import FirstRunWizard
     from vrcc.gui.main_window import MainWindow
     from vrcc.gui.models_dialog import ModelsDialog
     from vrcc.gui.settings import SettingsDialog
+    from vrcc.gui.style import apply_font_scale, apply_theme_guarded
 
-    _apply_theme(app, store.config.gui.theme, store.config.gui.font_scale)
-    _apply_font_scale(app, store.config.gui.font_scale)
+    apply_theme_guarded(app, store.config.gui.theme, store.config.gui.font_scale)
+    apply_font_scale(app, store.config.gui.font_scale)
 
     bus = EventBus()
     bridge = BusBridge(bus)
@@ -278,6 +222,18 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             stack.chatbox.start()
             if stack.mute is not None:
                 stack.mute.start()
+            try:
+                self._finish_startup(success)
+            finally:
+                # The engines were the loader's until here; run the swaps
+                # Settings asked for during startup now that each engine has a
+                # single caller again. After the failure seeding, so a replayed
+                # swap in flight is never stamped _FAILED underneath.
+                for kind, force in sorted(startup_deferred.items()):
+                    reloader.request(kind, _target_for(kind), force=force)
+                startup_deferred.clear()
+
+        def _finish_startup(self, success: bool) -> None:
             if not success:
                 # Mark each dead kind so re-picking the SAME configured model
                 # in Settings runs a real swap instead of no-opping into the
@@ -304,7 +260,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
                 QMessageBox.warning(
                     window,
                     tr("Microphone error"),
-                    tr("Could not open the microphone — check Settings > "
+                    tr("Could not open the microphone. Check Settings > "
                        "Audio, then restart VRCC."),
                 )
                 return
@@ -333,8 +289,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         if target_id is None:
             return None, None
         if kind == "stt":
+            model_dir = paths.models_dir / "whisper" / target_id
             return (
-                SttEngine(cfg.stt, paths.models_dir / "whisper" / target_id, bus),
+                create_stt_engine(cfg.stt, model_dir, bus, model_id=target_id),
                 target_id,
             )
         spec = MT_MODELS.get(target_id)
@@ -392,41 +349,110 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         loaded=dict(startup_ids),
     )
 
+    # Swap requests that arrive while the startup EngineLoader still owns the
+    # engines are held here (kind -> force) and replayed by _Starter._on_done.
+    # The reloader's swap thread would otherwise unload() the very object the
+    # loader thread is inside load()/warm_up() on; both engines document a
+    # single-caller contract. on_model_change/_on_done both run on the GUI
+    # thread, so the check-then-defer below cannot race the replay.
+    startup_deferred: dict[str, bool] = {}
+
+    def _request_or_defer(kind: str, force: bool) -> None:
+        if loader.is_alive():
+            startup_deferred[kind] = startup_deferred.get(kind, False) or force
+            return
+        reloader.request(kind, _target_for(kind), force=force)
+
     def on_model_change(kind: str) -> None:
         """Settings wrote a live model change (or toggled translate); hot-swap
         it into the running pipeline without a restart."""
-        reloader.request(kind, _target_for(kind))
+        _request_or_defer(kind, force=False)
+
+    def reload_engine(kind: str) -> None:
+        """Rebuild an engine for a device/compute/thread change that keeps the
+        same model id: forced so the reloader can't no-op on the unchanged id
+        (same hot-swap path as a model switch)."""
+        _request_or_defer(kind, force=True)
 
     # Coalesced (mid-swap) requests recompute their target from current config.
     reloader._on_pending = on_model_change
 
     def open_settings() -> None:
+        lang_before = store.config.gui.ui_language
         dlg = SettingsDialog(
             store,
             parent=window,
             download_manager=dm,
             on_model_change=on_model_change,
+            apply=live_apply,
         )
         dlg.exec()
         dlg.deleteLater()
-        # Settings can edit fields the main-window toolbar also shows (source
-        # language, profile, translate toggle); re-sync so they don't diverge.
-        window.reload_from_config()
+        if store.config.gui.ui_language != lang_before:
+            # tr() is read at widget construction, so rebuild in the new language.
+            rebuild_main_window()
+        else:
+            # Settings can edit fields the toolbar also shows (source language,
+            # profile, translate toggle); re-sync so they don't diverge.
+            window.reload_from_config()
 
     def open_models() -> None:
         dlg = ModelsDialog(dm, bridge, config_store=store, parent=window)
         dlg.exec()
         dlg.deleteLater()
 
-    window = MainWindow(
-        bridge,
-        store,
-        stack.pipeline,
-        on_open_settings=open_settings,
-        on_open_models=open_models,
-        mt_available=stack.mt is not None,
+    def make_window() -> MainWindow:
+        return MainWindow(
+            bridge,
+            store,
+            stack.pipeline,
+            on_open_settings=open_settings,
+            on_open_models=open_models,
+            mt_available=stack.mt is not None,
+            download_manager=dm,
+            on_model_change=on_model_change,
+        )
+
+    # Qt-free façade for live Settings changes: the dialog pushes audio/VAD/OSC/
+    # engine edits into the running stack with no restart (rebuilds reuse the reloader).
+    live_apply = LiveApply(
+        pipeline=stack.pipeline,
+        segmenter=stack.segmenter,
+        chatbox=stack.chatbox,
+        bus=bus,
+        reload_engine=reload_engine,
+        make_source=lambda device_cfg: MicSource(_resolve_audio_device(device_cfg)),
+        make_mute=lambda: MuteSync(
+            store.config.mute_sync, store.config.osc.ip, bus
+        ),
+        mute=stack.mute,
     )
+    window = make_window()
     window.show()
+
+    def rebuild_main_window() -> None:
+        """Rebuild MainWindow in the new UI language (tr() is read at widget
+        construction). The old window detaches its bridge slots first so events
+        stop reaching it; geometry carries across for a seamless swap.
+
+        Runtime state carries across too: a fresh window starts gray with an
+        empty caption feed, and nothing re-pushes engine/capture state until
+        the next event, so mid-session it would sit on "Starting" over a
+        healthy pipeline."""
+        nonlocal window
+        apply_ui_language(app, store.config.gui.ui_language)
+        old = window
+        old.disconnect_bridge()
+        fresh = make_window()
+        fresh.restoreGeometry(old.saveGeometry())
+        fresh._engine_states.update(old._engine_states)
+        fresh._render_log()
+        if pipeline_started[0]:
+            fresh.set_capture_status(stack.pipeline.captioning_enabled)
+        window = fresh
+        fresh.show()
+        old.hide()
+        old.deleteLater()
 
     # Run the driver-floor check before the loader (its flag drives resolve()'s
     # CPU fallback) but after the window subscribes to the bridge, so a
@@ -451,8 +477,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         detector.stop()
         stack.pipeline.stop()
         stack.chatbox.stop()
-        if stack.mute is not None:
-            stack.mute.stop()
+        # Covers both the startup coordinator and one LiveApply built lazily
+        # when mute sync was enabled after launch (stack.mute is None then).
+        live_apply.stop_mute()
         bridge.detach()
         store.save_now()
         logger.info("VRCC stopped")
@@ -469,30 +496,3 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             os._exit(int(exit_code))
 
     return int(exit_code)
-
-
-def _apply_theme(app, theme: str, scale: float = 1.0) -> None:
-    """Apply the app theme (Fusion + palette + stylesheet). Never raises.
-    ``scale`` bakes the text-size preset into the QSS font-sizes (QSS wins over
-    setFont)."""
-    try:
-        from vrcc.gui.style import apply_theme
-        apply_theme(app, theme, scale)
-    except Exception:  # noqa: BLE001 -- theming must never block startup
-        logger.warning("could not apply theme %r", theme, exc_info=True)
-
-
-def _apply_font_scale(app, scale: float) -> None:
-    """Scale the base font by ``scale`` (clamped). Best-effort: a failure
-    leaves the default font."""
-    try:
-        scale = max(0.5, min(2.0, float(scale)))
-        if abs(scale - 1.0) < 1e-3:
-            return
-        font = app.font()
-        base = font.pointSizeF()
-        if base > 0:
-            font.setPointSizeF(base * scale)
-            app.setFont(font)
-    except Exception:  # noqa: BLE001 -- font scaling must never block startup
-        logger.debug("could not apply font scale", exc_info=True)

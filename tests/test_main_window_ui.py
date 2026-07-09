@@ -13,14 +13,12 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def _window(tmp_path, theme=None, mt_available=True, store=None):
+def _window(tmp_path, mt_available=True, store=None):
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.main_window import MainWindow
 
     if store is None:
         store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
-    if theme is not None:
-        store.config.gui.theme = theme
     bridge = BusBridge(EventBus())
 
     class _P:
@@ -97,13 +95,14 @@ def test_language_flow_labels_present(qapp, tmp_path):
         w.close(); w.deleteLater(); bridge.detach()
 
 
-def test_light_theme_reaches_caption_log(qapp, tmp_path):
+def test_theme_palette_reaches_caption_log(qapp, tmp_path):
+    # The caption-log HTML must be tinted from the active palette (not a
+    # hardcoded color), so the muted token appears in the rendered feed.
     from vrcc.gui.style import PALETTE
-    w, bridge = _window(tmp_path, theme="light")
+    w, bridge = _window(tmp_path)
     try:
         html = w._log.toHtml()
-        assert PALETTE["light"]["muted"].lower() in html.lower()
-        assert PALETTE["dark"]["text"].lower() not in html.lower()
+        assert PALETTE["dark"]["muted"].lower() in html.lower()
     finally:
         w.close(); w.deleteLater(); bridge.detach()
 

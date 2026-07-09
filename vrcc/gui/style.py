@@ -19,15 +19,6 @@ PALETTE = {
         "good": "#2ecc71", "warn": "#e0a33e", "bad": "#e5544b",
         "on_badge": "#ffffff",
     },
-    "light": {
-        "ground": "#f5f6f8", "surface": "#ffffff", "surface_2": "#eef1f5",
-        "border": "#dfe3ea", "text": "#1a1d24", "muted": "#5b6472",
-        "accent": "#1f7ae0", "accent_hover": "#3d8fe8",
-        # warn darkened for light surfaces: #9a6a10 on #ffffff is ~4.7:1
-        # (the old #e0a33e was ~2:1, unreadable in the restart banner).
-        "good": "#2ecc71", "warn": "#9a6a10", "bad": "#e5544b",
-        "on_badge": "#ffffff",
-    },
 }
 
 # Tiny stroke icons QSS `image:` needs as files (data URIs aren't supported).
@@ -44,7 +35,7 @@ def ensure_qss_icons(theme: str) -> Path:
 
     Best-effort: an unwritable temp dir degrades to missing icon glyphs (Qt
     ignores a dead url()), never an aborted stylesheet. The dir is named by
-    the RESOLVED theme so "system" shares the dark/light dir it maps to."""
+    the RESOLVED theme so every caller shares one icon dir."""
     resolved = resolve_theme(theme)
     p = PALETTE[resolved]
     d = Path(tempfile.gettempdir()) / f"vrcc-qss-{resolved}"
@@ -71,19 +62,8 @@ def ensure_qss_icons(theme: str) -> Path:
 
 
 def resolve_theme(name: str) -> str:
-    if name in ("dark", "light"):
-        return name
-    if name == "system":
-        try:
-            from PySide6.QtGui import Qt
-            from PySide6.QtWidgets import QApplication
-
-            app = QApplication.instance()
-            if app is not None:
-                scheme = app.styleHints().colorScheme()
-                return "light" if scheme == Qt.ColorScheme.Light else "dark"
-        except Exception:  # noqa: BLE001 -- any failure falls back to dark
-            pass
+    # The theme argument survives so stored configs and existing callers keep
+    # working while there is only one palette.
     return "dark"
 
 
@@ -149,6 +129,9 @@ def build_qss(theme: str, scale: float = 1.0) -> str:
     QPushButton[buttonRole="primary"]:focus {{ background: {p['accent_hover']}; border: 1px solid {p['ground']}; }}
     QPushButton[buttonRole="primary"]:disabled {{ background: {p['surface_2']}; color: {p['muted']}; border-color: {p['border']}; }}
     QPushButton[segActive="true"] {{ background: {p['accent']}; border-color: {p['accent']}; color: #ffffff; }}
+    QPushButton:disabled {{ color: {p['muted']}; }}
+    QPushButton[segActive="true"]:disabled {{ background: {p['surface_2']};
+        border-color: {p['border']}; color: {p['muted']}; }}
     QTabWidget::pane {{ border: 1px solid {p['border']}; border-radius: 10px; }}
     QTabBar::tab {{ background: {p['ground']}; color: {p['muted']};
         padding: 8px 14px; border-radius: 8px; margin: 2px; }}
@@ -188,3 +171,38 @@ def apply_theme(app, theme: str, scale: float = 1.0) -> str:
     app.setPalette(pal)
     app.setStyleSheet(build_qss(resolved, scale))
     return resolved
+
+
+def apply_theme_guarded(app, theme: str, scale: float = 1.0) -> None:
+    """:func:`apply_theme` that never raises (theming must never block
+    startup). ``scale`` bakes the text-size preset into the QSS font-sizes
+    (QSS wins over setFont)."""
+    try:
+        apply_theme(app, theme, scale)
+    except Exception:  # noqa: BLE001 -- theming must never block startup
+        logger.warning("could not apply theme %r", theme, exc_info=True)
+
+
+# The app's unscaled base font size, captured on the first apply_font_scale
+# call (before any scaling): live re-applies must always set base*scale, or
+# each Settings edit would compound onto the previous scale.
+_BASE_POINT_SIZE: float | None = None
+
+
+def apply_font_scale(app, scale: float) -> None:
+    """Set the app font to the captured base size times ``scale`` (clamped),
+    including scale 1.0, which restores the base. Best-effort: a failure
+    leaves the current font."""
+    global _BASE_POINT_SIZE
+    try:
+        scale = max(0.5, min(2.0, float(scale)))
+        font = app.font()
+        if _BASE_POINT_SIZE is None:
+            base = font.pointSizeF()
+            if base <= 0:
+                return  # pixel-sized font: nothing safe to scale
+            _BASE_POINT_SIZE = base
+        font.setPointSizeF(_BASE_POINT_SIZE * scale)
+        app.setFont(font)
+    except Exception:  # noqa: BLE001 -- font scaling must never block startup
+        logger.debug("could not apply font scale", exc_info=True)

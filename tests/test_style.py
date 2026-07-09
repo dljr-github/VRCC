@@ -2,29 +2,26 @@ import pytest
 from vrcc.gui.style import PALETTE, resolve_theme, build_qss
 
 
-def test_palette_has_both_themes_and_all_tokens():
+def test_palette_has_only_dark_with_all_tokens():
     tokens = {"ground", "surface", "surface_2", "border", "text", "muted",
               "accent", "good", "warn", "bad"}
-    for theme in ("dark", "light"):
-        assert tokens <= set(PALETTE[theme])
-        for value in PALETTE[theme].values():
-            assert value.startswith("#") and len(value) in (4, 7)
+    assert set(PALETTE) == {"dark"}
+    assert tokens <= set(PALETTE["dark"])
+    for value in PALETTE["dark"].values():
+        assert value.startswith("#") and len(value) in (4, 7)
 
 
-def test_dark_and_light_grounds_differ():
-    assert PALETTE["dark"]["ground"] != PALETTE["light"]["ground"]
-
-
-def test_on_badge_token_is_white_in_both_themes():
-    # Chip text (e.g. the mute badge) sits on a solid good/bad fill in both
-    # themes, so white reads correctly either way -- a single shared token.
+def test_on_badge_token_is_white():
+    # Chip text (e.g. the mute badge) sits on a solid good/bad fill, so white
+    # reads correctly -- a single shared token.
     assert PALETTE["dark"]["on_badge"] == "#ffffff"
-    assert PALETTE["light"]["on_badge"] == "#ffffff"
 
 
-@pytest.mark.parametrize("name,expected", [("dark", "dark"), ("light", "light"), ("bogus", "dark")])
-def test_resolve_theme_passthrough_and_fallback(name, expected):
-    assert resolve_theme(name) == expected
+@pytest.mark.parametrize("name", ["dark", "light", "system", "bogus", ""])
+def test_resolve_theme_always_dark(name):
+    # The argument is kept for stored configs and existing callers, but there
+    # is only one palette, so every input resolves to dark.
+    assert resolve_theme(name) == "dark"
 
 
 def test_build_qss_is_nonempty_and_uses_accent():
@@ -33,14 +30,12 @@ def test_build_qss_is_nonempty_and_uses_accent():
     assert PALETTE["dark"]["accent"] in qss
 
 
-def test_build_qss_styles_control_subparts_both_themes():
-    from vrcc.gui.style import build_qss
-    for theme in ("dark", "light"):
-        qss = build_qss(theme)
-        for token in ("::indicator", "::drop-down", "::down-arrow", "QScrollBar",
-                      "QSlider::handle", 'QPushButton[buttonRole="primary"]',
-                      "QSpinBox", "::up-button"):
-            assert token in qss, f"{token} missing in {theme}"
+def test_build_qss_styles_control_subparts():
+    qss = build_qss("dark")
+    for token in ("::indicator", "::drop-down", "::down-arrow", "QScrollBar",
+                  "QSlider::handle", 'QPushButton[buttonRole="primary"]',
+                  "QSpinBox", "::up-button"):
+        assert token in qss, f"{token} missing"
 
 
 def test_ensure_qss_icons_writes_files():
@@ -52,8 +47,8 @@ def test_ensure_qss_icons_writes_files():
 
 def test_ensure_qss_icons_dir_named_by_resolved_theme():
     from vrcc.gui.style import ensure_qss_icons
-    # "bogus" resolves to dark; the dir must carry the RESOLVED name so
-    # "system"/unknown themes share the dark/light dir they map to.
+    # Any input resolves to dark; the dir carries the RESOLVED name so every
+    # caller shares one icon dir.
     assert ensure_qss_icons("bogus").name == "vrcc-qss-dark"
 
 
@@ -75,11 +70,10 @@ def test_build_qss_survives_unwritable_icon_dir(tmp_path, monkeypatch):
 def test_primary_button_focus_rule_follows_primary_rule():
     # The plain primary rule (later, equal specificity) used to swallow
     # :focus; a dedicated primary-focus rule AFTER it keeps a visible ring.
-    for theme in ("dark", "light"):
-        qss = build_qss(theme)
-        base = qss.index('QPushButton[buttonRole="primary"] ')  # raises if absent
-        focus = qss.index('QPushButton[buttonRole="primary"]:focus')
-        assert focus > base, theme
+    qss = build_qss("dark")
+    base = qss.index('QPushButton[buttonRole="primary"] ')  # raises if absent
+    focus = qss.index('QPushButton[buttonRole="primary"]:focus')
+    assert focus > base
 
 
 def test_line_edit_focus_border_unified_to_1px():
@@ -89,13 +83,6 @@ def test_line_edit_focus_border_unified_to_1px():
         "QDoubleSpinBox:focus { border: 1px solid" in qss
     )
     assert "QLineEdit:focus { border: 2px" not in qss
-
-
-def test_light_warn_token_darkened_for_contrast():
-    # Light warn is #9a6a10 (~4.7:1 on #ffffff, WCAG AA); the old shared
-    # amber was ~2:1 on white. The dark palette keeps its amber unchanged.
-    assert PALETTE["light"]["warn"] != PALETTE["dark"]["warn"]
-    assert PALETTE["dark"]["warn"] == "#e0a33e"
 
 
 def test_build_qss_scales_font_size():
@@ -114,6 +101,32 @@ def test_build_qss_clamps_scale():
     assert "font-size: 7px" in build_qss("dark", 0.01)  # clamp to 0.5 -> 7
 
 
+def test_apply_font_scale_never_compounds_across_live_changes():
+    # The live text-size path calls apply_font_scale repeatedly; every call
+    # must set base*scale from the captured base (Large then Small must not
+    # yield base*1.2*0.9, and Normal must restore the base exactly).
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    import vrcc.gui.style as style_mod
+
+    app = QApplication.instance() or QApplication([])
+    style_mod._BASE_POINT_SIZE = None  # this test owns the captured base
+    base = app.font().pointSizeF()
+    assert base > 0
+    try:
+        style_mod.apply_font_scale(app, 1.2)
+        style_mod.apply_font_scale(app, 0.9)
+        assert app.font().pointSizeF() == pytest.approx(base * 0.9)
+        style_mod.apply_font_scale(app, 1.0)
+        assert app.font().pointSizeF() == pytest.approx(base)
+    finally:
+        style_mod.apply_font_scale(app, 1.0)  # leave the shared app font unscaled
+        style_mod._BASE_POINT_SIZE = None
+
+
 def test_apply_theme_scale_changes_resolved_font_height():
     import os
 
@@ -124,14 +137,19 @@ def test_apply_theme_scale_changes_resolved_font_height():
 
     app = QApplication.instance() or QApplication([])
 
-    apply_theme(app, "dark", 1.0)
-    small = QLabel("Ag")
-    small.ensurePolished()
-    h1 = small.fontMetrics().height()
+    try:
+        apply_theme(app, "dark", 1.0)
+        small = QLabel("Ag")
+        small.ensurePolished()
+        h1 = small.fontMetrics().height()
 
-    apply_theme(app, "dark", 2.0)
-    big = QLabel("Ag")
-    big.ensurePolished()
-    h2 = big.fontMetrics().height()
+        apply_theme(app, "dark", 2.0)
+        big = QLabel("Ag")
+        big.ensurePolished()
+        h2 = big.fontMetrics().height()
 
-    assert h2 > h1  # the QSS font-size actually scales the resolved font
+        assert h2 > h1  # the QSS font-size actually scales the resolved font
+    finally:
+        # The QApplication is shared across test files; a leftover 2x QSS
+        # breaks any later window-metrics test.
+        apply_theme(app, "dark", 1.0)
