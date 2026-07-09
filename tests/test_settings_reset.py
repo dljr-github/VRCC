@@ -213,6 +213,10 @@ def test_yes_pushes_vad_timings_live_exactly_once(qapp, tmp_path, monkeypatch):
 
 def test_headless_construction_and_reset_do_not_raise(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(settings_mod, "device_names", lambda: ["Fake GPU"])
+    # Bare construction skips the _dialog helper, so the hardware verdict is
+    # pinned here too: a CPU verdict binds the device to "cpu" by design.
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     store.config.stt.device = "cuda"
     dlg = SettingsDialog(store)  # bare: no apply / download_manager / on_model_change
