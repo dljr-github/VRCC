@@ -78,8 +78,7 @@ def _quality_table(speed: dict, quality: dict) -> list[str]:
     lines = [
         "",
         "Quality mode (beam 5) against Speed mode (beam 1). Only whisper "
-        "models have a beam to widen; Parakeet and Canary always decode "
-        "greedily.",
+        "models have a beam to widen; Parakeet always decodes greedily.",
         "",
         "| Model | Device | WER Speed | WER Quality | Latency Speed "
         "| Latency Quality |",

@@ -26,12 +26,10 @@ class _FakeDM:
     def delete(self, kind, mid): self.downloaded.discard(mid)
 
 
-def _dlg(tmp_path, dm=None, theme=None):
+def _dlg(tmp_path, dm=None):
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.models_dialog import ModelsDialog
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
-    if theme is not None:
-        store.config.gui.theme = theme
     bridge = BusBridge(EventBus())
     dm = dm or _FakeDM(tmp_path / "models")
     return ModelsDialog(dm, bridge, config_store=store), store, bridge, dm
@@ -129,31 +127,30 @@ def test_active_model_row_shows_in_use(qapp, tmp_path):
         dlg.close(); dlg.deleteLater(); bridge.detach()
 
 
-def test_light_theme_has_no_hardcoded_dark_colors(qapp, tmp_path):
+def test_theme_muted_token_reaches_dialog(qapp, tmp_path):
+    # The dialog's copy must be tinted from the palette's muted token, not a
+    # hardcoded color: the active token appears in at least one styled sheet.
     from vrcc.gui.style import PALETTE
-    dlg, _s, bridge, _dm = _dlg(tmp_path, theme="light")
+    dlg, _s, bridge, _dm = _dlg(tmp_path)
     try:
-        dark_muted = PALETTE["dark"]["muted"].lower()
-        light_muted = PALETTE["light"]["muted"].lower()
+        muted = PALETTE["dark"]["muted"].lower()
         sheets = [dlg.styleSheet().lower()]
         sheets += [lbl.styleSheet().lower() for lbl in dlg.findChildren(QLabel)]
-        assert not any(dark_muted in s for s in sheets)
-        assert any(light_muted in s for s in sheets)
+        assert any(muted in s for s in sheets)
     finally:
         dlg.close(); dlg.deleteLater(); bridge.detach()
 
 
-def test_light_theme_cards_use_light_surface(qapp, tmp_path):
+def test_theme_cards_use_surface_token(qapp, tmp_path):
     from vrcc.gui.style import PALETTE
     from vrcc.gui.widgets import Card
-    dlg, _s, bridge, _dm = _dlg(tmp_path, theme="light")
+    dlg, _s, bridge, _dm = _dlg(tmp_path)
     try:
         cards = dlg.findChildren(Card)
         assert cards
+        surface = PALETTE["dark"]["surface"].lower()
         for card in cards:
-            sheet = card.styleSheet().lower()
-            assert PALETTE["dark"]["surface"].lower() not in sheet
-            assert PALETTE["light"]["surface"].lower() in sheet
+            assert surface in card.styleSheet().lower()
     finally:
         dlg.close(); dlg.deleteLater(); bridge.detach()
 

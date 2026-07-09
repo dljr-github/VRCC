@@ -35,8 +35,7 @@ class WhisperSpec:
     asr_type: str | None = None    # onnx-asr model type ("nemo-conformer-*")
 
 
-# The 25 European languages Parakeet TDT 0.6B v3 and Canary 1B v2 support
-# (Whisper codes).
+# The 25 European languages Parakeet TDT 0.6B v3 supports (Whisper codes).
 _EUROPEAN_25_LANGUAGES = (
     "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu",
     "it", "lv", "lt", "mt", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv",
@@ -69,18 +68,6 @@ WHISPER_MODELS: dict[str, WhisperSpec] = {
             repo="istupakov/parakeet-tdt-0.6b-v3-onnx",
             quantization="int8",
             asr_type="nemo-conformer-tdt",
-        ),
-        WhisperSpec(
-            "canary-1b-v2", "Canary 1B v2 (European languages)", 1030,
-            "accurate", False,
-            languages=_EUROPEAN_25_LANGUAGES,
-            # Canary's decoder prompt pins the language (defaulting to
-            # English); it cannot detect the spoken language itself.
-            auto_language=False,
-            backend="onnx_asr",
-            repo="istupakov/canary-1b-v2-onnx",
-            quantization="int8",
-            asr_type="nemo-conformer-aed",
         ),
     )
 }

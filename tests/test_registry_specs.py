@@ -55,7 +55,6 @@ def test_whisper_expected_models_present():
         "distil-large-v3.5",
         "distil-small.en",
         "parakeet-tdt-0.6b-v3",
-        "canary-1b-v2",
     }
     assert expected <= set(WHISPER_MODELS)
 
@@ -90,7 +89,7 @@ def test_whisper_backed_specs_have_no_onnx_asr_fields():
 
 
 def test_onnx_asr_backed_specs_are_fully_described():
-    known_types = {"nemo-conformer-tdt", "nemo-conformer-aed"}
+    known_types = {"nemo-conformer-tdt"}
     for spec in WHISPER_MODELS.values():
         if spec.backend == "onnx_asr":
             assert spec.repo, f"{spec.id} missing repo"
@@ -122,17 +121,6 @@ def test_parakeet_spec_fields():
     assert spec.asr_type == "nemo-conformer-tdt"
     assert spec.english_only is False
     assert spec.auto_language is True  # detects the language within its set
-    _assert_european_25(spec.languages)
-
-
-def test_canary_spec_fields():
-    spec = WHISPER_MODELS["canary-1b-v2"]
-    assert spec.backend == "onnx_asr"
-    assert spec.repo == "istupakov/canary-1b-v2-onnx"
-    assert spec.quantization == "int8"
-    assert spec.asr_type == "nemo-conformer-aed"
-    assert spec.english_only is False
-    assert spec.auto_language is False  # prompt-pinned language, no detection
     _assert_european_25(spec.languages)
 
 

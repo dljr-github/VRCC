@@ -374,11 +374,10 @@ def test_ensure_whisper_propagates_errors(
 
 
 # --------------------------------------------------------------------------
-# DownloadManager: onnx-asr backend (Parakeet / Canary)
+# DownloadManager: onnx-asr backend (Parakeet)
 # --------------------------------------------------------------------------
 
 _PARAKEET_ID = "parakeet-tdt-0.6b-v3"
-_CANARY_ID = "canary-1b-v2"
 _PARAKEET_FILES = (
     "config.json",
     "vocab.txt",
@@ -456,29 +455,6 @@ def test_ensure_parakeet_short_circuits_when_downloaded(
     result = manager.ensure_whisper(_PARAKEET_ID)
 
     assert result == d
-
-
-def test_canary_uses_the_aed_decoder_file_set(
-    manager: DownloadManager, monkeypatch: pytest.MonkeyPatch
-):
-    # AED exports split into encoder + decoder (no decoder_joint).
-    calls: dict[str, object] = {}
-
-    def fake_snapshot(repo_id, local_dir=None, allow_patterns=None, tqdm_class=None):
-        calls["repo_id"] = repo_id
-        for name in allow_patterns:
-            _touch(Path(local_dir) / name)
-        return local_dir
-
-    monkeypatch.setattr("vrcc.download.manager.snapshot_download", fake_snapshot)
-
-    manager.ensure_whisper(_CANARY_ID)
-
-    assert calls["repo_id"] == "istupakov/canary-1b-v2-onnx"
-    d = manager.whisper_model_dir(_CANARY_ID)
-    assert (d / "decoder-model.int8.onnx").is_file()
-    assert not (d / "decoder_joint-model.int8.onnx").exists()
-    assert manager.is_whisper_downloaded(_CANARY_ID) is True
 
 
 def test_delete_removes_parakeet_dir(manager: DownloadManager):

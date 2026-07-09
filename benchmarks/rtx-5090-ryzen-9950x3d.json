@@ -118,58 +118,6 @@
       ]
     },
     {
-      "model": "canary-1b-v2",
-      "device": "cpu",
-      "resolved_device": "cpu",
-      "compute": "int8",
-      "beam": 1,
-      "utterance_set": "a0ad13b7b284",
-      "size_mb": 1030,
-      "load_s": 1.42,
-      "warmup_s": 0.08,
-      "n_utterances": 100,
-      "audio_s": 752.9,
-      "proc_s": 43.2,
-      "rtf": 0.0574,
-      "latency_median_s": 0.324,
-      "latency_p90_s": 0.844,
-      "wer": 0.0179,
-      "gated": 0,
-      "empty": 0,
-      "engine_events": [
-        [
-          "ready",
-          "cpu:int8"
-        ]
-      ]
-    },
-    {
-      "model": "canary-1b-v2",
-      "device": "cuda",
-      "resolved_device": "cuda",
-      "compute": "int8",
-      "beam": 1,
-      "utterance_set": "a0ad13b7b284",
-      "size_mb": 1030,
-      "load_s": 2.11,
-      "warmup_s": 0.18,
-      "n_utterances": 100,
-      "audio_s": 752.9,
-      "proc_s": 84.1,
-      "rtf": 0.1117,
-      "latency_median_s": 0.673,
-      "latency_p90_s": 1.54,
-      "wer": 0.0179,
-      "gated": 0,
-      "empty": 0,
-      "engine_events": [
-        [
-          "ready",
-          "cuda:int8"
-        ]
-      ]
-    },
-    {
       "model": "distil-large-v3.5",
       "device": "cpu",
       "resolved_device": "cpu",

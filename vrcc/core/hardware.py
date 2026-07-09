@@ -20,6 +20,7 @@ import ctranslate2
 
 from vrcc.core.bus import EventBus
 from vrcc.core.events import AppError
+from vrcc.stt.registry import WHISPER_MODELS
 
 logger = logging.getLogger("vrcc.hardware")
 
@@ -99,7 +100,7 @@ def setup_cuda_dlls() -> bool:
 def _preload_onnxruntime_cuda_dlls() -> None:
     """Best-effort ``onnxruntime.preload_dlls()`` (ORT >= 1.21): loads the
     CUDA/cuDNN DLLs from the installed nvidia-* wheels into the process so the
-    CUDA execution provider (Parakeet/Canary on GPU) can build sessions in the
+    CUDA execution provider (Parakeet on GPU) can build sessions in the
     packaged app. A no-op on older or CPU-only onnxruntime builds. Anything
     the preload prints is captured and demoted to a debug log entry."""
     try:
@@ -273,6 +274,37 @@ def resolve(
         compute = compute_cfg
 
     return device, device_index, compute
+
+
+def _is_onnx_asr(model_id: str | None) -> bool:
+    """Whether ``model_id`` names an onnx-asr-backed registry spec (Parakeet)."""
+    if model_id is None:
+        return False
+    spec = WHISPER_MODELS.get(model_id)
+    return spec is not None and spec.backend == "onnx_asr"
+
+
+def resolved_device(
+    device_cfg: str, device_index: int = 0, model_id: str | None = None
+) -> str:
+    """Concrete run device (`"cuda"`/`"cpu"`) for a config device choice.
+
+    Mirrors :func:`resolve`'s device decision (`"auto"` -> `"cuda"` when a CUDA
+    device is visible else `"cpu"`; a failed driver-floor check downgrades a
+    `"cuda"` to `"cpu"`), then applies the onnx-asr override: under `"auto"` the
+    onnx-asr voice models (Parakeet) resolve to `"cpu"` even with a GPU present,
+    because their int8 graphs run about as fast there and leave VRAM for VRChat
+    (see vrcc.stt.onnx_asr.load). An explicit `"cuda"` stays `"cuda"`.
+    """
+    if device_cfg == "auto":
+        device = "cuda" if cuda_device_count() > 0 else "cpu"
+    else:
+        device = device_cfg
+    if device == "cuda" and _driver_floor_failed:
+        device = "cpu"
+    if device_cfg == "auto" and device == "cuda" and _is_onnx_asr(model_id):
+        device = "cpu"
+    return device
 
 
 def check_driver_floor(bus: EventBus) -> bool:

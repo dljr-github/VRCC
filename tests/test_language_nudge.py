@@ -1,9 +1,12 @@
-"""Offscreen GUI tests for the language-change model nudge: switching the
-spoken language to one the active voice model cannot transcribe offers the
-best downloaded compatible model. Settings applies an accepted switch through
-the model combo (the normal change path: fit prompt, Mode lock, hot-swap
-callback); the main window writes config directly and pokes the callback.
-No compatible download, "auto", and a covered language must all stay silent.
+"""Offscreen GUI tests for the spoken-language / voice-model interaction.
+
+Both language combos (Settings and the main window) grey the spoken languages
+the active voice model cannot transcribe, so an unsupported language can't be
+picked from the popup. The main window additionally keeps the model nudge: if a
+language outside the active model's set is chosen anyway (config or code), it
+offers the best downloaded compatible model. Settings no longer nudges -- its
+greying makes the prompt unreachable -- so ``maybe_switch_model_for_language``
+is gone.
 """
 
 import os
@@ -15,9 +18,8 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, default_paths
-from vrcc.gui import settings as settings_mod
+from vrcc.gui import model_prompts
 from vrcc.gui.bridge import BusBridge
-from vrcc.gui.settings import SettingsDialog
 
 
 @pytest.fixture(scope="module")
@@ -49,97 +51,22 @@ def _capture_question(monkeypatch, answer):
     return asked
 
 
-# -- Settings ----------------------------------------------------------------
+def _lang_enabled(combo, text):
+    idx = combo.findText(text)
+    assert idx >= 0, text
+    return combo.model().item(idx).isEnabled()
 
 
-def _dialog(tmp_path, monkeypatch, downloaded, model_id):
-    # The fit prompt is not under test and would block offscreen; skip it.
-    monkeypatch.setattr(settings_mod.model_fit, "vram_warning", lambda *a, **k: None)
-    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
-    store.config.stt.model = model_id
-    store.config.stt.device = "cpu"  # pins tier_for_config, machine-independent
-    swaps: list[str] = []
-    dlg = SettingsDialog(
-        store,
-        download_manager=_FakeDM(whisper=downloaded),
-        on_model_change=swaps.append,
-    )
-    return dlg, store, swaps
+# -- dead code removed --------------------------------------------------------
 
 
-def test_settings_nudge_yes_switches_through_model_combo(qapp, tmp_path, monkeypatch):
-    dlg, store, swaps = _dialog(
-        tmp_path, monkeypatch,
-        downloaded={"parakeet-tdt-0.6b-v3", "small"},
-        model_id="parakeet-tdt-0.6b-v3",
-    )
-    try:
-        asked = _capture_question(monkeypatch, QMessageBox.StandardButton.Yes)
-        dlg._source_combo.setCurrentText("Japanese")  # outside Parakeet's set
-        assert len(asked) == 1
-        assert "Japanese" in asked[0]
-        assert store.config.stt.model == "small"
-        assert dlg._model_combo.currentData() == "small"
-        assert swaps == ["stt"]  # hot-swap ran via the normal change path
-    finally:
-        dlg.close()
-        dlg.deleteLater()
+def test_settings_nudge_helper_is_gone():
+    # Settings greys unsupported languages instead of nudging, so the settings
+    # nudge entry point no longer exists.
+    assert not hasattr(model_prompts, "maybe_switch_model_for_language")
 
 
-def test_settings_nudge_no_keeps_model_and_language(qapp, tmp_path, monkeypatch):
-    dlg, store, swaps = _dialog(
-        tmp_path, monkeypatch,
-        downloaded={"parakeet-tdt-0.6b-v3", "small"},
-        model_id="parakeet-tdt-0.6b-v3",
-    )
-    try:
-        asked = _capture_question(monkeypatch, QMessageBox.StandardButton.No)
-        dlg._source_combo.setCurrentText("Japanese")
-        assert len(asked) == 1
-        assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
-        assert store.config.stt.source_language == "Japanese"  # change kept
-        assert swaps == []
-    finally:
-        dlg.close()
-        dlg.deleteLater()
-
-
-def test_settings_nudge_silent_without_compatible_download(qapp, tmp_path, monkeypatch):
-    dlg, store, swaps = _dialog(
-        tmp_path, monkeypatch,
-        downloaded={"parakeet-tdt-0.6b-v3"},  # nothing else on disk
-        model_id="parakeet-tdt-0.6b-v3",
-    )
-    try:
-        asked = _capture_question(monkeypatch, QMessageBox.StandardButton.Yes)
-        dlg._source_combo.setCurrentText("Japanese")
-        assert asked == []
-        assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
-        assert swaps == []
-    finally:
-        dlg.close()
-        dlg.deleteLater()
-
-
-def test_settings_nudge_silent_for_auto_and_covered_language(qapp, tmp_path, monkeypatch):
-    dlg, store, swaps = _dialog(
-        tmp_path, monkeypatch,
-        downloaded={"parakeet-tdt-0.6b-v3", "small"},
-        model_id="parakeet-tdt-0.6b-v3",
-    )
-    try:
-        asked = _capture_question(monkeypatch, QMessageBox.StandardButton.Yes)
-        dlg._source_combo.setCurrentText("French")  # inside Parakeet's set
-        dlg._source_combo.setCurrentText("auto")
-        assert asked == []
-        assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
-        assert swaps == []
-    finally:
-        dlg.close()
-        dlg.deleteLater()
-
-
-# -- main window ---------------------------------------------------------------
+# -- main window --------------------------------------------------------------
 
 
 class _Pipeline:
@@ -169,7 +96,45 @@ def _window(tmp_path, downloaded, model_id):
     return window, store, bridge, swaps
 
 
+def test_main_window_greys_source_languages_for_active_model(qapp, tmp_path):
+    window, store, bridge, swaps = _window(
+        tmp_path, {"parakeet-tdt-0.6b-v3"}, "parakeet-tdt-0.6b-v3"
+    )
+    try:
+        src = window._source_combo
+        assert _lang_enabled(src, "French")        # inside Parakeet's set
+        assert not _lang_enabled(src, "Japanese")  # outside it
+        assert _lang_enabled(src, "auto")          # Parakeet self-detects
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_main_window_regreys_source_on_reload(qapp, tmp_path):
+    # A model change made in Settings reaches the window via reload_from_config;
+    # the spoken-language greying must re-run against the current model.
+    window, store, bridge, swaps = _window(
+        tmp_path, {"distil-small.en", "small"}, "distil-small.en"
+    )
+    try:
+        src = window._source_combo
+        assert not _lang_enabled(src, "Japanese")  # english-only
+        assert not _lang_enabled(src, "auto")      # cannot self-detect
+
+        store.config.stt.model = "small"
+        window.reload_from_config()
+        assert _lang_enabled(src, "Japanese")
+        assert _lang_enabled(src, "auto")
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
 def test_main_window_nudge_yes_switches_and_hotswaps(qapp, tmp_path, monkeypatch):
+    # Greying blocks a popup pick, but a language set programmatically (or from
+    # config) still reaches the nudge; on Yes it swaps to a compatible model.
     window, store, bridge, swaps = _window(
         tmp_path, {"parakeet-tdt-0.6b-v3", "small"}, "parakeet-tdt-0.6b-v3"
     )

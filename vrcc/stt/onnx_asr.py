@@ -1,4 +1,4 @@
-"""onnx-asr STT engine: NVIDIA NeMo ONNX exports (Parakeet TDT, Canary AED).
+"""onnx-asr STT engine: NVIDIA NeMo ONNX exports (Parakeet TDT).
 
 Same duck-typed contract as :class:`vrcc.stt.engine.SttEngine` (load /
 warm_up / unload / transcribe), turning mono float32 16 kHz audio into an
@@ -29,10 +29,6 @@ from vrcc.stt.engine import SttResult
 from vrcc.stt.registry import WhisperSpec
 
 logger = logging.getLogger("vrcc.stt.onnx_asr")
-
-# The onnx-asr model type whose decoder prompt accepts a source language
-# (Canary). TDT/RNNT transducers neither need nor accept one.
-_AED_TYPE = "nemo-conformer-aed"
 
 _CPU_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -147,12 +143,10 @@ class OnnxAsrEngine:
     def transcribe(self, samples: np.ndarray) -> SttResult | None:
         """Transcribe ``samples`` (mono float32, 16 kHz) into an :class:`SttResult`.
 
-        Returns ``None`` for empty text. AED models (Canary) get the
-        configured source language forced into their decoder prompt; the
-        transducers auto-detect within their set but don't report it -- either
-        way ``language`` echoes the configured source ("en" when set to auto,
-        the MT source fallback). Raises ``RuntimeError`` if called before
-        :meth:`load`.
+        Returns ``None`` for empty text. The transducers auto-detect within
+        their set but don't report it, so ``language`` echoes the configured
+        source ("en" when set to auto, the MT source fallback). Raises
+        ``RuntimeError`` if called before :meth:`load`.
         """
         if self._model is None:
             raise RuntimeError(
@@ -163,7 +157,6 @@ class OnnxAsrEngine:
         text = self._model.recognize(
             np.ascontiguousarray(samples, dtype=np.float32),
             sample_rate=_SAMPLE_RATE,
-            **self._recognize_kwargs(),
         )
         text = (text or "").strip()
         if not text:
@@ -192,20 +185,6 @@ class OnnxAsrEngine:
         logger.warning("%s: %s", self._spec.id, detail)
         self._bus.publish(EngineStateChanged("stt", "fallback_cpu", detail))
         self._device = "cpu"
-
-    def _recognize_kwargs(self) -> dict:
-        """Per-utterance ``recognize()`` options: AED models take the
-        configured source language (their prompt defaults to English), when it
-        is one the model supports. Transducers take nothing."""
-        if self._spec.asr_type != _AED_TYPE:
-            return {}
-        source = self._cfg.source_language
-        if source == "auto":
-            return {}
-        code = get(source).whisper
-        if self._spec.languages is not None and code not in self._spec.languages:
-            return {}  # unsupported pick (combo greying bypassed): don't crash
-        return {"language": code}
 
     def _providers(self, device: str, index: int) -> tuple:
         """onnxruntime providers for the resolved device: CUDA (pinned to the

@@ -1,7 +1,6 @@
 """Tests for :mod:`vrcc.stt.onnx_asr` with a fake onnx-asr factory (no
 onnx-asr/onnxruntime model load): load events, provider selection + CPU
-fallback, transcribe result contract, Canary language forcing, and the
-create_stt_engine dispatch.
+fallback, transcribe result contract, and the create_stt_engine dispatch.
 """
 
 from __future__ import annotations
@@ -21,9 +20,7 @@ from vrcc.stt.onnx_asr import OnnxAsrEngine
 from vrcc.stt.registry import WHISPER_MODELS
 
 PARAKEET_ID = "parakeet-tdt-0.6b-v3"
-CANARY_ID = "canary-1b-v2"
 PARAKEET = WHISPER_MODELS[PARAKEET_ID]
-CANARY = WHISPER_MODELS[CANARY_ID]
 
 
 class _FakeModel:
@@ -126,15 +123,6 @@ def test_load_passes_type_dir_quantization_and_cpu_providers(model_dir):
     assert call.providers == ["CPUExecutionProvider"]
     assert [(e.engine, e.state) for e in events] == [("stt", "loading"), ("stt", "ready")]
     assert events[-1].detail == "cpu:int8"
-
-
-def test_load_uses_the_spec_asr_type(model_dir):
-    factory = _RecordingFactory()
-    eng = OnnxAsrEngine(
-        _cfg(model=CANARY_ID), CANARY, model_dir, EventBus(), model_factory=factory
-    )
-    eng.load()
-    assert factory.calls[0].model == "nemo-conformer-aed"
 
 
 def test_load_missing_model_dir_publishes_failed_and_raises(tmp_path):
@@ -359,27 +347,6 @@ def test_transducer_passes_no_language_option(model_dir):
     assert factory.built[0].calls[0].kwargs == {}
 
 
-def test_canary_forces_the_configured_source_language(model_dir):
-    eng, factory = _loaded_engine(model_dir, spec=CANARY, source_language="French")
-    eng.transcribe(np.zeros(160, dtype=np.float32))
-    assert factory.built[0].calls[0].kwargs == {"language": "fr"}
-
-
-def test_canary_auto_source_passes_no_language(model_dir):
-    # Canary can't detect the language; auto leaves its English default prompt.
-    eng, factory = _loaded_engine(model_dir, spec=CANARY, source_language="auto")
-    eng.transcribe(np.zeros(160, dtype=np.float32))
-    assert factory.built[0].calls[0].kwargs == {}
-
-
-def test_canary_unsupported_source_passes_no_language(model_dir):
-    # Combo greying should prevent this pick, but config can still hold it --
-    # an unknown language token must not crash the decoder prompt.
-    eng, factory = _loaded_engine(model_dir, spec=CANARY, source_language="Japanese")
-    eng.transcribe(np.zeros(160, dtype=np.float32))
-    assert factory.built[0].calls[0].kwargs == {}
-
-
 def test_warm_up_transcribes_half_second_of_silence(model_dir):
     eng, factory = _loaded_engine(model_dir)
     eng.warm_up()
@@ -399,10 +366,9 @@ def test_unload_drops_model_and_transcribe_raises(model_dir):
 # --------------------------------------------------------------------------
 
 def test_factory_builds_onnx_asr_engine_for_onnx_asr_ids(tmp_path):
-    for mid in (PARAKEET_ID, CANARY_ID):
-        eng = create_stt_engine(_cfg(model=mid), tmp_path, EventBus())
-        assert isinstance(eng, OnnxAsrEngine), mid
-        assert eng._spec is WHISPER_MODELS[mid]
+    eng = create_stt_engine(_cfg(model=PARAKEET_ID), tmp_path, EventBus())
+    assert isinstance(eng, OnnxAsrEngine)
+    assert eng._spec is WHISPER_MODELS[PARAKEET_ID]
 
 
 def test_factory_builds_whisper_engine_for_whisper_id(tmp_path):

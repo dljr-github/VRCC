@@ -1,10 +1,10 @@
 """End-to-end CPU tests of the onnx-asr STT path against the REAL onnx-asr +
-onnxruntime stack (no network, no NVIDIA weights): synthetic ONNX exports with
-the exact Parakeet-TDT / Canary-AED contracts (tests/onnx_asr_fakes.py) are
-laid out exactly as DownloadManager writes them, then driven through
-create_stt_engine -> OnnxAsrEngine -> onnx-asr's real mel preprocessing and
-decode loops. Guards the integration against onnx-asr contract drift, which
-the fake-factory unit tests in test_stt_onnx_asr.py can't see.
+onnxruntime stack (no network, no NVIDIA weights): a synthetic ONNX export
+with the exact Parakeet-TDT contract (tests/onnx_asr_fakes.py) is laid out
+exactly as DownloadManager writes it, then driven through create_stt_engine
+-> OnnxAsrEngine -> onnx-asr's real mel preprocessing and decode loop. Guards
+the integration against onnx-asr contract drift, which the fake-factory unit
+tests in test_stt_onnx_asr.py can't see.
 
 Skipped when the ``onnx`` graph-building package (dev extra) is absent.
 """
@@ -23,10 +23,9 @@ from vrcc.download.manager import DownloadManager
 from vrcc.stt import create_stt_engine
 from vrcc.stt.onnx_asr import OnnxAsrEngine
 
-from tests.onnx_asr_fakes import build_fake_aed, build_fake_tdt
+from tests.onnx_asr_fakes import build_fake_tdt
 
 PARAKEET_ID = "parakeet-tdt-0.6b-v3"
-CANARY_ID = "canary-1b-v2"
 
 # 2s of 440 Hz sine at 16 kHz: content is irrelevant (synthetic weights), but
 # it flows through onnx-asr's real nemo128 mel preprocessor.
@@ -37,11 +36,8 @@ AUDIO = (0.1 * np.sin(2 * np.pi * 440 * np.arange(32000) / 16000)).astype(np.flo
 def models_dir(tmp_path_factory):
     base = tmp_path_factory.mktemp("models")
     tdt = base / "whisper" / PARAKEET_ID
-    aed = base / "whisper" / CANARY_ID
     tdt.mkdir(parents=True)
-    aed.mkdir(parents=True)
     build_fake_tdt(tdt)
-    build_fake_aed(aed)
     return base
 
 
@@ -58,10 +54,9 @@ def _engine(models_dir, model_id, source_language):
     return engine, dm, events
 
 
-def test_fake_exports_satisfy_the_download_manager_presence_check(models_dir):
+def test_fake_export_satisfies_the_download_manager_presence_check(models_dir):
     dm = DownloadManager(models_dir, EventBus())
     assert dm.is_whisper_downloaded(PARAKEET_ID) is True
-    assert dm.is_whisper_downloaded(CANARY_ID) is True
 
 
 def test_parakeet_full_stack_transcribes_on_cpu(models_dir):
@@ -87,33 +82,3 @@ def test_parakeet_auto_source_transcribes_and_falls_back_to_english(models_dir):
     result = engine.transcribe(AUDIO)
     assert result.text == "hello world"
     assert result.language == "en"
-
-
-# The fake AED decoder's first emitted word reveals which language token
-# onnx-asr wrote into prompt slot 4, so these assert VRCC's Canary language
-# forcing through the real decode loop, not through a mock.
-
-def test_canary_prompt_defaults_to_english(models_dir):
-    engine, _, _ = _engine(models_dir, CANARY_ID, "English")
-    engine.load()
-    assert engine.transcribe(AUDIO).text == "english"
-
-
-def test_canary_forces_the_configured_source_language(models_dir):
-    engine, _, _ = _engine(models_dir, CANARY_ID, "French")
-    engine.load()
-    result = engine.transcribe(AUDIO)
-    assert result.text == "bonjour"  # <|fr|> reached the decoder prompt
-    assert result.language == "fr"
-
-
-def test_canary_auto_source_leaves_the_english_default(models_dir):
-    engine, _, _ = _engine(models_dir, CANARY_ID, "auto")
-    engine.load()
-    assert engine.transcribe(AUDIO).text == "english"
-
-
-def test_canary_unsupported_source_is_not_forced(models_dir):
-    engine, _, _ = _engine(models_dir, CANARY_ID, "Japanese")
-    engine.load()
-    assert engine.transcribe(AUDIO).text == "english"

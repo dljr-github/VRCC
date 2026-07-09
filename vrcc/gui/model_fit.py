@@ -1,5 +1,5 @@
 """Plain-language memory-fit warnings for a model the user is about to load or
-download. Advisory heuristics only — the engines' VRAM-OOM-to-CPU fallback is the
+download. Advisory heuristics only; the engines' VRAM-OOM-to-CPU fallback is the
 real safety net. No jargon in the returned sentences ("graphics card" /
 "processor", never "VRAM"/"GPU")."""
 

@@ -265,9 +265,9 @@ def test_settings_language_picker_writes_config(tmp_path):
 
         combo.setCurrentIndex(codes.index("ja"))
         assert store.config.gui.ui_language == "ja"
-        # The language is restart-applied: the banner must appear. The dialog
-        # itself is never shown here, so ask relative to it.
-        assert dlg._restart_banner.isVisibleTo(dlg)
+        # The restart banner is gone: a language change now rebuilds the window
+        # on dialog close instead of deferring to a restart.
+        assert not hasattr(dlg, "_restart_banner")
     finally:
         dlg.close()
         dlg.deleteLater()

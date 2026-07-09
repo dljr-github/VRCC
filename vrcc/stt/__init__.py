@@ -15,7 +15,7 @@ def create_stt_engine(
     """Build the (unloaded) STT engine for ``model_id`` (default ``cfg.model``;
     hot-swaps pass the swap's target id while keeping the live ``cfg``): an
     :class:`~vrcc.stt.onnx_asr.OnnxAsrEngine` when the registry marks the id
-    as onnx-asr-backed (Parakeet/Canary), else a
+    as onnx-asr-backed (Parakeet), else a
     :class:`~vrcc.stt.engine.SttEngine` (faster-whisper -- also the fallback
     for ids the registry doesn't know, preserving the old free-form-model-id
     behavior). Both share the same duck-typed load/warm_up/unload/transcribe

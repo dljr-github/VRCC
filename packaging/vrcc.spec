@@ -46,7 +46,7 @@ datas += [
 binaries = collect_dynamic_libs("ctranslate2")
 # onnxruntime's own DLLs -- in the CUDA build this includes the CUDA execution
 # provider libraries from the onnxruntime-gpu overlay (see release.yml), which
-# Parakeet/Canary use for GPU captions.
+# Parakeet uses for GPU captions.
 binaries += collect_dynamic_libs("onnxruntime")
 for cuda_pkg in ("nvidia.cublas", "nvidia.cudnn"):
     try:

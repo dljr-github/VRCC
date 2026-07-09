@@ -22,9 +22,8 @@ Windows-11-10.0.26200-SP0 | driver 610.62 | LibriSpeech test-clean | `rtx-5090-r
 | distil-large-v3.5 | 1510 MB | 2.4% | 2.3% | 0.06 s | 0.008 | 2.78 s | 0.398 |
 | distil-small.en | 332 MB | 4.0% | 4.0% | 0.04 s | 0.006 | 0.64 s | 0.086 |
 | parakeet-tdt-0.6b-v3 | 690 MB | 2.3% | 2.3% | 0.21 s | 0.033 | 0.13 s | 0.021 |
-| canary-1b-v2 | 1030 MB | 1.8% | 1.8% | 0.67 s | 0.112 | 0.32 s | 0.057 |
 
-Quality mode (beam 5) against Speed mode (beam 1). Only whisper models have a beam to widen; Parakeet and Canary always decode greedily.
+Quality mode (beam 5) against Speed mode (beam 1). Only whisper models have a beam to widen; Parakeet always decodes greedily.
 
 | Model | Device | WER Speed | WER Quality | Latency Speed | Latency Quality |
 | ----- | ------ | --------- | ----------- | ------------- | --------------- |

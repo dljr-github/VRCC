@@ -74,8 +74,8 @@ jobs:
         # wheel faster-whisper depends on, so it must be installed LAST, as
         # its own step, for its CUDA-enabled binaries to win the file overlap
         # deterministically. Safe here because this env is frozen into the
-        # zip right after and never upgraded. Gives Parakeet/Canary GPU
-        # captions; CTranslate2 (whisper models) has its own CUDA path.
+        # zip right after and never upgraded. Gives Parakeet GPU captions;
+        # CTranslate2 (whisper models) has its own CUDA path.
         # <1.23: newer onnxruntime-gpu builds are CUDA 13, but the [cuda]
         # extra ships the CUDA 12 runtime wheels (CTranslate2 needs them);
         # mismatched builds silently fall back to CPU sessions.

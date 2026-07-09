@@ -68,9 +68,3 @@ def test_model_blurb_marks_parakeet_language_restriction():
 
 def test_parakeet_display_name():
     assert whisper_display_name("parakeet-tdt-0.6b-v3") == "Parakeet v3 (European languages)"
-
-
-def test_canary_display_name_and_blurb():
-    assert whisper_display_name("canary-1b-v2") == "Canary 1B v2 (European languages)"
-    blurb = model_blurb("whisper", "canary-1b-v2")
-    assert "european languages only" in blurb.lower()

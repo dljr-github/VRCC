@@ -28,10 +28,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from vrcc.gui import settings_reset
 from vrcc.i18n import tr
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
+
+
+def _auto_label(dlg: "SettingsDialog") -> QLabel:
+    """Muted, hidden-until-Auto label sitting under a device combo."""
+    label = QLabel()
+    label.setStyleSheet(dlg._muted_style)
+    label.setWordWrap(True)
+    label.setVisible(False)
+    return label
 
 
 def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
@@ -186,6 +196,11 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         tr("Use your graphics card (faster) or the processor.")
     )
     form.addRow(tr("Run voice recognition on"), dlg._stt_device_combo)
+    dlg._stt_device_auto_label = _auto_label(dlg)
+    form.addRow("", dlg._stt_device_auto_label)
+    dlg._stt_device_combo.currentIndexChanged.connect(
+        lambda _i: settings_reset.refresh_after_stt_device(dlg)
+    )
 
     dlg._stt_compute_combo = dlg._make_compute_combo(dlg._cfg.stt)
     dlg._stt_compute_combo.setToolTip(
@@ -198,6 +213,11 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         tr("Use your graphics card (faster) or the processor.")
     )
     form.addRow(tr("Run translation on"), dlg._mt_device_combo)
+    dlg._mt_device_auto_label = _auto_label(dlg)
+    form.addRow("", dlg._mt_device_auto_label)
+    dlg._mt_device_combo.currentIndexChanged.connect(
+        lambda _i: settings_reset.update_device_auto_labels(dlg)
+    )
 
     dlg._mt_compute_combo = dlg._make_compute_combo(dlg._cfg.translate)
     dlg._mt_compute_combo.setToolTip(
@@ -211,11 +231,13 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         tr("How many processor cores to use (0 = automatic).")
     )
     dlg._bind_int(cpu_threads, dlg._cfg.stt, "cpu_threads")
+    dlg._stt_cpu_threads_spin = cpu_threads
     form.addRow(tr("CPU threads (0 = auto)"), cpu_threads)
 
     workers = dlg._spin(1, 8, dlg._cfg.stt.num_workers)
     workers.setToolTip(tr("How many voice-recognition jobs run at once."))
     dlg._bind_int(workers, dlg._cfg.stt, "num_workers")
+    dlg._stt_workers_spin = workers
     form.addRow(tr("Voice recognition workers"), workers)
 
     inter = dlg._spin(1, 8, dlg._cfg.translate.inter_threads)
@@ -223,6 +245,7 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         tr("How many processor cores translation may use across jobs.")
     )
     dlg._bind_int(inter, dlg._cfg.translate, "inter_threads")
+    dlg._mt_inter_spin = inter
     form.addRow(tr("Translation threads (between jobs)"), inter)
 
     intra = dlg._spin(0, 64, dlg._cfg.translate.intra_threads)
@@ -230,6 +253,7 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         tr("How many processor cores each translation job may use (0 = auto).")
     )
     dlg._bind_int(intra, dlg._cfg.translate, "intra_threads")
+    dlg._mt_intra_spin = intra
     form.addRow(tr("Translation threads (within a job, 0 = auto)"), intra)
 
     queued = dlg._spin(-1, 64, dlg._cfg.translate.max_queued_batches)
@@ -240,6 +264,7 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         )
     )
     dlg._bind_int(queued, dlg._cfg.translate, "max_queued_batches")
+    dlg._mt_queued_spin = queued
     form.addRow(
         tr("Translation queue size (0 = auto, -1 = unlimited)"), queued
     )
@@ -288,11 +313,17 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     qual = QPushButton(tr("Reset to Quality preset"))
     qual.setToolTip(tr("Most accurate captions."))
     qual.clicked.connect(lambda: dlg._apply_profile("quality"))
+    recommended = QPushButton(settings_reset.reset_button_text())
+    recommended.setToolTip(settings_reset.reset_button_tooltip())
+    recommended.clicked.connect(lambda: settings_reset.confirm_and_reset(dlg))
     profile_row.addWidget(lat)
     profile_row.addWidget(qual)
+    profile_row.addWidget(recommended)
     profile_row.addStretch(1)
     outer.addLayout(profile_row)
     outer.addStretch(1)
+
+    settings_reset.update_device_auto_labels(dlg)
     return page
 
 

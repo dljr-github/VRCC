@@ -39,26 +39,24 @@ def test_presets_cover_all_tiers():
 # registry or benchmark change that reorders a tier must show up here as a
 # conscious diff, not silently reshuffle the recommendations.
 _EXPECTED_WHISPER_PREFERENCE = {
-    # canary-1b-v2 medians 0.67 s on CUDA, past the 0.6 s GPU budget, so the
-    # most accurate model is only a fallback there.
+    # parakeet is language-restricted, so a language-blind walk trails it
+    # behind every unrestricted model, accurate and in-budget though it is.
     "gpu_high": [
         "large-v3-turbo", "large-v3", "medium", "small", "base", "tiny",
         "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
-        "canary-1b-v2",
     ],
     # large-v3 (3090 MB) fails the gpu_low VRAM cap and drops to the
     # unrestricted tail.
     "gpu_low": [
         "large-v3-turbo", "medium", "small", "base", "tiny", "large-v3",
         "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
-        "canary-1b-v2",
     ],
-    # On CPU both NeMo exports stay inside the 1.0 s budget and beat every
-    # unrestricted model on accuracy, but they are language-restricted, so a
-    # language-blind walk still keeps them behind small/base/tiny.
+    # On CPU parakeet stays inside the 1.0 s budget and beats every
+    # unrestricted model on accuracy, but it is language-restricted, so a
+    # language-blind walk still keeps it behind small/base/tiny.
     "cpu": [
         "small", "base", "tiny", "medium", "large-v3-turbo", "large-v3",
-        "canary-1b-v2", "parakeet-tdt-0.6b-v3",
+        "parakeet-tdt-0.6b-v3",
         "distil-small.en", "distil-large-v3.5",
     ],
 }
@@ -136,12 +134,11 @@ def test_rank_whisper_language_none_is_byte_identical_to_blind_lists(tier):
     assert recommend._rank_whisper(tier, language=None) == _EXPECTED_WHISPER_PREFERENCE[tier]
 
 
-def test_rank_whisper_cpu_english_puts_the_nemo_exports_first():
-    # Once "en" is known, both NeMo exports beat every whisper model on CPU:
-    # canary 1.8 percent at 0.32 s, parakeet 2.3 percent at 0.13 s, against
-    # small's 3.7 percent at 0.75 s. Canary leads on the lower WER band.
+def test_rank_whisper_cpu_english_puts_parakeet_first():
+    # Once "en" is known, parakeet beats every whisper model on CPU: 2.3
+    # percent at 0.13 s, against small's 3.7 percent at 0.75 s.
     assert recommend._rank_whisper("cpu", language="en") == [
-        "canary-1b-v2", "parakeet-tdt-0.6b-v3",
+        "parakeet-tdt-0.6b-v3",
         "small", "distil-small.en", "base", "tiny",
         "medium", "distil-large-v3.5", "large-v3-turbo", "large-v3",
     ]
@@ -155,13 +152,12 @@ def test_rank_whisper_cpu_japanese_matches_language_blind_order():
 
 def test_rank_whisper_gpu_high_german_keeps_turbo_first():
     # GPU WER bands: turbo/large-v3 band 5, parakeet band 7, medium band 9,
-    # so parakeet slots after large-v3 and before medium. canary serves "de"
-    # but medians 0.67 s on CUDA, past the 0.6 s budget, so it trails the
-    # in-budget models. The english-only distil pair cannot serve "de".
+    # so parakeet slots after large-v3 and before medium. The english-only
+    # distil pair cannot serve "de", so it trails.
     assert recommend._rank_whisper("gpu_high", language="de") == [
         "large-v3-turbo", "large-v3", "parakeet-tdt-0.6b-v3",
         "medium", "small", "base", "tiny",
-        "canary-1b-v2", "distil-large-v3.5", "distil-small.en",
+        "distil-large-v3.5", "distil-small.en",
     ]
 
 
@@ -180,18 +176,18 @@ def test_rank_whisper_english_only_flag_trails_without_languages_tuple():
     assert got == ["plain", "en-flag-only"]
 
 
-def test_canary_competes_only_with_concrete_language():
+def test_parakeet_competes_only_with_concrete_language():
     blind = recommend._rank_whisper("cpu")
     with_de = recommend._rank_whisper("cpu", language="de")
-    # language-blind: canary trails every unrestricted id
-    assert blind.index("canary-1b-v2") > blind.index("tiny")
-    # concrete "de" on CPU, where canary is inside the budget: it leads
-    assert with_de[0] == "canary-1b-v2"
+    # language-blind: parakeet trails every unrestricted id
+    assert blind.index("parakeet-tdt-0.6b-v3") > blind.index("tiny")
+    # concrete "de" on CPU, where parakeet is inside the budget: it leads
+    assert with_de[0] == "parakeet-tdt-0.6b-v3"
 
 
 def test_preset_for_choice_language_reranks_whisper_half_only():
     assert recommend.preset_for_choice("cpu", language="en") == (
-        "canary-1b-v2", "nllb-600M-int8",
+        "parakeet-tdt-0.6b-v3", "nllb-600M-int8",
     )
     assert recommend.preset_for_choice("gpu", tier="gpu_high", language="de") == (
         "large-v3-turbo", "nllb-1.3B-int8",
@@ -199,8 +195,8 @@ def test_preset_for_choice_language_reranks_whisper_half_only():
 
 
 def test_preset_without_a_language_never_leads_with_a_non_detecting_model():
-    # No spoken language to pin canary's decoder prompt to, so the
-    # language-blind presets must not name it.
+    # No spoken language to pin a non-detecting model to, so the
+    # language-blind presets must not name one.
     for tier in _TIERS:
         assert WHISPER_MODELS[recommend.PRESETS[tier][0]].auto_language
 
@@ -232,12 +228,11 @@ def test_recommended_profile_follows_the_beam_measurements(model_id, device, exp
     assert recommend.recommended_profile(model_id, device) == expected
 
 
-@pytest.mark.parametrize("model_id", ["parakeet-tdt-0.6b-v3", "canary-1b-v2"])
-def test_recommended_profile_is_silent_for_greedy_decoders(model_id):
-    # The onnx-asr exports have no beam to widen, which is why the Mode
-    # control greys out for them: there is nothing to recommend.
-    assert recommend.recommended_profile(model_id, "cuda") is None
-    assert recommend.recommended_profile(model_id, "cpu") is None
+def test_recommended_profile_is_silent_for_greedy_decoders():
+    # The onnx-asr export has no beam to widen, which is why the Mode control
+    # greys out for it: there is nothing to recommend.
+    assert recommend.recommended_profile("parakeet-tdt-0.6b-v3", "cuda") is None
+    assert recommend.recommended_profile("parakeet-tdt-0.6b-v3", "cpu") is None
 
 
 def test_recommended_profile_is_silent_for_unknown_ids():
@@ -270,7 +265,7 @@ def _cfg_with_personal_choices():
     cfg.translate.targets = ["Japanese", "French"]
     cfg.audio.device = "Some USB Mic"
     cfg.osc.port = 9999
-    cfg.gui.theme = "light"
+    cfg.gui.font_scale = 1.5
     cfg.gui.ui_language = "ja"
     return cfg
 
@@ -284,10 +279,10 @@ def test_reset_to_recommended_restores_engine_fields_and_picks_models(monkeypatc
     assert cfg.stt.device == "auto" and cfg.stt.compute_type == "auto"
     assert cfg.stt.cpu_threads == 0 and cfg.stt.num_workers == 1
     assert cfg.translate.device == "auto" and cfg.translate.intra_threads == 0
-    # German is inside canary's set, and on CPU it leads the ranking.
-    assert cfg.stt.model == "canary-1b-v2"
-    assert summary["stt_model"] == "canary-1b-v2"
-    # canary decodes greedily, so it gets no profile advice: Speed stands.
+    # German is inside parakeet's set, and on CPU it leads the ranking.
+    assert cfg.stt.model == "parakeet-tdt-0.6b-v3"
+    assert summary["stt_model"] == "parakeet-tdt-0.6b-v3"
+    # parakeet decodes greedily, so it gets no profile advice: Speed stands.
     assert cfg.gui.profile == "latency"
 
 
@@ -301,12 +296,12 @@ def test_reset_to_recommended_leaves_personal_choices_alone(monkeypatch):
     assert cfg.translate.targets == ["Japanese", "French"]
     assert cfg.audio.device == "Some USB Mic"
     assert cfg.osc.port == 9999
-    assert cfg.gui.theme == "light"
+    assert cfg.gui.font_scale == 1.5
     assert cfg.gui.ui_language == "ja"
 
 
 def test_reset_to_recommended_prefers_a_downloaded_model(monkeypatch):
-    # The ranking would pick canary for German on CPU, but only small is on
+    # The ranking would pick parakeet for German on CPU, but only small is on
     # disk: resetting must not leave the app unable to caption.
     monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
     cfg = _cfg_with_personal_choices()

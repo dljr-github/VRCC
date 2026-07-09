@@ -37,7 +37,6 @@ STT_BENCH: dict[str, tuple[float, float, float, float]] = {
     "distil-large-v3.5": (0.024, 0.023, 0.06, 2.78),
     "distil-small.en": (0.040, 0.040, 0.04, 0.64),
     "parakeet-tdt-0.6b-v3": (0.023, 0.023, 0.21, 0.13),
-    "canary-1b-v2": (0.018, 0.018, 0.67, 0.32),
 }
 
 # Beam 5 (the Quality mode) against beam 1 (Speed), same runs. Only whisper
@@ -221,11 +220,10 @@ def preset_for_choice(
     back to the smallest GPU preset so the choice still gets GPU-sized models.
     ``language`` (a Whisper code) reranks the whisper half for a known spoken
     language; the MT half is language-blind. A model that cannot detect the
-    spoken language (canary-1b-v2) can still be chosen here: it is only
-    reached with a concrete ``language``, which the caller has already written
-    to the config as the spoken language, so the decoder prompt is pinned to
-    the same language the ranking assumed. A ``None`` language falls back to
-    the language-blind presets, where such models never lead.
+    spoken language itself (the distil English pair) can still be chosen here:
+    it is only reached with a concrete ``language``, which the caller has
+    already written to the config as the spoken language. A ``None`` language
+    falls back to the language-blind presets, where such models never lead.
     """
     if device_choice == "cpu":
         resolved = "cpu"

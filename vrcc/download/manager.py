@@ -27,19 +27,14 @@ _KINDS = ("mt", "whisper")
 
 def _onnx_asr_files(spec: WhisperSpec) -> list[str]:
     """The exact files onnx-asr needs to run ``spec`` offline (doubles as the
-    snapshot allow_patterns, so nothing else is fetched). AED exports (Canary)
-    split into encoder+decoder; the transducers into encoder+decoder_joint."""
+    snapshot allow_patterns, so nothing else is fetched). The transducer
+    exports split into encoder + decoder_joint."""
     suffix = f".{spec.quantization}" if spec.quantization else ""
-    decoder = (
-        f"decoder-model{suffix}.onnx"
-        if spec.asr_type == "nemo-conformer-aed"
-        else f"decoder_joint-model{suffix}.onnx"
-    )
     return [
         "config.json",
         "vocab.txt",
         f"encoder-model{suffix}.onnx",
-        decoder,
+        f"decoder_joint-model{suffix}.onnx",
     ]
 
 
@@ -100,7 +95,7 @@ class DownloadManager:
     def ensure_whisper(self, model_id: str) -> Path:
         """Download the voice model unless already present.
 
-        onnx-asr models (Parakeet/Canary) come from their HF repo via
+        onnx-asr models (Parakeet) come from their HF repo via
         ``snapshot_download`` (with byte progress, restricted to the files
         onnx-asr needs); faster-whisper models via ``download_model`` (no
         byte-level progress hook, so only the terminal ``done=True`` is

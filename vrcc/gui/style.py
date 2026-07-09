@@ -19,15 +19,6 @@ PALETTE = {
         "good": "#2ecc71", "warn": "#e0a33e", "bad": "#e5544b",
         "on_badge": "#ffffff",
     },
-    "light": {
-        "ground": "#f5f6f8", "surface": "#ffffff", "surface_2": "#eef1f5",
-        "border": "#dfe3ea", "text": "#1a1d24", "muted": "#5b6472",
-        "accent": "#1f7ae0", "accent_hover": "#3d8fe8",
-        # warn darkened for light surfaces: #9a6a10 on #ffffff is ~4.7:1
-        # (the old #e0a33e was ~2:1, unreadable in the restart banner).
-        "good": "#2ecc71", "warn": "#9a6a10", "bad": "#e5544b",
-        "on_badge": "#ffffff",
-    },
 }
 
 # Tiny stroke icons QSS `image:` needs as files (data URIs aren't supported).
@@ -44,7 +35,7 @@ def ensure_qss_icons(theme: str) -> Path:
 
     Best-effort: an unwritable temp dir degrades to missing icon glyphs (Qt
     ignores a dead url()), never an aborted stylesheet. The dir is named by
-    the RESOLVED theme so "system" shares the dark/light dir it maps to."""
+    the RESOLVED theme so every caller shares one icon dir."""
     resolved = resolve_theme(theme)
     p = PALETTE[resolved]
     d = Path(tempfile.gettempdir()) / f"vrcc-qss-{resolved}"
@@ -71,19 +62,8 @@ def ensure_qss_icons(theme: str) -> Path:
 
 
 def resolve_theme(name: str) -> str:
-    if name in ("dark", "light"):
-        return name
-    if name == "system":
-        try:
-            from PySide6.QtGui import Qt
-            from PySide6.QtWidgets import QApplication
-
-            app = QApplication.instance()
-            if app is not None:
-                scheme = app.styleHints().colorScheme()
-                return "light" if scheme == Qt.ColorScheme.Light else "dark"
-        except Exception:  # noqa: BLE001 -- any failure falls back to dark
-            pass
+    # The theme argument survives so stored configs and existing callers keep
+    # working while there is only one palette.
     return "dark"
 
 

@@ -1,8 +1,9 @@
-"""Question prompts about the active voice model, shared by Settings and the
-main window: offer the CPU when an onnx-asr model meets an explicit CUDA
-device, and offer a better downloaded model when the spoken language changes
-to one the active model cannot transcribe. The decision helpers are Qt-free;
-only the offer functions build a dialog.
+"""Question prompts and combo greying for the active voice model, shared by
+Settings and the main window: offer the CPU when an onnx-asr model meets an
+explicit CUDA device, grey the spoken languages the active model cannot
+transcribe, and (main window) offer a better downloaded model when a spoken
+language outside the active model's set is chosen anyway. The decision helpers
+are Qt-free; the offer functions build a dialog and the greying edits a combo.
 """
 
 from __future__ import annotations
@@ -13,14 +14,21 @@ from vrcc.gui.model_labels import whisper_display_name
 from vrcc.i18n import tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
 
+_AUTO = "auto"
+
 # Hedged on purpose ("usually"): relative CPU/GPU speed varies by machine; on
 # the reference box the int8 exports measured no faster on CUDA than CPU.
 _CPU_OFFER = tr_noop(
-    "Parakeet and Canary usually run about as fast on the CPU as on the GPU, "
+    "Parakeet usually runs about as fast on the CPU as on the GPU, "
     "and GPU mode takes VRAM away from VRChat. Use the CPU for this model?"
 )
 
 _SWITCH_OFFER = tr_noop("{name} cannot transcribe {language}. Switch to {other}?")
+
+# Per-item tooltip on a spoken-language entry the active voice model can't do.
+_LANGUAGE_LOCKED_TIP = tr_noop(
+    "{name} cannot transcribe this language. Choose another voice model first."
+)
 
 
 def cpu_offer_needed(cfg, model_id: str) -> bool:
@@ -122,14 +130,25 @@ def offer_language_switch(parent, cfg, dm, source_display: str) -> str | None:
     return candidate if answer == QMessageBox.StandardButton.Yes else None
 
 
-def maybe_switch_model_for_language(dlg) -> None:
-    """Settings hook: apply an accepted switch through the voice-model combo,
-    so the normal change path runs (fit prompt, Mode lock, hot-swap)."""
-    candidate = offer_language_switch(
-        dlg, dlg._cfg, dlg._download_manager, dlg._cfg.stt.source_language
-    )
-    if candidate is None or dlg._model_combo is None:
-        return
-    idx = dlg._model_combo.findData(candidate)
-    if idx >= 0:
-        dlg._model_combo.setCurrentIndex(idx)
+def grey_unsupported_languages(combo, model_id: str) -> None:
+    """Disable the spoken-language entries the active voice model can't
+    transcribe, each with a tooltip naming the model. "auto" is enabled only
+    when the model detects the spoken language itself; an unknown model id
+    (hand-edited config) restricts nothing. Symmetric to the model-combo
+    greying: the user switches the voice model first, which re-enables the
+    languages, so the two directions never deadlock."""
+    spec = WHISPER_MODELS.get(model_id)
+    tip = tr(_LANGUAGE_LOCKED_TIP, name=whisper_display_name(model_id))
+    item_model = combo.model()
+    for i in range(combo.count()):
+        item = item_model.item(i)
+        if item is None:
+            continue
+        text = combo.itemText(i)
+        if text == _AUTO:
+            enabled = spec is None or spec.auto_language
+        else:
+            lang = LANGUAGES.get(text)
+            enabled = spec is None or lang is None or _covers(spec, lang.whisper)
+        item.setEnabled(enabled)
+        item.setToolTip("" if enabled else tip)

@@ -185,6 +185,27 @@ def test_invalid_literal_field_falls_back_to_default_with_warning(tmp_path):
     assert "gui.theme" in store.load_warnings[0]
 
 
+@pytest.mark.parametrize("stored", ["light", "system"])
+def test_stored_light_or_system_theme_loads_as_dark(tmp_path, stored):
+    # Only the dark palette survives; a config written by an older build that
+    # stored "light"/"system" must still load, dropping the field back to
+    # "dark". It is no longer a valid Literal value, so the field-by-field
+    # fallback records a benign gui.theme warning (the good fields are kept).
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"gui": {"theme": stored, "font_scale": 1.25}}),
+        encoding="utf-8",
+    )
+
+    store = ConfigStore(path)
+    store.load()
+
+    assert store.config.gui.theme == "dark"
+    assert store.config.gui.font_scale == 1.25
+    assert len(store.load_warnings) == 1
+    assert "gui.theme" in store.load_warnings[0]
+
+
 def test_section_that_is_not_an_object_falls_back_to_defaults_with_warning(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"osc": "not-an-object"}), encoding="utf-8")

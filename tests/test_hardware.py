@@ -98,6 +98,47 @@ class TestResolve:
         assert index == 3
 
 
+class TestResolvedDevice:
+    _PARAKEET = "parakeet-tdt-0.6b-v3"
+
+    def test_auto_gpu_whisper_is_cuda(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("auto", 0, "small") == "cuda"
+
+    def test_auto_gpu_parakeet_is_cpu(self, monkeypatch):
+        # onnx-asr auto override: a GPU is present but the int8 graph runs on CPU.
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("auto", 0, self._PARAKEET) == "cpu"
+
+    def test_explicit_cuda_parakeet_stays_cuda(self, monkeypatch):
+        # The override only applies to "auto"; a pinned "cuda" is honored.
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("cuda", 0, self._PARAKEET) == "cuda"
+
+    def test_explicit_cpu_stays_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("cpu", 0, "small") == "cpu"
+
+    def test_auto_without_gpu_is_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
+        assert hardware.resolved_device("auto", 0, "small") == "cpu"
+
+    def test_auto_gpu_unknown_model_mirrors_resolve(self, monkeypatch):
+        # No / unknown model id: no onnx override, so it matches resolve()'s cuda.
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        assert hardware.resolved_device("auto", 0, None) == "cuda"
+
+    def test_failed_driver_floor_degrades_auto_to_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "_driver_floor_failed", True)
+        assert hardware.resolved_device("auto", 0, "small") == "cpu"
+
+    def test_failed_driver_floor_degrades_explicit_cuda_to_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "_driver_floor_failed", True)
+        assert hardware.resolved_device("cuda", 0, "small") == "cpu"
+
+
 class TestDriverFloor:
     def test_no_cuda_device_never_publishes(self, monkeypatch):
         monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)

@@ -94,7 +94,9 @@ class MuteSyncConfig(BaseModel):
 
 class GuiConfig(BaseModel):
     profile: Literal["latency", "quality"] = "latency"
-    theme: Literal["dark", "light", "system"] = "system"
+    # Field kept so stored configs and callers keep loading; only one palette
+    # exists, so a stored "light"/"system" is dropped back to this default.
+    theme: Literal["dark"] = "dark"
     font_scale: float = 1.0
     # UI language code from vrcc.i18n.UI_LANGUAGES; "auto" follows the OS
     # locale. Free-form (not Literal) so a catalog added later needs no

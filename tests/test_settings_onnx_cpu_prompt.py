@@ -1,8 +1,8 @@
 """Offscreen GUI tests for the explicit-CUDA CPU offer: onnx-asr models
-(Parakeet, Canary) run about as fast on the CPU, so picking one while
-stt.device == "cuda" (or picking cuda while one is active) asks whether to
-use the CPU instead. The prompt must never fire for device "auto" -- the
-engine already prefers the CPU there.
+(Parakeet) run about as fast on the CPU, so picking one while stt.device ==
+"cuda" (or picking cuda while one is active) asks whether to use the CPU
+instead. The prompt must never fire for device "auto" -- the engine already
+prefers the CPU there.
 """
 
 import os
@@ -74,9 +74,9 @@ def test_onnx_pick_on_cuda_no_keeps_cuda(qapp, tmp_path, monkeypatch):
     try:
         asked = _capture_question(monkeypatch, QMessageBox.StandardButton.No)
         combo = dlg._model_combo
-        combo.setCurrentIndex(combo.findData("canary-1b-v2"))
+        combo.setCurrentIndex(combo.findData("parakeet-tdt-0.6b-v3"))
         assert len(asked) == 1
-        assert store.config.stt.model == "canary-1b-v2"
+        assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
         assert store.config.stt.device == "cuda"
     finally:
         dlg.close()

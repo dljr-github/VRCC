@@ -21,8 +21,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from vrcc.core import recommend
+from vrcc.core.hardware import resolved_device
 from vrcc.core.languages import LANGUAGES
-from vrcc.gui import model_prompts
+from vrcc.gui import model_prompts, settings_reset
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
 from vrcc.gui.widgets import SegmentedControl
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
@@ -47,9 +49,32 @@ _MODE_DESC = tr_noop(
 # onnx_asr backend ignores beam size and temperature, the profile's headline
 # caption-quality effect).
 _MODE_LOCKED_TOOLTIP = tr_noop(
-    "Parakeet and Canary always decode at full accuracy, so Speed / Quality "
-    "does not change their captions."
+    "Parakeet always decodes at full accuracy, so Speed / Quality "
+    "does not change its captions."
 )
+# Appended to _MODE_DESC for a whisper model the benchmarks have an opinion on
+# (recommend.recommended_profile); mapped from its "quality"/"latency" verdict.
+_MODE_RECOMMEND_QUALITY = tr_noop(
+    "Quality is recommended for this model: more accurate, and barely slower."
+)
+_MODE_RECOMMEND_SPEED = tr_noop(
+    "Speed is recommended for this model: Quality is no more accurate here."
+)
+
+
+def _mode_recommendation(dlg: "SettingsDialog") -> str:
+    """Muted Speed/Quality recommendation for the active whisper model on its
+    resolved device, or "" when the recommender has no opinion (onnx-asr, or an
+    unmeasured model/device)."""
+    device = resolved_device(
+        dlg._cfg.stt.device, dlg._cfg.stt.device_index, dlg._cfg.stt.model
+    )
+    profile = recommend.recommended_profile(dlg._cfg.stt.model, device)
+    if profile == "quality":
+        return tr(_MODE_RECOMMEND_QUALITY)
+    if profile == "latency":
+        return tr(_MODE_RECOMMEND_SPEED)
+    return ""
 
 # Labels double as SegmentedControl values (compared/persisted via scale_map);
 # tr_noop keeps them stable values while making them catalog-extractable for
@@ -116,8 +141,18 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
         locked = spec is not None and spec.backend == "onnx_asr"
         dlg._mode.setEnabled(not locked)
         dlg._mode.setToolTip(tr(_MODE_LOCKED_TOOLTIP if locked else _MODE_TOOLTIP))
-        dlg._mode_desc.setText(tr(_MODE_LOCKED_TOOLTIP if locked else _MODE_DESC))
+        if locked:
+            dlg._mode_desc.setText(tr(_MODE_LOCKED_TOOLTIP))
+            return
+        text = tr(_MODE_DESC)
+        recommendation = _mode_recommendation(dlg)
+        if recommendation:
+            text = text + "\n" + recommendation
+        dlg._mode_desc.setText(text)
     dlg._update_mode_for_model = update_mode_for_model
+    # Re-evaluate the recommendation when the Mode toggles (device / model
+    # triggers fire from their own combos).
+    dlg._mode.changed.connect(lambda _v: update_mode_for_model())
     update_mode_for_model()
 
     dlg._send_check = QCheckBox(tr("Send my captions to VRChat"))
@@ -143,22 +178,10 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     dlg._bind_checkbox(dlg._include_original_check, dlg._cfg.osc, "include_original")
     form.addRow(dlg._include_original_check)
 
-    # Appearance.
-    theme = QComboBox()
-    for label, value in (
-        (tr("System"), "system"), (tr("Dark"), "dark"), (tr("Light"), "light")
-    ):
-        theme.addItem(label, value)
-    ti = theme.findData(dlg._cfg.gui.theme)
-    if ti >= 0:
-        theme.setCurrentIndex(ti)
-    theme.setToolTip(tr("Dark, light, or match your system."))
-    dlg._bind_data_combo(theme, dlg._cfg.gui, "theme")
-    form.addRow(tr("Theme"), theme)
-
-    # Interface language (restart-applied, like the theme). Data is the code;
-    # labels are each language's own name, so a user stuck in the wrong
-    # language can still find theirs.
+    # Interface language. Unlike the other fields it can't retint live widgets
+    # (tr() runs at construction), so SettingsDialog rebuilds the main window on
+    # close when it changed. Data is the code; labels are each language's own
+    # name, so a user stuck in the wrong language can still find theirs.
     ui_lang = QComboBox()
     ui_lang.addItem(tr("Auto (match my system)"), "auto")
     for code, native_name in UI_LANGUAGES.items():
@@ -166,9 +189,7 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     li = ui_lang.findData(dlg._cfg.gui.ui_language)
     if li >= 0:
         ui_lang.setCurrentIndex(li)
-    ui_lang.setToolTip(
-        tr("The language of VRCC's interface. Applies after restarting VRCC.")
-    )
+    ui_lang.setToolTip(tr("The language of VRCC's interface."))
     dlg._bind_data_combo(ui_lang, dlg._cfg.gui, "ui_language")
     dlg._ui_language_combo = ui_lang
     form.addRow(tr("Language"), ui_lang)
@@ -213,6 +234,10 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         tr("Bigger models are more accurate but slower and larger.")
     )
     dlg._model_combo.currentIndexChanged.connect(dlg._on_voice_model_changed)
+    # The STT Auto device label depends on the model (onnx-asr auto -> cpu).
+    dlg._model_combo.currentIndexChanged.connect(
+        lambda _i: settings_reset.update_device_auto_labels(dlg)
+    )
 
     form.addRow(tr("Voice model"), dlg._model_combo)
     if not voice_specs:
@@ -238,7 +263,6 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
             return
         dlg._cfg.stt.source_language = dlg._source_combo.currentText()
         dlg._changed()
-        model_prompts.maybe_switch_model_for_language(dlg)
     dlg._source_combo.currentIndexChanged.connect(on_source)
 
     form.addRow(tr("Spoken language"), dlg._source_combo)
@@ -319,6 +343,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     form.addRow(adv)
 
     dlg._update_language_limited_items()
+    model_prompts.grey_unsupported_languages(dlg._source_combo, dlg._cfg.stt.model)
     return page
 
 

@@ -4,9 +4,8 @@ Speak into your microphone and your words appear in the VRChat chatbox as
 live captions, with translations into up to three languages underneath.
 Everything runs locally: speech recognition via
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) or NVIDIA's
-[Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) /
-[Canary 1B v2](https://huggingface.co/nvidia/canary-1b-v2)
-(run as ONNX exports via [onnx-asr](https://github.com/istupakov/onnx-asr))
+[Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
+(run as an ONNX export via [onnx-asr](https://github.com/istupakov/onnx-asr))
 and machine translation via
 [CTranslate2](https://github.com/OpenNMT/CTranslate2)
 (NLLB / M2M100 / MADLAD models). No cloud services, no API keys.
@@ -65,14 +64,14 @@ as pip wheels, so no system CUDA install is needed):
 ```
 
 The second command swaps in the GPU build of onnxruntime so the Parakeet
-and Canary models also run on the GPU (whisper models use CTranslate2's own
-CUDA path). It must run **after** the first: `onnxruntime-gpu` installs the
+model also runs on the GPU (whisper models use CTranslate2's own CUDA
+path). It must run **after** the first: `onnxruntime-gpu` installs the
 same `onnxruntime` package as the CPU wheel pulled in by faster-whisper,
 and the one installed last wins. Keep it below 1.23. Newer builds are
 built against CUDA 13, `[cuda]` ships the CUDA 12 wheels that CTranslate2
-needs, and with mismatched builds those models silently run on the CPU
-instead. Skipping the second command entirely is also fine; the two
-models then run on the CPU.
+needs, and with mismatched builds that model silently runs on the CPU
+instead. Skipping the second command entirely is also fine; Parakeet
+then runs on the CPU.
 
 > **GPU note:** CUDA use requires an NVIDIA driver of version **570 or
 > newer**. On older drivers the app detects this at startup and falls back
@@ -95,9 +94,8 @@ downloads them for you. Approximate download sizes:
 | Translation | `nllb-600M-int8` | ~650 MB |
 
 Other options range from whisper `tiny` (~75 MB) up to `large-v3` (~3 GB),
-plus NVIDIA's `parakeet-tdt-0.6b-v3` (~690 MB, very accurate and fast) and
-`canary-1b-v2` (~1 GB, as accurate but slower); both are limited to
-English + 24 other European languages (no Japanese/Korean/Chinese).
+plus NVIDIA's `parakeet-tdt-0.6b-v3` (~690 MB, very accurate and fast),
+limited to English + 24 other European languages (no Japanese/Korean/Chinese).
 MT models range from `m2m100-418M-int8` (~480 MB) up to `madlad400-3b`
 (~3.5 GB). Models can be added/removed later via the **Models** dialog.
 See [the benchmarks below](#speech-to-text-benchmarks) for measured
@@ -141,8 +139,8 @@ window, and adding a UI translation is a single JSON file in `vrcc/i18n/`
   thresholds. Noticeably better phrasing, a few hundred milliseconds
   slower.
 
-Parakeet and Canary always decode at full accuracy, so the Mode control
-is greyed out while one of them is the active voice model. The individual
+Parakeet always decodes at full accuracy, so the Mode control is greyed
+out while it is the active voice model. The individual
 knobs (VAD timings, beam sizes, quality gates and so on) live in
 **Settings → Advanced**.
 
@@ -157,27 +155,25 @@ normalization, so it says nothing about other languages. It is scored with
 VRCC's quality gates open, so it measures what the model heard rather than
 what the app chose to suppress. Latency is the median time to transcribe
 one utterance. Whisper models run float16 on GPU and int8 on CPU, which is
-why their two WER columns differ slightly; Parakeet and Canary are int8
-either way.
+why their two WER columns differ slightly; Parakeet is int8 either way.
 
 | Model | Size | WER (GPU) | WER (CPU) | GPU latency | CPU latency |
 | ----- | ---- | --------- | --------- | ----------- | ----------- |
 | `tiny` | 75 MB | 7.4% | 7.9% | 0.03 s | 0.13 s |
 | `base` | 145 MB | 5.7% | 5.9% | 0.04 s | 0.25 s |
-| `small` | 484 MB | 3.7% | 3.7% | 0.09 s | 0.75 s |
+| `small` | 484 MB | 3.7% | 3.7% | 0.09 s | 0.74 s |
 | `medium` | 1.5 GB | 2.7% | 2.6% | 0.17 s | 2.41 s |
 | `large-v3` | 3.1 GB | 1.7% | 1.8% | 0.24 s | 3.90 s |
 | `large-v3-turbo` | 1.6 GB | 1.7% | 1.6% | 0.07 s | 2.81 s |
 | `distil-large-v3.5` | 1.5 GB | 2.4% | 2.3% | 0.06 s | 2.78 s |
 | `distil-small.en` | 332 MB | 4.0% | 4.0% | 0.04 s | 0.64 s |
 | `parakeet-tdt-0.6b-v3` | 690 MB | 2.3% | 2.3% | 0.21 s | **0.13 s** |
-| `canary-1b-v2` | 1 GB | 1.8% | 1.8% | 0.67 s | **0.32 s** |
 
-Two results are worth reading twice. Parakeet and Canary are **faster on
-the CPU than on the GPU** (their int8 ONNX graphs do not suit CUDA), which
-is why VRCC runs them on the CPU when the device is left on Auto. And on
-the CPU, Canary is both the most accurate model in the table and quick
-enough for live captions, which no whisper model manages.
+One result is worth reading twice. Parakeet is **faster on the CPU than on
+the GPU** (0.13 s vs 0.21 s; its int8 ONNX graph does not suit CUDA), which
+is why VRCC runs it on the CPU when the device is left on Auto. On the CPU
+it reaches 2.3% at 0.13 s, beating the `small` default (3.7% at 0.75 s) on
+both accuracy and speed, which no other model near that latency manages.
 
 Widening the beam (the Quality mode) is close to free on a GPU and buys
 little: `base` improves from 5.7% to 4.7% for an extra 20 ms, `medium`
@@ -204,30 +200,28 @@ language.
 
 On CPU it depends on the language you speak:
 
-- One of the 25 European languages: use `canary-1b-v2` for accuracy or
-  `parakeet-tdt-0.6b-v3` for speed. Both beat the `small` default on
-  accuracy *and* latency, and it is not close. Canary reaches 1.8% at
-  0.32 s, better than any whisper model at any speed here; Parakeet gives
-  up half a point for a third of the wait, and detects the spoken language
-  on its own where Canary must be told it.
+- One of the 25 European languages: use `parakeet-tdt-0.6b-v3`. It reaches
+  2.3% at 0.13 s, beating the `small` default (3.7% at 0.75 s) on accuracy
+  *and* latency, and it is not close. It also detects the spoken language
+  on its own within that set.
 - Japanese, Korean, Chinese, or anything else outside that set: stay on
   `small`. Every whisper model that beats it needs seconds per caption on
   a CPU.
 
-Both NeMo models are faster on the CPU than on the GPU (0.13 s vs 0.21 s
-for Parakeet, 0.32 s vs 0.67 s for Canary), because their int8 ONNX graphs
-do not suit CUDA. So the CPU build is enough for them, and if you play
-VRChat on the same PC they leave the whole GPU to the game. VRCC does this
-for you when the device is left on Auto.
+Parakeet is faster on the CPU than on the GPU (0.13 s vs 0.21 s), because
+its int8 ONNX graph does not suit CUDA. So the CPU build is enough for it,
+and if you play VRChat on the same PC it leaves the whole GPU to the game.
+VRCC does this for you when the device is left on Auto.
 
-The distil models lost to `large-v3-turbo` on GPU and to the NeMo pair and
+The distil models lost to `large-v3-turbo` on GPU and to Parakeet and
 `small` on CPU in these runs, so there's little reason to pick them.
 
 The first-run wizard picks for your hardware and your spoken language,
 which it takes from your Windows display language. On a CPU that means
-Canary or Parakeet when you speak a language they cover, and `small` when
-you do not. Set the spoken language to Auto and it stays with the whisper
-models, since Canary cannot detect a language for itself.
+Parakeet when you speak a language it covers, and `small` when you do not.
+Set the spoken language to Auto and it stays with the whisper models: with
+no language known ahead of time, a European-only model cannot be trusted
+to cover it.
 
 ## Where things are stored
 
@@ -283,8 +277,8 @@ downloads; check that a model's license fits your use:
   good alternative if you need a permissive license.
 - **MADLAD-400** (`madlad400-3b`): **Apache-2.0**.
 - Whisper models: **MIT** (OpenAI weights, SYSTRAN CT2 conversions).
-- **Parakeet / Canary** (`parakeet-tdt-0.6b-v3`, `canary-1b-v2`):
-  **CC-BY-4.0** (NVIDIA weights, istupakov ONNX exports).
+- **Parakeet** (`parakeet-tdt-0.6b-v3`): **CC-BY-4.0** (NVIDIA weights,
+  istupakov ONNX export).
 
 ## Troubleshooting
 
