@@ -1,10 +1,10 @@
 """Download, presence-check and delete STT/MT model files.
 
 Lays models out as ``<models_dir>/{mt,whisper}/<id>`` (``whisper/`` holds
-every voice model -- the directory name is historical, Parakeet ONNX exports
-land there too), delegating to ``snapshot_download`` (MT + Parakeet) /
-``download_model`` (faster-whisper) and reporting :class:`DownloadProgress`
-on the bus. Downloader errors propagate.
+every voice model -- the directory name is historical, the onnx-asr backed
+NeMo exports land there too), delegating to ``snapshot_download`` (MT +
+onnx-asr) / ``download_model`` (faster-whisper) and reporting
+:class:`DownloadProgress` on the bus. Downloader errors propagate.
 """
 
 from __future__ import annotations
@@ -25,15 +25,21 @@ _MODEL_BIN = "model.bin"
 _KINDS = ("mt", "whisper")
 
 
-def _parakeet_files(spec: WhisperSpec) -> list[str]:
-    """The exact files onnx-asr needs to run a Parakeet TDT export offline
-    (doubles as the snapshot allow_patterns, so nothing else is fetched)."""
+def _onnx_asr_files(spec: WhisperSpec) -> list[str]:
+    """The exact files onnx-asr needs to run ``spec`` offline (doubles as the
+    snapshot allow_patterns, so nothing else is fetched). AED exports (Canary)
+    split into encoder+decoder; the transducers into encoder+decoder_joint."""
     suffix = f".{spec.quantization}" if spec.quantization else ""
+    decoder = (
+        f"decoder-model{suffix}.onnx"
+        if spec.asr_type == "nemo-conformer-aed"
+        else f"decoder_joint-model{suffix}.onnx"
+    )
     return [
         "config.json",
         "vocab.txt",
         f"encoder-model{suffix}.onnx",
-        f"decoder_joint-model{suffix}.onnx",
+        decoder,
     ]
 
 
@@ -63,8 +69,8 @@ class DownloadManager:
     def is_whisper_downloaded(self, model_id: str) -> bool:
         d = self.whisper_model_dir(model_id)
         spec = WHISPER_MODELS.get(model_id)
-        if spec is not None and spec.backend == "parakeet":
-            return all((d / name).is_file() for name in _parakeet_files(spec))
+        if spec is not None and spec.backend == "onnx_asr":
+            return all((d / name).is_file() for name in _onnx_asr_files(spec))
         return (d / _MODEL_BIN).is_file()
 
     # -- downloads ---------------------------------------------------------
@@ -94,11 +100,11 @@ class DownloadManager:
     def ensure_whisper(self, model_id: str) -> Path:
         """Download the voice model unless already present.
 
-        Parakeet models come from their HF repo via ``snapshot_download``
-        (with byte progress, restricted to the files onnx-asr needs);
-        faster-whisper models via ``download_model`` (no byte-level progress
-        hook, so only the terminal ``done=True`` is published). Returns the
-        model dir; downloader exceptions propagate.
+        onnx-asr models (Parakeet/Canary) come from their HF repo via
+        ``snapshot_download`` (with byte progress, restricted to the files
+        onnx-asr needs); faster-whisper models via ``download_model`` (no
+        byte-level progress hook, so only the terminal ``done=True`` is
+        published). Returns the model dir; downloader exceptions propagate.
         """
         target = self.whisper_model_dir(model_id)
         if self.is_whisper_downloaded(model_id):
@@ -106,11 +112,11 @@ class DownloadManager:
             return target
 
         spec = WHISPER_MODELS.get(model_id)
-        if spec is not None and spec.backend == "parakeet":
+        if spec is not None and spec.backend == "onnx_asr":
             snapshot_download(
                 repo_id=spec.repo,
                 local_dir=str(target),
-                allow_patterns=_parakeet_files(spec),
+                allow_patterns=_onnx_asr_files(spec),
                 tqdm_class=self._progress_tqdm(model_id),
             )
         else:

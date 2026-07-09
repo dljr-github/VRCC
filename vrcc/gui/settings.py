@@ -109,9 +109,9 @@ class SettingsDialog(QDialog):
         self._stt_temp_spin: QDoubleSpinBox | None = None
         self._mt_beam_spin: QSpinBox | None = None
         self._model_combo: QComboBox | None = None
-        # (combo index, supported whisper language codes) for voice models
-        # that can't transcribe every language (distil English-only, Parakeet).
-        self._limited_model_indices: list[tuple[int, tuple[str, ...]]] = []
+        # (combo index, spec) for voice models that can't transcribe every
+        # language (distil English-only, Parakeet/Canary European sets).
+        self._limited_model_indices: list[tuple[int, object]] = []
         # Currently-selected model id per combo, so a cancelled fit-warning
         # switch can revert the combo without re-firing its handler.
         self._voice_selected_id: str | None = None
@@ -199,8 +199,8 @@ class SettingsDialog(QDialog):
                 if combo is self._model_combo:
                     # Positional language-limited greying: shift past the removal.
                     self._limited_model_indices = [
-                        (j - 1 if j > i else j, langs)
-                        for j, langs in self._limited_model_indices
+                        (j - 1 if j > i else j, spec)
+                        for j, spec in self._limited_model_indices
                     ]
                 return
 
@@ -470,18 +470,18 @@ class SettingsDialog(QDialog):
 
     def _update_language_limited_items(self) -> None:
         """Grey out voice models that can't transcribe the selected spoken
-        language. "auto" keeps multilingual-but-limited models (Parakeet)
-        enabled -- they auto-detect within their set -- but greys single-
-        language ones (distil), which would force English regardless."""
+        language. "auto" keeps models that detect the language within their
+        set (Parakeet) enabled, but greys those that can't detect at all
+        (distil, Canary), which would transcribe as English regardless."""
         if self._model_combo is None:
             return
         source = self._source_combo.currentText()
         model = self._model_combo.model()
-        for i, langs in self._limited_model_indices:
+        for i, spec in self._limited_model_indices:
             if source == _AUTO:
-                enabled = len(langs) > 1
+                enabled = spec.auto_language
             else:
-                enabled = languages.get(source).whisper in langs
+                enabled = languages.get(source).whisper in spec.languages
             item = model.item(i)
             if item is not None:
                 item.setEnabled(enabled)

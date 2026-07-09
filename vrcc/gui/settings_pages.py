@@ -180,7 +180,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         i = dlg._model_combo.count()
         dlg._model_combo.addItem(whisper_display_name(spec.id), spec.id)
         if spec.languages is not None:
-            dlg._limited_model_indices.append((i, spec.languages))
+            dlg._limited_model_indices.append((i, spec))
     mi = dlg._model_combo.findData(dlg._cfg.stt.model)
     if mi >= 0:
         dlg._model_combo.setCurrentIndex(mi)  # else: index 0 is already the placeholder

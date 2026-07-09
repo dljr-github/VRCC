@@ -389,7 +389,7 @@ class ModelsDialog(QDialog):
 
     def _start_download(self, row: _ModelRow) -> None:
         self._downloading_id = row.model_id
-        # Only faster-whisper downloads lack byte progress; MT and Parakeet
+        # Only faster-whisper downloads lack byte progress; MT and onnx-asr
         # snapshots publish real percentages.
         row.begin_progress(
             indeterminate=row.kind == "whisper"

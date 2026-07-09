@@ -1,11 +1,12 @@
-"""Parakeet STT engine: NVIDIA Parakeet TDT ONNX export run via onnx-asr.
+"""onnx-asr STT engine: NVIDIA NeMo ONNX exports (Parakeet TDT, Canary AED).
 
 Same duck-typed contract as :class:`vrcc.stt.engine.SttEngine` (load /
 warm_up / unload / transcribe), turning mono float32 16 kHz audio into an
-:class:`SttResult`. ``onnx_asr`` is imported lazily in :meth:`load`; a failed
-CUDA session build falls back to CPU once. Parakeet reports no per-segment
-confidence or no-speech probability, so results carry neutral gate values
-(0.0) and the VAD is the effective quality gate. Zero Qt.
+:class:`SttResult`. The ``onnx_asr`` package is imported lazily in
+:meth:`load`; a failed CUDA session build falls back to CPU once. These
+models report no per-segment confidence or no-speech probability, so results
+carry neutral gate values (0.0) and the VAD is the effective quality gate.
+Zero Qt.
 """
 
 from __future__ import annotations
@@ -23,11 +24,11 @@ from vrcc.core.languages import get
 from vrcc.stt.engine import SttResult
 from vrcc.stt.registry import WhisperSpec
 
-logger = logging.getLogger("vrcc.stt.parakeet")
+logger = logging.getLogger("vrcc.stt.onnx_asr")
 
-# onnx-asr model *type* (not a HF name): loads the local export offline
-# without consulting onnx-asr's repo registry.
-_ASR_TYPE = "nemo-conformer-tdt"
+# The onnx-asr model type whose decoder prompt accepts a source language
+# (Canary). TDT/RNNT transducers neither need nor accept one.
+_AED_TYPE = "nemo-conformer-aed"
 
 _CPU_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -37,8 +38,8 @@ _WARM_UP_SAMPLES = 8000
 _SAMPLE_RATE = 16000
 
 
-class ParakeetEngine:
-    """One loaded Parakeet ONNX model.
+class OnnxAsrEngine:
+    """One loaded onnx-asr model.
 
     Single-caller contract (same as ``SttEngine``): driven by exactly one
     worker thread; ``transcribe()`` and ``unload()`` aren't thread-safe
@@ -92,7 +93,8 @@ class ParakeetEngine:
                 if providers == _CPU_PROVIDERS:
                     raise
                 logger.warning(
-                    "Parakeet CUDA session failed; falling back to CPU: %s", exc
+                    "%s CUDA session failed; falling back to CPU: %s",
+                    self._spec.id, exc,
                 )
                 self._bus.publish(EngineStateChanged("stt", "fallback_cpu", str(exc)))
                 self._model = self._build_model(_CPU_PROVIDERS)
@@ -124,20 +126,23 @@ class ParakeetEngine:
     def transcribe(self, samples: np.ndarray) -> SttResult | None:
         """Transcribe ``samples`` (mono float32, 16 kHz) into an :class:`SttResult`.
 
-        Returns ``None`` for empty text. Parakeet auto-detects the spoken
-        language but doesn't report it, so ``language`` echoes the configured
-        source language ("en" when set to auto -- the MT source fallback).
-        Raises ``RuntimeError`` if called before :meth:`load`.
+        Returns ``None`` for empty text. AED models (Canary) get the
+        configured source language forced into their decoder prompt; the
+        transducers auto-detect within their set but don't report it -- either
+        way ``language`` echoes the configured source ("en" when set to auto,
+        the MT source fallback). Raises ``RuntimeError`` if called before
+        :meth:`load`.
         """
         if self._model is None:
             raise RuntimeError(
-                "ParakeetEngine.transcribe() called before a successful load(); "
+                "OnnxAsrEngine.transcribe() called before a successful load(); "
                 "call load() first."
             )
 
         text = self._model.recognize(
             np.ascontiguousarray(samples, dtype=np.float32),
             sample_rate=_SAMPLE_RATE,
+            **self._recognize_kwargs(),
         )
         text = (text or "").strip()
         if not text:
@@ -145,13 +150,27 @@ class ParakeetEngine:
 
         source = self._cfg.source_language
         language = "en" if source == "auto" else get(source).whisper
-        # No confidence/no-speech signals from the TDT decoder: neutral values
+        # No confidence/no-speech signals from these decoders: neutral values
         # that always pass SttConfig's gates (VAD is the effective gate).
         return SttResult(
             text=text, language=language, avg_logprob=0.0, no_speech_prob=0.0
         )
 
     # -- internals -------------------------------------------------------------
+
+    def _recognize_kwargs(self) -> dict:
+        """Per-utterance ``recognize()`` options: AED models take the
+        configured source language (their prompt defaults to English), when it
+        is one the model supports. Transducers take nothing."""
+        if self._spec.asr_type != _AED_TYPE:
+            return {}
+        source = self._cfg.source_language
+        if source == "auto":
+            return {}
+        code = get(source).whisper
+        if self._spec.languages is not None and code not in self._spec.languages:
+            return {}  # unsupported pick (combo greying bypassed): don't crash
+        return {"language": code}
 
     def _providers(self, device: str, index: int) -> tuple:
         """onnxruntime providers for the resolved device: CUDA (pinned to the
@@ -167,7 +186,7 @@ class ParakeetEngine:
                 )
             logger.info(
                 "CUDA requested but this onnxruntime build has no "
-                "CUDAExecutionProvider; Parakeet runs on CPU"
+                "CUDAExecutionProvider; %s runs on CPU", self._spec.id,
             )
         return _CPU_PROVIDERS
 
@@ -179,7 +198,7 @@ class ParakeetEngine:
 
             factory = onnx_asr.load_model
         return factory(
-            _ASR_TYPE,
+            self._spec.asr_type,
             self._model_dir,
             quantization=self._spec.quantization,
             providers=list(providers),

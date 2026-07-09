@@ -1,6 +1,7 @@
-"""Tests for :mod:`vrcc.stt.parakeet` with a fake onnx-asr factory (no
+"""Tests for :mod:`vrcc.stt.onnx_asr` with a fake onnx-asr factory (no
 onnx-asr/onnxruntime model load): load events, provider selection + CPU
-fallback, transcribe result contract, and the create_stt_engine dispatch.
+fallback, transcribe result contract, Canary language forcing, and the
+create_stt_engine dispatch.
 """
 
 from __future__ import annotations
@@ -16,11 +17,13 @@ from vrcc.core.config import SttConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.stt import create_stt_engine
 from vrcc.stt.engine import SttEngine, SttResult
-from vrcc.stt.parakeet import ParakeetEngine
+from vrcc.stt.onnx_asr import OnnxAsrEngine
 from vrcc.stt.registry import WHISPER_MODELS
 
 PARAKEET_ID = "parakeet-tdt-0.6b-v3"
-SPEC = WHISPER_MODELS[PARAKEET_ID]
+CANARY_ID = "canary-1b-v2"
+PARAKEET = WHISPER_MODELS[PARAKEET_ID]
+CANARY = WHISPER_MODELS[CANARY_ID]
 
 
 class _FakeModel:
@@ -30,8 +33,10 @@ class _FakeModel:
         self.text = text
         self.calls: list[SimpleNamespace] = []
 
-    def recognize(self, samples, sample_rate=16000):
-        self.calls.append(SimpleNamespace(samples=samples, sample_rate=sample_rate))
+    def recognize(self, samples, sample_rate=16000, **kwargs):
+        self.calls.append(
+            SimpleNamespace(samples=samples, sample_rate=sample_rate, kwargs=kwargs)
+        )
         return self.text
 
 
@@ -87,7 +92,7 @@ def test_load_passes_type_dir_quantization_and_cpu_providers(model_dir):
     bus = EventBus()
     events = _collect(bus)
     factory = _RecordingFactory()
-    eng = ParakeetEngine(_cfg(), SPEC, model_dir, bus, model_factory=factory)
+    eng = OnnxAsrEngine(_cfg(), PARAKEET, model_dir, bus, model_factory=factory)
 
     eng.load()
 
@@ -101,12 +106,21 @@ def test_load_passes_type_dir_quantization_and_cpu_providers(model_dir):
     assert events[-1].detail == "cpu:int8"
 
 
+def test_load_uses_the_spec_asr_type(model_dir):
+    factory = _RecordingFactory()
+    eng = OnnxAsrEngine(
+        _cfg(model=CANARY_ID), CANARY, model_dir, EventBus(), model_factory=factory
+    )
+    eng.load()
+    assert factory.calls[0].model == "nemo-conformer-aed"
+
+
 def test_load_missing_model_dir_publishes_failed_and_raises(tmp_path):
     bus = EventBus()
     events = _collect(bus)
     factory = _RecordingFactory()
-    eng = ParakeetEngine(
-        _cfg(), SPEC, tmp_path / "nope", bus, model_factory=factory
+    eng = OnnxAsrEngine(
+        _cfg(), PARAKEET, tmp_path / "nope", bus, model_factory=factory
     )
 
     with pytest.raises(RuntimeError, match="Models window"):
@@ -127,7 +141,9 @@ def test_load_cuda_without_provider_runs_on_cpu(model_dir, monkeypatch):
     bus = EventBus()
     events = _collect(bus)
     factory = _RecordingFactory()
-    eng = ParakeetEngine(_cfg(device="cuda"), SPEC, model_dir, bus, model_factory=factory)
+    eng = OnnxAsrEngine(
+        _cfg(device="cuda"), PARAKEET, model_dir, bus, model_factory=factory
+    )
 
     eng.load()
 
@@ -147,8 +163,9 @@ def test_load_cuda_session_failure_falls_back_to_cpu(model_dir, monkeypatch):
     bus = EventBus()
     events = _collect(bus)
     factory = _RecordingFactory(fail_at=(0,))
-    eng = ParakeetEngine(
-        _cfg(device="cuda", device_index=1), SPEC, model_dir, bus, model_factory=factory
+    eng = OnnxAsrEngine(
+        _cfg(device="cuda", device_index=1), PARAKEET, model_dir, bus,
+        model_factory=factory,
     )
 
     eng.load()
@@ -169,7 +186,7 @@ def test_load_cpu_build_failure_publishes_failed_and_raises(model_dir):
     bus = EventBus()
     events = _collect(bus)
     factory = _RecordingFactory(fail_at=(0,))
-    eng = ParakeetEngine(_cfg(), SPEC, model_dir, bus, model_factory=factory)
+    eng = OnnxAsrEngine(_cfg(), PARAKEET, model_dir, bus, model_factory=factory)
 
     with pytest.raises(RuntimeError):
         eng.load()
@@ -181,17 +198,18 @@ def test_load_cpu_build_failure_publishes_failed_and_raises(model_dir):
 # transcribe()
 # --------------------------------------------------------------------------
 
-def _loaded_engine(model_dir, text="hello there", **cfg_over):
+def _loaded_engine(model_dir, spec=PARAKEET, text="hello there", **cfg_over):
     bus = EventBus()
     factory = _RecordingFactory(text)
-    eng = ParakeetEngine(_cfg(**cfg_over), SPEC, model_dir, bus, model_factory=factory)
+    cfg_over.setdefault("model", spec.id)
+    eng = OnnxAsrEngine(_cfg(**cfg_over), spec, model_dir, bus, model_factory=factory)
     eng.load()
     return eng, factory
 
 
 def test_transcribe_before_load_raises(model_dir):
-    eng = ParakeetEngine(
-        _cfg(), SPEC, model_dir, EventBus(), model_factory=_RecordingFactory()
+    eng = OnnxAsrEngine(
+        _cfg(), PARAKEET, model_dir, EventBus(), model_factory=_RecordingFactory()
     )
     with pytest.raises(RuntimeError, match="load"):
         eng.transcribe(np.zeros(160, dtype=np.float32))
@@ -229,6 +247,33 @@ def test_transcribe_language_auto_falls_back_to_english(model_dir):
     assert eng.transcribe(np.zeros(160, dtype=np.float32)).language == "en"
 
 
+def test_transducer_passes_no_language_option(model_dir):
+    eng, factory = _loaded_engine(model_dir, source_language="French")
+    eng.transcribe(np.zeros(160, dtype=np.float32))
+    assert factory.built[0].calls[0].kwargs == {}
+
+
+def test_canary_forces_the_configured_source_language(model_dir):
+    eng, factory = _loaded_engine(model_dir, spec=CANARY, source_language="French")
+    eng.transcribe(np.zeros(160, dtype=np.float32))
+    assert factory.built[0].calls[0].kwargs == {"language": "fr"}
+
+
+def test_canary_auto_source_passes_no_language(model_dir):
+    # Canary can't detect the language; auto leaves its English default prompt.
+    eng, factory = _loaded_engine(model_dir, spec=CANARY, source_language="auto")
+    eng.transcribe(np.zeros(160, dtype=np.float32))
+    assert factory.built[0].calls[0].kwargs == {}
+
+
+def test_canary_unsupported_source_passes_no_language(model_dir):
+    # Combo greying should prevent this pick, but config can still hold it --
+    # an unknown language token must not crash the decoder prompt.
+    eng, factory = _loaded_engine(model_dir, spec=CANARY, source_language="Japanese")
+    eng.transcribe(np.zeros(160, dtype=np.float32))
+    assert factory.built[0].calls[0].kwargs == {}
+
+
 def test_warm_up_transcribes_half_second_of_silence(model_dir):
     eng, factory = _loaded_engine(model_dir)
     eng.warm_up()
@@ -247,9 +292,11 @@ def test_unload_drops_model_and_transcribe_raises(model_dir):
 # create_stt_engine dispatch
 # --------------------------------------------------------------------------
 
-def test_factory_builds_parakeet_engine_for_parakeet_id(tmp_path):
-    eng = create_stt_engine(_cfg(), tmp_path, EventBus())
-    assert isinstance(eng, ParakeetEngine)
+def test_factory_builds_onnx_asr_engine_for_onnx_asr_ids(tmp_path):
+    for mid in (PARAKEET_ID, CANARY_ID):
+        eng = create_stt_engine(_cfg(model=mid), tmp_path, EventBus())
+        assert isinstance(eng, OnnxAsrEngine), mid
+        assert eng._spec is WHISPER_MODELS[mid]
 
 
 def test_factory_builds_whisper_engine_for_whisper_id(tmp_path):
@@ -267,5 +314,5 @@ def test_factory_model_id_override_wins_over_config(tmp_path):
     # Hot-swaps pass the swap target while keeping the live config object.
     cfg = _cfg(model="small")
     eng = create_stt_engine(cfg, tmp_path, EventBus(), model_id=PARAKEET_ID)
-    assert isinstance(eng, ParakeetEngine)
+    assert isinstance(eng, OnnxAsrEngine)
     assert eng._cfg is cfg

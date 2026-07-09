@@ -53,21 +53,25 @@ def test_language_limited_models_grey_with_source_language(qapp, tmp_path):
         for mid in ("small", "distil-small.en", "parakeet-tdt-0.6b-v3"):
             assert _item_enabled(combo, mid), mid
 
-        # Japanese: Parakeet (European languages) and distil (English) grey out.
+        # Japanese: the European-set models and distil (English) grey out.
         dlg._source_combo.setCurrentText("Japanese")
         assert _item_enabled(combo, "small")
         assert not _item_enabled(combo, "distil-small.en")
         assert not _item_enabled(combo, "parakeet-tdt-0.6b-v3")
+        assert not _item_enabled(combo, "canary-1b-v2")
 
-        # French: Parakeet supports it, distil still doesn't.
+        # French: Parakeet and Canary support it, distil still doesn't.
         dlg._source_combo.setCurrentText("French")
         assert _item_enabled(combo, "parakeet-tdt-0.6b-v3")
+        assert _item_enabled(combo, "canary-1b-v2")
         assert not _item_enabled(combo, "distil-small.en")
 
-        # auto: multilingual-but-limited models stay enabled (they detect
-        # within their set); single-language distil models grey out.
+        # auto: models that detect the language within their set stay enabled
+        # (Parakeet); models that can't detect at all grey out (distil would
+        # force English; Canary's decoder prompt defaults to English).
         dlg._source_combo.setCurrentText("auto")
         assert _item_enabled(combo, "parakeet-tdt-0.6b-v3")
+        assert not _item_enabled(combo, "canary-1b-v2")
         assert not _item_enabled(combo, "distil-small.en")
     finally:
         dlg.close()

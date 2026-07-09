@@ -55,6 +55,7 @@ def test_whisper_expected_models_present():
         "distil-large-v3.5",
         "distil-small.en",
         "parakeet-tdt-0.6b-v3",
+        "canary-1b-v2",
     }
     assert expected <= set(WHISPER_MODELS)
 
@@ -77,35 +78,62 @@ def test_whisper_spec_is_frozen():
 
 def test_backends_are_known():
     for spec in WHISPER_MODELS.values():
-        assert spec.backend in {"whisper", "parakeet"}, f"{spec.id}: {spec.backend!r}"
+        assert spec.backend in {"whisper", "onnx_asr"}, f"{spec.id}: {spec.backend!r}"
 
 
-def test_whisper_backed_specs_have_no_repo():
+def test_whisper_backed_specs_have_no_onnx_asr_fields():
     for spec in WHISPER_MODELS.values():
         if spec.backend == "whisper":
             assert spec.repo is None
             assert spec.quantization is None
+            assert spec.asr_type is None
+
+
+def test_onnx_asr_backed_specs_are_fully_described():
+    known_types = {"nemo-conformer-tdt", "nemo-conformer-aed"}
+    for spec in WHISPER_MODELS.values():
+        if spec.backend == "onnx_asr":
+            assert spec.repo, f"{spec.id} missing repo"
+            assert spec.asr_type in known_types, f"{spec.id}: {spec.asr_type!r}"
 
 
 def test_english_only_specs_restrict_languages_to_english():
     for spec in WHISPER_MODELS.values():
         if spec.english_only:
             assert spec.languages == ("en",), f"{spec.id} greying needs languages"
+            assert spec.auto_language is False
+
+
+def _assert_european_25(languages):
+    assert languages is not None
+    assert len(languages) == 25
+    # The subset of VRCC display languages the model must (not) cover.
+    for code in ("en", "es", "fr", "de", "pt", "ru", "it", "pl", "nl", "uk"):
+        assert code in languages
+    for code in ("ja", "ko", "zh", "ar", "hi", "th", "vi", "tr"):
+        assert code not in languages
 
 
 def test_parakeet_spec_fields():
     spec = WHISPER_MODELS["parakeet-tdt-0.6b-v3"]
-    assert spec.backend == "parakeet"
+    assert spec.backend == "onnx_asr"
     assert spec.repo == "istupakov/parakeet-tdt-0.6b-v3-onnx"
     assert spec.quantization == "int8"
+    assert spec.asr_type == "nemo-conformer-tdt"
     assert spec.english_only is False
-    assert spec.languages is not None
-    assert len(spec.languages) == 25
-    # The subset of VRCC display languages Parakeet must (not) cover.
-    for code in ("en", "es", "fr", "de", "pt", "ru", "it", "pl", "nl", "uk"):
-        assert code in spec.languages
-    for code in ("ja", "ko", "zh", "ar", "hi", "th", "vi", "tr"):
-        assert code not in spec.languages
+    assert spec.auto_language is True  # detects the language within its set
+    _assert_european_25(spec.languages)
+
+
+def test_canary_spec_fields():
+    spec = WHISPER_MODELS["canary-1b-v2"]
+    assert spec.backend == "onnx_asr"
+    assert spec.repo == "istupakov/canary-1b-v2-onnx"
+    assert spec.quantization == "int8"
+    assert spec.asr_type == "nemo-conformer-aed"
+    assert spec.english_only is False
+    assert spec.auto_language is False  # prompt-pinned language, no detection
+    _assert_european_25(spec.languages)
 
 
 # --------------------------------------------------------------------------

@@ -34,6 +34,7 @@ _WHISPER_LABEL_MARKERS = (
     tr_noop("Distil-Large v3.5 (English)"),
     tr_noop("Distil-Small (English)"),
     tr_noop("Parakeet v3 (European languages)"),
+    tr_noop("Canary 1B v2 (European languages)"),
 )
 
 
@@ -71,6 +72,7 @@ _WHISPER_LEAD_INS: dict[str, str] = {
     "distil-large-v3.5": tr_noop("Near-most accurate, fast"),
     "distil-small.en": tr_noop("Fast, small download"),
     "parakeet-tdt-0.6b-v3": tr_noop("Very accurate and fast"),
+    "canary-1b-v2": tr_noop("Most accurate, slower captions"),
 }
 
 _MT_LEAD_INS: dict[str, str] = {
@@ -111,8 +113,9 @@ def model_blurb(kind: str, model_id: str) -> str:
         if spec.english_only:
             blurb += " · " + tr("English only")
         elif spec.languages is not None:
-            # Today the only language-restricted non-English model is Parakeet
-            # (25 European languages); revisit the wording if that changes.
+            # Today every language-restricted non-English model (Parakeet,
+            # Canary) covers the same 25 European languages; revisit the
+            # wording if that changes.
             blurb += " · " + tr("European languages only")
         return blurb
     if kind == "mt":
