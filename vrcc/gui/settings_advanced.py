@@ -189,6 +189,20 @@ def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
     # When I mute in VRChat.
     mute = QGroupBox(tr("When I mute in VRChat"))
     mute_form = QFormLayout(mute)
+    # Captioning starts off every launch and the master toggle outranks every
+    # mode, so "Only caption while muted" alone reads as if picking it starts
+    # captions; the note names the real precondition.
+    mute_note = QLabel(
+        tr(
+            "These options apply only while captioning is turned on "
+            "in the main window."
+        )
+    )
+    mute_note.setStyleSheet(dlg._muted_style)
+    mute_note.setWordWrap(True)
+    mute_form.addRow(mute_note)
+    dlg._mute_note = mute_note
+
     mute_enabled = QCheckBox(tr("React when I mute myself in VRChat"))
     mute_enabled.setChecked(dlg._cfg.mute_sync.enabled)
     mute_enabled.setToolTip(

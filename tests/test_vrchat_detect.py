@@ -76,6 +76,27 @@ def test_removal_transitions_back_to_not_detected_once():
     assert [e.detected for e in events] == [False, True, False]
 
 
+def test_republish_reannounces_current_state_without_a_transition():
+    # A window rebuilt on a UI-language change subscribes after the last
+    # transition, and VrchatDetected fires only on transitions; republish()
+    # lets the composition root feed the current state to a late subscriber.
+    bus = EventBus()
+    events: list[VrchatDetected] = []
+    bus.subscribe(VrchatDetected, events.append)
+    det, _ = _detector(bus)
+    det.start()
+    name = "VRChat-Client-2._oscjson._tcp.local."
+    det.add_service(None, "_oscjson._tcp.local.", name)
+    assert [e.detected for e in events] == [False, True]
+
+    det.republish()
+    assert [e.detected for e in events] == [False, True, True]
+
+    det.remove_service(None, "_oscjson._tcp.local.", name)
+    det.republish()
+    assert [e.detected for e in events][-2:] == [False, False]
+
+
 def test_stop_cancels_browser_and_is_safe_before_start():
     bus = EventBus()
     det, holder = _detector(bus)

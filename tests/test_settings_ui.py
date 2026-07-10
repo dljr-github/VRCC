@@ -444,6 +444,23 @@ def test_split_delay_spin_exists_and_writes_config(qapp, tmp_path):
         dlg.deleteLater()
 
 
+def test_mute_group_states_the_captioning_precondition(qapp, tmp_path):
+    # The mode copy ("Only caption while muted") reads as if mute state alone
+    # drives captioning, but captioning starts off every launch and the master
+    # toggle outranks every mode; the page must say so or a mode change looks
+    # broken ("Paused - not listening" persists until Start captioning).
+    dlg, _ = _dlg(tmp_path)
+    try:
+        assert dlg._mute_note.text() == (
+            "These options apply only while captioning is turned on "
+            "in the main window."
+        )
+        assert dlg._mute_note.wordWrap() is True
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
 def test_overflow_combo_shows_friendly_labels_and_binds_raw_value(qapp, tmp_path):
     dlg, store = _dlg(tmp_path)
     try:

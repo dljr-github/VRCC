@@ -209,6 +209,23 @@ def test_mute_gating_updates_meter_but_skips_stt():
     assert env.chatbox.submits == []
 
 
+def test_mute_gated_exposes_only_the_mute_sync_gate():
+    # The GUI polls this to label a mute pause; it must track the mute gate
+    # alone, independent of the master toggle (which the GUI already knows).
+    env = make_pipeline(mute=FakeMute(caption=False))
+    assert env.pipeline.mute_gated() is True
+    assert env.pipeline._should_caption() is False
+
+    open_env = make_pipeline(mute=FakeMute(caption=True))
+    open_env.pipeline.set_captioning(False)
+    assert open_env.pipeline.mute_gated() is False  # toggle off, gate open
+
+
+def test_mute_gated_is_false_without_mute_sync():
+    env = make_pipeline()  # mute=None
+    assert env.pipeline.mute_gated() is False
+
+
 def test_master_toggle_gates_captioning():
     env = make_pipeline()  # make_pipeline opts in; production default is off
     assert env.pipeline.captioning_enabled is True

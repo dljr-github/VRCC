@@ -60,6 +60,13 @@ class VrchatDetector:
         except Exception:  # noqa: BLE001 -- detection is best-effort
             logger.warning("VRChat detection unavailable (mDNS failed)", exc_info=True)
 
+    def republish(self) -> None:
+        """Re-announce the current state. ``VrchatDetected`` fires only on
+        presence transitions, so a subscriber attached after the last one (a
+        main window rebuilt on a UI-language change) would otherwise wait on
+        "checking" until VRChat's mDNS record genuinely cycles."""
+        self._publish(self._detected)
+
     def stop(self) -> None:
         for closer in (
             lambda: self._browser and self._browser.cancel(),

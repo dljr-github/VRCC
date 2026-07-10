@@ -45,6 +45,7 @@ class _FakePipeline:
 
     def __init__(self, accept_typed: bool = True) -> None:
         self.captioning_enabled = True
+        self.mute_gate = False
         self.typed: list[str] = []
         self._accept_typed = accept_typed
 
@@ -54,6 +55,9 @@ class _FakePipeline:
 
     def set_captioning(self, enabled: bool) -> None:
         self.captioning_enabled = bool(enabled)
+
+    def mute_gated(self) -> bool:
+        return self.mute_gate
 
 
 def _main_window(store, mt_available: bool = True):
@@ -183,6 +187,175 @@ def test_captioning_toggle_pauses_without_closing_and_shows_paused(qapp, tmp_pat
     finally:
         window.close()
         window.deleteLater()
+        bridge.detach()
+
+
+def test_capture_label_names_the_mute_pause_instead_of_listening(qapp, tmp_path):
+    # Reported: mute sync in pause mode with the user muted in VRChat dropped
+    # every caption while the label stayed green "Listening". The label folds
+    # the pipeline's mute gate in and repaints on every MuteChanged.
+    from types import SimpleNamespace
+
+    store = _store(tmp_path)
+    window, bridge = _main_window(store)
+    try:
+        window.set_capture_status(True)
+        assert "Listening" in window._capture_label.text()
+
+        window._pipeline.mute_gate = True
+        window._on_mute_changed(SimpleNamespace(muted=True))
+        assert window._capture_label.text() == "Paused - following your VRChat mute"
+        assert window._mute_chip.text() == "MUTED"
+
+        window._pipeline.mute_gate = False
+        window._on_mute_changed(SimpleNamespace(muted=False))
+        assert "Listening" in window._capture_label.text()
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_reload_from_config_repaints_the_mute_pause_label(qapp, tmp_path):
+    # A Settings mode change moves the gate through the shared config object
+    # with no bus event; reload_from_config (run when Settings closes) must
+    # re-derive the label from the live gate.
+    store = _store(tmp_path)
+    window, bridge = _main_window(store)
+    try:
+        window.set_capture_status(True)
+        window._pipeline.mute_gate = True
+        window.reload_from_config()
+        assert window._capture_label.text() == "Paused - following your VRChat mute"
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_master_toggle_pause_outranks_the_mute_gate_label(qapp, tmp_path):
+    # With captioning toggled off the pipeline gates on the toggle first, so
+    # naming the mute would send the user to the wrong control.
+    store = _store(tmp_path)
+    window, bridge = _main_window(store)
+    try:
+        window.set_capture_status(True)
+        window._pipeline.mute_gate = True
+        window._captioning_btn.setChecked(False)
+        assert window._capture_label.text() == "Paused - not listening"
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_mute_chip_clears_on_unknown_state(qapp, tmp_path):
+    # MuteSync.stop() publishes MuteChanged(None): the chip must hide rather
+    # than keep the stopped session's MUTED/LIVE.
+    from types import SimpleNamespace
+
+    store = _store(tmp_path)
+    window, bridge = _main_window(store)
+    try:
+        window._on_mute_changed(SimpleNamespace(muted=True))
+        assert not window._mute_chip.isHidden()
+        window._on_mute_changed(SimpleNamespace(muted=None))
+        assert window._mute_chip.isHidden()
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def _rebuild_env(tmp_path):
+    """Bridge, detector, pipeline and window factory for driving
+    app._swap_main_window (the UI-language change path) for real."""
+    from vrcc.gui.bridge import BusBridge
+    from vrcc.gui.main_window import MainWindow
+    from vrcc.osc.vrchat_detect import VrchatDetector
+
+    class _Zc:
+        def close(self) -> None:
+            pass
+
+    class _Browser:
+        def cancel(self) -> None:
+            pass
+
+    bus = EventBus()
+    bridge = BusBridge(bus)
+    detector = VrchatDetector(
+        bus, zeroconf_factory=_Zc, browser_factory=lambda zc, st, listener: _Browser()
+    )
+    store = _store(tmp_path)
+    pipeline = _FakePipeline()
+
+    def make_window():
+        return MainWindow(
+            bridge, store, pipeline,
+            on_open_settings=lambda: None, on_open_models=lambda: None,
+        )
+
+    return bridge, detector, pipeline, make_window
+
+
+def test_rebuilt_window_is_repushed_vrchat_state_and_capture_ok(qapp, tmp_path):
+    # The detector publishes VrchatDetected only on transitions, so the fresh
+    # window is told the current state via republish(); the capture label
+    # carries over from the old window, and paused-vs-listening re-derives
+    # from the captioning toggle, so a merely paused run renders amber
+    # Paused instead of red failure or gray Starting.
+    from vrcc.app import _swap_main_window
+
+    bridge, detector, pipeline, make_window = _rebuild_env(tmp_path)
+    pipeline.captioning_enabled = False  # the user paused before the rebuild
+
+    old = make_window()
+    fresh = None
+    try:
+        detector.start()
+        detector.add_service(
+            None, "_oscjson._tcp.local.", "VRChat-Client-7._oscjson._tcp.local."
+        )
+        assert "connected" in old._vrchat_label.text()
+        old.set_capture_status(True)  # the pipeline started and is healthy
+
+        fresh = _swap_main_window(old, make_window, detector)
+
+        assert "connected" in fresh._vrchat_label.text()
+        assert fresh._capture_label.text() == "Paused - not listening"
+    finally:
+        for w in (old, fresh):
+            if w is not None:
+                w.close()
+                w.deleteLater()
+        bridge.detach()
+
+
+def test_rebuilt_window_keeps_a_capture_failure_red(qapp, tmp_path):
+    # A failed engine paints red with a reason, whether from a mid-session
+    # swap (pipeline started) or before capture ever started; the rebuild
+    # must carry that verbatim rather than repaint green "Listening" over a
+    # pipeline that is not captioning, or reset to gray "Starting".
+    from vrcc.app import _swap_main_window
+
+    bridge, detector, _pipeline, make_window = _rebuild_env(tmp_path)
+
+    old = make_window()
+    fresh = None
+    try:
+        old.set_capture_status(False, "a model failed to load")
+
+        fresh = _swap_main_window(old, make_window, detector)
+
+        assert fresh._capture_label.text() == (
+            "Not listening - a model failed to load"
+        )
+    finally:
+        for w in (old, fresh):
+            if w is not None:
+                w.close()
+                w.deleteLater()
         bridge.detach()
 
 
