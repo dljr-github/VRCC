@@ -150,8 +150,25 @@ def build_qss(theme: str, scale: float = 1.0) -> str:
     """.strip()
 
 
+def _apply_window_icon(app) -> None:
+    """Set the application window icon (all windows and dialogs inherit it)
+    from the ICO shipped inside the package. The spec lands it at the same
+    vrcc/vrcc.ico relative path in a frozen build, so one resolution covers
+    source and frozen runs. Best-effort: a missing or unreadable file keeps
+    Qt's default icon, never blocks startup."""
+    from PySide6.QtGui import QIcon
+
+    try:
+        ico = Path(__file__).resolve().parent.parent / "vrcc.ico"
+        if ico.is_file():
+            app.setWindowIcon(QIcon(str(ico)))
+    except Exception:  # noqa: BLE001 -- branding must never block startup
+        logger.debug("could not set the window icon", exc_info=True)
+
+
 def apply_theme(app, theme: str, scale: float = 1.0) -> str:
-    """Set Fusion + a token palette + the QSS. Returns the resolved theme."""
+    """Set Fusion + a token palette + the QSS + the window icon. Returns
+    the resolved theme."""
     from PySide6.QtGui import QColor, QPalette
 
     resolved = resolve_theme(theme)
@@ -174,6 +191,7 @@ def apply_theme(app, theme: str, scale: float = 1.0) -> str:
     pal.setColor(QPalette.ColorRole.ToolTipText, QColor(p["text"]))
     app.setPalette(pal)
     app.setStyleSheet(build_qss(resolved, scale))
+    _apply_window_icon(app)
     return resolved
 
 

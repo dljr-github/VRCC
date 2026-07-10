@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Simplified variant for 16 and 24 px. Every edge sits on a
+       multiple of 16 so it lands on whole pixel rows at 16 px;
+       the tail is wider and the bar gap larger than the master. -->
+  <rect width="256" height="256" rx="48" fill="#14161d"/>
+  <path fill="#3ea6ff" d="M56 16 H200 A40 40 0 0 1 240 56 V152 A40 40 0 0 1 200 192 H128 L56 236 L72 192 H56 A40 40 0 0 1 16 152 V56 A40 40 0 0 1 56 16 Z"/>
+  <rect x="48" y="48" width="160" height="32" rx="16" fill="#14161d"/>
+  <rect x="48" y="112" width="96" height="32" rx="16" fill="#14161d"/>
+</svg>

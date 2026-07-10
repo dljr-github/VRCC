@@ -71,6 +71,9 @@ vrcc = "vrcc.cli:main"
 include = ["vrcc*"]
 
 [tool.setuptools.package-data]
+# vrcc.gui.style resolves the window icon relative to the package, so the
+# ICO has to ship with pip installs, not only with the frozen build.
+"vrcc" = ["*.ico"]
 "vrcc.i18n" = ["*.json"]
 
 [tool.pytest.ini_options]
