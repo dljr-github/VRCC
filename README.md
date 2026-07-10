@@ -16,72 +16,33 @@ Chatbox:   Hello, how are you today?
            こんにちは 今日はどうですか?
 ```
 
-## Download (recommended)
+VRCC is built to be plug and play. Run it and the first-run wizard sizes
+up your machine, picks the models, and sets the performance mode for you;
+every recommendation traces back to a measured benchmark run rather than
+a guess. The tuning knobs are still there in Settings, but you should not
+need them.
+
+![VRCC walkthrough](assets/walkthrough.gif)
+
+## Download
 
 From the [latest release](https://github.com/dljr-github/VRCC/releases/latest),
 grab the zip that matches your hardware, unzip it anywhere, and run
-`VRCC.exe`. No Python setup needed; the first-run wizard downloads the
-models for you.
+`VRCC.exe`. Windows 10/11; no Python setup needed. The first-run wizard
+downloads the models for you.
 
-- **`VRCC-cuda-windows-x64.zip`** for PCs with an NVIDIA GPU (driver 570
-  or newer). Near-instant captions, and it falls back to CPU by itself
-  when no usable GPU is found.
-- **`VRCC-windows-x64.zip`** is the CPU-only build, a much smaller
-  download. Captions are identical, just a moment slower; the default
-  models are sized to keep up on CPU.
+- The CUDA zip (its name starts with `VRCC-cuda-windows-x64`) for PCs
+  with an NVIDIA GPU (driver 570 or newer). Near-instant captions, and it
+  falls back to CPU by itself when no usable GPU is found.
+- The CPU zip (`VRCC-windows-x64`) is a much smaller download. Captions
+  are identical, just a moment slower; the default models are sized to
+  keep up on CPU.
 
 GPU acceleration only supports NVIDIA cards at the moment (no AMD hardware
 to test on). On AMD or Intel graphics, use the CPU build.
 
-Installing from source (below) is only for developers who want to
-contribute.
-
-## Requirements
-
-- Windows 10/11 (Python 3.10+ needed for source installs only)
-- Optional: an NVIDIA GPU. CPU and GPU produce identical captions; the
-  only difference is latency (GPU responds near-instantly, CPU a moment
-  slower). The first-run wizard picks a sensible default for your machine.
-
-## Install from source (developers)
-
-Most users don't need this; use the
-[packaged exe](#download-recommended) instead.
-
-CPU-only:
-
-```
-python -m venv .venv
-.venv\Scripts\pip install -e .
-```
-
-With NVIDIA GPU acceleration (bundles the CUDA 12 cuBLAS + cuDNN runtimes
-as pip wheels, so no system CUDA install is needed):
-
-```
-.venv\Scripts\pip install -e .[cuda]
-.venv\Scripts\pip install "onnxruntime-gpu>=1.21,<1.23"
-```
-
-The second command swaps in the GPU build of onnxruntime so the Parakeet
-model also runs on the GPU (whisper models use CTranslate2's own CUDA
-path). It must run **after** the first: `onnxruntime-gpu` installs the
-same `onnxruntime` package as the CPU wheel pulled in by faster-whisper,
-and the one installed last wins. Keep it below 1.23. Newer builds are
-built against CUDA 13, `[cuda]` ships the CUDA 12 wheels that CTranslate2
-needs, and with mismatched builds that model silently runs on the CPU
-instead. Skipping the second command entirely is also fine; Parakeet
-then runs on the CPU.
-
-> **GPU note:** CUDA use requires an NVIDIA driver of version **570 or
-> newer**. On older drivers the app detects this at startup and falls back
-> to CPU automatically.
-
-Run the app:
-
-```
-.venv\Scripts\vrcc              # or: .venv\Scripts\python -m vrcc.cli
-```
+Installing from source is only for developers who want to contribute; see
+[DEVELOPING.md](DEVELOPING.md).
 
 ## First run
 
@@ -98,13 +59,15 @@ Windows display language), and downloads them:
 The wizard shows what it picked and lets you switch the run device before
 downloading.
 
+![First-run wizard recommending models for an NVIDIA GPU](assets/images/firstrun.png)
+
 Other options range from whisper `tiny` (~75 MB) up to `large-v3` (~3 GB),
 plus NVIDIA's `parakeet-tdt-0.6b-v3` (~690 MB, very accurate and fast),
 limited to English + 24 other European languages (no Japanese/Korean/Chinese).
 MT models range from `m2m100-418M-int8` (~480 MB) up to `madlad400-3b`
 (~3.5 GB). Models can be added/removed later via the **Models** dialog.
-See [the benchmarks below](#speech-to-text-benchmarks) for measured
-accuracy and speed.
+See [Picking a model](#picking-a-model) below for measured accuracy and
+speed.
 
 ## Usage
 
@@ -123,6 +86,8 @@ accuracy and speed.
    OSCQuery discovery and works **only when VRChat runs on the same PC**
    (localhost); captioning itself works regardless.
 
+![Main window captioning with Japanese and Spanish translations](assets/images/main-window.png)
+
 ### Interface language
 
 The interface follows your Windows display language by default and can speak
@@ -131,8 +96,7 @@ Deutsch, Italiano, Português (Brasil), Русский, Українська, Po
 Nederlands, Türkçe, Bahasa Indonesia, Tiếng Việt, ไทย). Pick a different one
 under **Settings → Simple → Language**; it applies as soon as the Settings
 window closes. This only affects VRCC's own interface; caption languages are
-chosen in the main window, and adding a UI translation is a single JSON file
-in `vrcc/i18n/` (copy the keys from any existing catalog).
+chosen in the main window.
 
 ### Performance modes
 
@@ -149,58 +113,23 @@ out while it is the active voice model. The individual
 knobs (VAD timings, beam sizes, quality gates and so on) live in
 **Settings → Advanced**.
 
-## Speech-to-text benchmarks
+## Picking a model
 
-Numbers from `tools/bench_stt.py`: 100
+Every figure in this section comes from `tools/bench_stt.py`: 100
 [LibriSpeech](https://www.openslr.org/12/) test-clean utterances run
-through the same engine path the app uses, at default settings (Speed
-mode). Machine: Windows 11, Ryzen 9 9950X3D, RTX 5090, driver 610.62.
-WER is word error rate on English read speech after Whisper-style
-normalization, so it says nothing about other languages. It is scored with
-VRCC's quality gates open, so it measures what the model heard rather than
-what the app chose to suppress. Latency is the median time to transcribe
-one utterance. Whisper models run float16 on GPU and int8 on CPU, which is
-why their two WER columns differ slightly; Parakeet is int8 either way.
-
-| Model | Size | WER (GPU) | WER (CPU) | GPU latency | CPU latency |
-| ----- | ---- | --------- | --------- | ----------- | ----------- |
-| `tiny` | 75 MB | 7.4% | 7.9% | 0.03 s | 0.13 s |
-| `base` | 145 MB | 5.7% | 5.9% | 0.04 s | 0.25 s |
-| `small` | 484 MB | 3.7% | 3.7% | 0.09 s | 0.74 s |
-| `medium` | 1.5 GB | 2.7% | 2.6% | 0.17 s | 2.41 s |
-| `large-v3` | 3.1 GB | 1.7% | 1.8% | 0.24 s | 3.90 s |
-| `large-v3-turbo` | 1.6 GB | 1.7% | 1.6% | 0.07 s | 2.81 s |
-| `distil-large-v3.5` | 1.5 GB | 2.4% | 2.3% | 0.06 s | 2.78 s |
-| `distil-small.en` | 332 MB | 4.0% | 4.0% | 0.04 s | 0.64 s |
-| `parakeet-tdt-0.6b-v3` | 690 MB | 2.3% | 2.3% | 0.21 s | **0.13 s** |
-
-One result is worth reading twice. Parakeet is **faster on the CPU than on
-the GPU** (0.13 s vs 0.21 s; its int8 ONNX graph does not suit CUDA), which
-is why VRCC runs it on the CPU when the device is left on Auto. On the CPU
-it reaches 2.3% at 0.13 s, beating the `small` default (3.7% at 0.74 s) on
-both accuracy and speed, which no other model near that latency manages.
-
-Widening the beam (the Quality mode) is close to free on a GPU and buys
-little: `base` improves from 5.7% to 4.7% for an extra 20 ms, `medium`
-from 2.7% to 2.4% for 10 ms, while `large-v3-turbo` gets no better at all.
-Speed is the right default, and VRCC now recommends the mode per model
-from these measurements rather than leaving you to guess.
-
-Numbers from other machines are collected in
-[benchmarks/RESULTS.md](benchmarks/RESULTS.md). If you want to add yours,
-[benchmarks/README.md](benchmarks/README.md) has the two commands.
-
-### Picking a model
-
-A disclaimer before quoting numbers: every figure in this section comes
-from the one machine benchmarked above. The accuracy numbers and
-the relative speed ratios carry over to other machines; the absolute
-latencies do not. On a slower CPU, expect every CPU time here to stretch
-by roughly the same factor. [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
-collects numbers from other hardware.
+through the same engine path the app uses, on one machine (Windows 11,
+Ryzen 9 9950X3D, RTX 5090, driver 610.62). WER is word error rate on
+English read speech; latency is the median time to transcribe one
+utterance. The accuracy numbers and the relative speed ratios carry over
+to other machines; the absolute latencies do not. On a slower CPU, expect
+every CPU time here to stretch by roughly the same factor. The full
+tables and methodology are in
+[DEVELOPING.md](DEVELOPING.md#speech-to-text-benchmarks), and
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md) collects numbers from
+other hardware.
 
 On an NVIDIA GPU, keep the default `large-v3-turbo`. It matched
-`large-v3` at 1.7% while being about 3.5x faster, and it handles every
+`large-v3` at 1.7% WER while being about 3.5x faster, and it handles every
 language.
 
 On CPU it depends on the language you speak:
@@ -242,35 +171,6 @@ are kept. When reporting a problem, attach the newest file from that folder.
 Run with `--portable` to keep config, models and logs in the application's
 own directory instead (handy on a USB stick or for isolated installs).
 
-## Building a standalone exe
-
-A PyInstaller one-folder spec lives in `packaging/vrcc.spec`:
-
-```
-.venv\Scripts\pip install -e .[dev]
-.venv\Scripts\pyinstaller packaging\vrcc.spec --noconfirm --distpath dist
-```
-
-This produces `dist\VRCC\VRCC.exe` (windowed, no console). Models are not
-bundled; the exe downloads them on first run exactly like the source
-install, and shares the same default models directory. Distribute the whole
-`dist\VRCC` folder; pair the exe with `--portable` if you want a fully
-self-contained folder.
-
-## End-to-end smoke test
-
-`scripts/smoke_e2e.py` runs the real VAD → STT → MT → chatbox pipeline over
-a WAV file (no GUI, no UDP; the chatbox client prints to stdout) and
-reports per-stage timings:
-
-```
-.venv\Scripts\python scripts\smoke_e2e.py path\to\speech.wav --target Japanese
-```
-
-The same path runs as an integration test:
-`set VRCC_E2E_WAV=path\to\speech.wav` then
-`.venv\Scripts\python -m pytest tests/ -v -m integration`.
-
 ## Model licenses
 
 The **code** in this repository is separate from the **models** it
@@ -288,7 +188,7 @@ downloads; check that a model's license fits your use:
 ## Troubleshooting
 
 - **"No GPU detected" / everything runs on CPU**: make sure you're running
-  the CUDA build (`VRCC-cuda-windows-x64.zip`, or a source install with
+  the CUDA build (the `VRCC-cuda-windows-x64` zip, or a source install with
   `pip install -e .[cuda]`) and that your NVIDIA driver is ≥ 570. GPU
   acceleration is NVIDIA-only for now (no AMD hardware to test on).
   CPU-only operation is normal otherwise: captions are identical, just a
@@ -309,13 +209,7 @@ downloads; check that a model's license fits your use:
   Each run writes one file at full debug detail and the five newest are
   kept, so the file with the latest timestamp is the run that went wrong.
 
-## Development
+## Developing
 
-```
-.venv\Scripts\pip install -e .[dev]
-.venv\Scripts\python -m pytest tests/ -v            # unit suite
-.venv\Scripts\python -m pytest tests/ -v -m integration  # downloads models
-```
-
-To benchmark the STT models on your hardware (and contribute the numbers),
-see [benchmarks/README.md](benchmarks/README.md).
+Building from source, tests, benchmarks and packaging live in
+[DEVELOPING.md](DEVELOPING.md).

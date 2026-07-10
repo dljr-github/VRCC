@@ -1,0 +1,21 @@
+{
+  "name": "vrcc-walkthrough",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Renders the README walkthrough video for VRCC.",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render:mp4": "remotion render src/index.ts Walkthrough out/walkthrough.mp4 --codec=h264",
+    "render:gif": "remotion render src/index.ts Walkthrough ../../assets/walkthrough.gif --codec=gif --scale=0.625 --every-nth-frame=3"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.5.0"
+  }
+}
