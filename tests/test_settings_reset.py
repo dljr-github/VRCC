@@ -104,6 +104,45 @@ def test_button_present_with_expected_text(qapp, tmp_path, monkeypatch):
         dlg.deleteLater()
 
 
+def test_reset_button_on_simple_tab_triggers_confirm_and_reset(qapp, tmp_path, monkeypatch):
+    dlg, _ = _dialog(tmp_path, monkeypatch)
+    try:
+        simple = dlg._tabs.widget(0).widget()
+        buttons = [
+            b
+            for b in simple.findChildren(QPushButton)
+            if b.text() == settings_reset.reset_button_text()
+        ]
+        assert len(buttons) == 1
+        calls = []
+        monkeypatch.setattr(settings_reset, "confirm_and_reset", calls.append)
+        buttons[0].click()
+        assert calls == [dlg]
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_advanced_page_has_no_reset_buttons(qapp, tmp_path, monkeypatch):
+    # The Mode control on the Simple tab applies the same Speed/Quality
+    # profiles, and the recommended reset lives there too, so the Advanced
+    # page carries no reset buttons at all.
+    dlg, _ = _dialog(tmp_path, monkeypatch)
+    try:
+        advanced = next(
+            dlg._tabs.widget(i).widget()
+            for i in range(dlg._tabs.count())
+            if dlg._tabs.tabText(i) == "Advanced / Power users"
+        )
+        texts = [b.text() for b in advanced.findChildren(QPushButton)]
+        assert "Reset to Speed preset" not in texts
+        assert "Reset to Quality preset" not in texts
+        assert settings_reset.reset_button_text() not in texts
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
 def test_no_changes_nothing(qapp, tmp_path, monkeypatch):
     model_calls = []
     apply = _RecordingApply()

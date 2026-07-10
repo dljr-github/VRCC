@@ -89,7 +89,7 @@ class SettingsDialog(QDialog):
         self._apply_timer.setSingleShot(True)
         self._apply_timer.setInterval(_APPLY_DEBOUNCE_MS)
         self._apply_timer.timeout.connect(self._apply_live_changes)
-        # Widget refs the profile-reset buttons / Mode control rewrite.
+        # Widget refs the Mode control / recommended reset rewrite.
         self._vad_spins: dict[str, QSpinBox | QDoubleSpinBox] = {}
         self._stt_beam_spin: QSpinBox | None = None
         self._stt_temp_spin: QDoubleSpinBox | None = None
