@@ -11,8 +11,6 @@ language change rebuilds the window on dialog close. Page bodies live in
 
 from __future__ import annotations
 
-import logging
-
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -35,14 +33,11 @@ from PySide6.QtWidgets import (
 
 from vrcc.core import languages
 from vrcc.core.config import ConfigStore, apply_profile
-from vrcc.core.hardware import device_names
 from vrcc.gui import model_fit, model_prompts, settings_advanced, settings_live, settings_pages
 from vrcc.gui.style import PALETTE, apply_font_scale, apply_theme_guarded, resolve_theme
 from vrcc.i18n import tr
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
-
-logger = logging.getLogger("vrcc.gui.settings")
 
 _AUTO = "auto"
 
@@ -229,7 +224,10 @@ class SettingsDialog(QDialog):
         self._cfg.stt.model = new_id
         model_prompts.maybe_prefer_cpu(self, new_id)
         self._update_mode_for_model()
-        model_prompts.grey_unsupported_languages(self._source_combo, self._cfg.stt.model)
+        model_prompts.grey_unsupported_languages(
+            self._source_combo, self._cfg.stt.model,
+            translating=self._cfg.translate.enabled,
+        )
         self._remove_deleted_placeholder(self._model_combo)
         self._changed()
         if self._on_model_change is not None:
@@ -259,6 +257,17 @@ class SettingsDialog(QDialog):
         if self._loading:
             return
         self._cfg.translate.enabled = bool(checked)
+        # The "auto" greying in both combos depends on this flag (the onnx-asr
+        # backend cannot report its detection to the translator), so the popup
+        # state must track the toggle live. Guarded like the other optional
+        # widgets: the Simple page hosting the toggle builds before the Voice
+        # page hosting the combos.
+        source = getattr(self, "_source_combo", None)
+        if source is not None:
+            model_prompts.grey_unsupported_languages(
+                source, self._cfg.stt.model, translating=self._cfg.translate.enabled
+            )
+            self._update_language_limited_items()
         self._changed()
         if self._on_model_change is not None:
             self._on_model_change("mt")
@@ -364,89 +373,6 @@ class SettingsDialog(QDialog):
             self._changed()
         combo.currentIndexChanged.connect(on_change)
 
-    def _device_choices(self):
-        choices = [(tr("Auto"), _AUTO, 0), (tr("CPU"), "cpu", 0)]
-        try:
-            names = device_names()
-        except Exception:  # noqa: BLE001
-            names = []
-        for i, name in enumerate(names):
-            choices.append((tr("GPU {index}: {name}", index=i, name=name), "cuda", i))
-        return choices
-
-    def _make_device_combo(self, section) -> QComboBox:
-        combo = QComboBox()
-        for label, device, index in self._device_choices():
-            combo.addItem(label, (device, index))
-        current = (section.device, section.device_index)
-        for i in range(combo.count()):
-            if combo.itemData(i) == current:
-                combo.setCurrentIndex(i)
-                break
-
-        def on_change(_i):
-            if self._loading:
-                return
-            device, index = combo.currentData()
-            section.device = device
-            section.device_index = index
-            if device == "cuda" and section is self._cfg.stt:
-                model_prompts.maybe_prefer_cpu(self, self._cfg.stt.model)
-            self._changed()
-        combo.currentIndexChanged.connect(on_change)
-        return combo
-
-    def _supported_compute_types(self, device: str, index: int):
-        try:
-            import ctranslate2
-
-            return sorted(ctranslate2.get_supported_compute_types(device, index))
-        except Exception:  # noqa: BLE001
-            return []
-
-    def _make_compute_combo(self, section) -> QComboBox:
-        values = [_AUTO]
-        seen = {_AUTO}
-        for device, index in (("cpu", 0), ("cuda", 0)):
-            for ct in self._supported_compute_types(device, index):
-                if ct not in seen:
-                    seen.add(ct)
-                    values.append(ct)
-        combo = QComboBox()
-        combo.addItems(values)
-        if section.compute_type not in values:
-            combo.addItem(section.compute_type)
-        combo.setCurrentText(section.compute_type)
-        self._bind_text_combo(combo, section, "compute_type")
-        return combo
-
-    def _make_input_device_combo(self) -> QComboBox:
-        """The microphone picker reused on the Simple page."""
-        combo = QComboBox()
-        combo.addItem(tr("Auto (system default)"), _AUTO)
-        try:
-            from vrcc.audio.devices import list_input_devices
-
-            for _index, name in list_input_devices():
-                combo.addItem(name, name)
-        except Exception:  # noqa: BLE001
-            logger.debug("could not list input devices", exc_info=True)
-        cur = self._cfg.audio.device
-        idx = combo.findData(cur)
-        if idx < 0:
-            combo.addItem(cur, cur)
-            idx = combo.findData(cur)
-        combo.setCurrentIndex(idx)
-        combo.setToolTip(tr("Which microphone to listen to."))
-
-        def on_device(_i):
-            if self._loading:
-                return
-            self._cfg.audio.device = combo.currentData()
-            self._changed()
-        combo.currentIndexChanged.connect(on_device)
-        return combo
-
     def _on_mode_changed(self, value: str) -> None:
         """Mode control changed: apply the matching Speed/Quality profile."""
         if self._loading:
@@ -479,19 +405,26 @@ class SettingsDialog(QDialog):
             combo.setCurrentIndex(idx)
 
     def _update_language_limited_items(self) -> None:
-        """Grey out voice models that can't transcribe the selected spoken
+        """Grey out voice models that can't serve the selected spoken
         language. "auto" keeps models that detect the language within their
-        set (Parakeet) enabled, but greys those that can't detect at all
-        (distil), which would transcribe as English regardless."""
+        set enabled, but greys those that can't detect at all (distil, which
+        would transcribe as English regardless) and, while translation is on,
+        the onnx-asr models: they detect but tag every result "en", which
+        would mislabel the translator's source."""
         if self._model_combo is None:
             return
         source = self._source_combo.currentText()
         model = self._model_combo.model()
         for i, spec in self._limited_model_indices:
             if source == _AUTO:
-                enabled = spec.auto_language
+                enabled = spec.auto_language and not (
+                    spec.backend == "onnx_asr" and self._cfg.translate.enabled
+                )
             else:
-                enabled = languages.get(source).whisper in spec.languages
+                enabled = (
+                    spec.languages is None
+                    or languages.get(source).whisper in spec.languages
+                )
             item = model.item(i)
             if item is not None:
                 item.setEnabled(enabled)

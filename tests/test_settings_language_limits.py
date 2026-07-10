@@ -2,8 +2,10 @@
 models with a language restriction (Parakeet's European set, the distil
 English-only pair) grey out when the spoken language falls outside their set,
 AND the spoken-language entries the active voice model cannot transcribe grey
-out. The two directions must never deadlock: switching the model re-enables
-the languages.
+out. While translation is on, "auto" and the onnx-asr models grey each other
+too: the backend tags every auto result "en", which would hand the translator
+the wrong source language. The directions must never deadlock: switching the
+model (or turning translation off) re-enables the languages.
 """
 
 import os
@@ -55,6 +57,7 @@ def _lang_enabled(combo, text):
 
 def test_language_limited_models_grey_with_source_language(qapp, tmp_path):
     store = _store(tmp_path)
+    store.config.translate.enabled = False
     dlg = SettingsDialog(store)  # headless: all models offered
     try:
         combo = dlg._model_combo
@@ -74,12 +77,29 @@ def test_language_limited_models_grey_with_source_language(qapp, tmp_path):
         assert _item_enabled(combo, "parakeet-tdt-0.6b-v3")
         assert not _item_enabled(combo, "distil-small.en")
 
-        # auto: models that detect the language within their set stay enabled
-        # (Parakeet); models that can't detect at all grey out (distil would
-        # force English).
+        # auto without translation: models that detect the language within
+        # their set stay enabled (Parakeet); models that can't detect at all
+        # grey out (distil would force English).
         dlg._source_combo.setCurrentText("auto")
         assert _item_enabled(combo, "parakeet-tdt-0.6b-v3")
         assert not _item_enabled(combo, "distil-small.en")
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_auto_source_greys_onnx_models_while_translating(qapp, tmp_path):
+    # Parakeet detects the spoken language but the onnx-asr backend tags
+    # every auto result "en", so with translation on the translator would be
+    # told English regardless; the model is not offerable under "auto".
+    store = _store(tmp_path)  # translation defaults on
+    dlg = SettingsDialog(store)
+    try:
+        combo = dlg._model_combo
+        dlg._source_combo.setCurrentText("auto")
+        assert not _item_enabled(combo, "parakeet-tdt-0.6b-v3")
+        assert not _item_enabled(combo, "distil-small.en")
+        assert _item_enabled(combo, "small")  # detects AND reports
     finally:
         dlg.close()
         dlg.deleteLater()
@@ -112,15 +132,56 @@ def test_language_limited_greying_survives_placeholder_removal(qapp, tmp_path):
 def test_source_languages_grey_for_european_model(qapp, tmp_path):
     store = _store(tmp_path)
     store.config.stt.model = "parakeet-tdt-0.6b-v3"
+    store.config.translate.enabled = False
     dlg = SettingsDialog(store)  # headless: source greying reads cfg.stt.model
     try:
         src = dlg._source_combo
         assert _lang_enabled(src, "French")        # inside Parakeet's set
         assert not _lang_enabled(src, "Japanese")  # outside it
-        assert _lang_enabled(src, "auto")          # Parakeet self-detects
+        assert _lang_enabled(src, "auto")          # detects, and no translator to mislead
         # The disabled entry carries an explanatory tooltip naming the model.
         item = src.model().item(src.findText("Japanese"))
         assert item.toolTip().strip()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_auto_entry_greys_for_onnx_model_while_translating(qapp, tmp_path):
+    store = _store(tmp_path)  # translation defaults on
+    store.config.stt.model = "parakeet-tdt-0.6b-v3"
+    dlg = SettingsDialog(store)
+    try:
+        src = dlg._source_combo
+        assert not _lang_enabled(src, "auto")
+        # The tooltip explains the reporting gap and both ways out; it is not
+        # the generic cannot-transcribe tip.
+        tip = src.model().item(src.findText("auto")).toolTip()
+        assert "cannot tell the translator" in tip
+        assert "turn translation off" in tip
+        assert _lang_enabled(src, "French")  # explicit picks stay open
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_translate_toggle_regreys_both_combos_live(qapp, tmp_path):
+    store = _store(tmp_path)  # translation defaults on
+    store.config.stt.model = "parakeet-tdt-0.6b-v3"
+    store.config.stt.source_language = "auto"
+    dlg = SettingsDialog(store)
+    try:
+        assert not _lang_enabled(dlg._source_combo, "auto")
+        assert not _item_enabled(dlg._model_combo, "parakeet-tdt-0.6b-v3")
+
+        dlg._translate_check.setChecked(False)
+        assert store.config.translate.enabled is False
+        assert _lang_enabled(dlg._source_combo, "auto")
+        assert _item_enabled(dlg._model_combo, "parakeet-tdt-0.6b-v3")
+
+        dlg._translate_check.setChecked(True)
+        assert not _lang_enabled(dlg._source_combo, "auto")
+        assert not _item_enabled(dlg._model_combo, "parakeet-tdt-0.6b-v3")
     finally:
         dlg.close()
         dlg.deleteLater()

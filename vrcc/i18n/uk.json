@@ -291,6 +291,8 @@
   "usually takes a few seconds": "зазвичай триває кілька секунд",
   "voice model": "голосова модель",
   "{mb} MB": "{mb} МБ",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name} не може повідомити моделі перекладу, яку мову він почув. Перемкнутися на {other}?",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name} не може повідомити моделі перекладу, якою мовою ви говорите. Виберіть свою мову або вимкніть переклад.",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name} не може розшифрувати цю мову. Спершу виберіть іншу голосову модель.",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name} не може розшифрувати мову {language}. Перемкнутися на {other}?",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name}: не вдалося продовжити роботу на GPU. Перемкнулися на CPU (повільніше).",

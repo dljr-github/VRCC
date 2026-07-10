@@ -1,11 +1,13 @@
 """Question prompts and combo greying for the active voice model, shared by
 Settings and the main window: offer the CPU when an onnx-asr model meets an
 explicit CUDA device, grey the spoken languages the active model cannot
-transcribe, and (main window) offer a better downloaded model when the stored
-spoken language sits outside the active model's set. Greying makes that state
-unreachable interactively, so the nudge fires from config loads. The decision
-helpers are Qt-free; the offer functions build a dialog and the greying edits
-a combo.
+serve, and (main window) offer a better downloaded model when the stored
+spoken language sits outside the active model's set. While translation is
+on, "auto" counts as unservable for the onnx-asr backend: it detects the
+spoken language but tags every result "en", which would hand the translator
+the wrong source. Greying makes these states unreachable interactively, so
+the nudge fires from config loads. The decision helpers are Qt-free; the
+offer functions build a dialog and the greying edits a combo.
 """
 
 from __future__ import annotations
@@ -27,9 +29,23 @@ _CPU_OFFER = tr_noop(
 
 _SWITCH_OFFER = tr_noop("{name} cannot transcribe {language}. Switch to {other}?")
 
+# Switch-offer body for a stored "auto" source: the problem is reporting the
+# detected language to the translator, not transcription, so it names none.
+_AUTO_SWITCH_OFFER = tr_noop(
+    "{name} cannot tell the translator which language it heard. Switch to {other}?"
+)
+
 # Per-item tooltip on a spoken-language entry the active voice model can't do.
 _LANGUAGE_LOCKED_TIP = tr_noop(
     "{name} cannot transcribe this language. Choose another voice model first."
+)
+
+# Tooltip on "auto" when the model detects the spoken language but cannot
+# report it (the onnx-asr backend) and translation is on: the ways out are a
+# concrete language or turning translation off, not only a model switch.
+_AUTO_LOCKED_TIP = tr_noop(
+    "{name} cannot tell the translator which language you speak. "
+    "Pick your language, or turn translation off."
 )
 
 
@@ -86,12 +102,28 @@ def _covers(spec, code: str) -> bool:
 
 def propose_language_switch(cfg, dm, source_display: str) -> str | None:
     """A downloaded voice model suited to ``source_display`` when the active
-    one cannot transcribe it, else ``None`` (also for "auto" / an unknown
-    name / no download manager / nothing compatible downloaded). Qt-free."""
+    one cannot serve it, else ``None`` (an unknown name / no download manager
+    / nothing compatible downloaded). "auto" proposes only in the translation
+    mislabel case: an onnx-asr model detects the spoken language but tags the
+    result "en", so while translation is on the offer targets a whisper model
+    with detection (it detects AND reports); every other "auto" case (distil
+    models, which cannot detect at all) returns ``None``. Qt-free."""
     if dm is None:
         return None
     spec = WHISPER_MODELS.get(cfg.stt.model)
-    lang = LANGUAGES.get(source_display)  # "auto" has no registry entry
+    if source_display == _AUTO:
+        if spec is None or spec.backend != "onnx_asr" or not cfg.translate.enabled:
+            return None
+        candidate, _ = recommend.best_downloaded(
+            dm, translate=False, tier=recommend.tier_for_config(cfg), language=None
+        )
+        if candidate is None or candidate == cfg.stt.model:
+            return None
+        target = WHISPER_MODELS[candidate]
+        if target.backend != "whisper" or not target.auto_language:
+            return None
+        return candidate
+    lang = LANGUAGES.get(source_display)
     if spec is None or lang is None or _covers(spec, lang.whisper):
         return None
     candidate, _ = recommend.best_downloaded(
@@ -109,26 +141,32 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
 
 
 def unsupported_stored_language(cfg) -> bool:
-    """Whether the stored spoken language is outside the active voice model's
-    set (the greying predicate): "auto" is unsupported when the model cannot
-    detect the language itself; an unknown model or language (a hand-edited
-    config) restricts nothing. Qt-free."""
+    """Whether the stored spoken language is outside what the active voice
+    model can serve (the greying predicate): "auto" is unsupported when the
+    model cannot detect the language itself, or (onnx-asr backend) detects
+    it but tags every result "en" while translation is on, mislabeling the
+    translator's source; an unknown model or language (a hand-edited config)
+    restricts nothing. Qt-free."""
     spec = WHISPER_MODELS.get(cfg.stt.model)
     if spec is None:
         return False
     if cfg.stt.source_language == _AUTO:
-        return not spec.auto_language
+        if not spec.auto_language:
+            return True
+        return spec.backend == "onnx_asr" and cfg.translate.enabled
     lang = LANGUAGES.get(cfg.stt.source_language)
     return lang is not None and not _covers(spec, lang.whisper)
 
 
 def run_language_nudge(window) -> None:
     """Offer the best downloaded voice model for the main window's stored
-    spoken language when the active model cannot transcribe it. Yes applies
-    the switch through the window's save/on_model_change pair and re-greys
-    the language combo; a decline is remembered as the (model, language)
-    pair so config reloads do not re-ask until the mismatch changes. No-op
-    without a candidate (including "auto", which names no target language)."""
+    spoken language when the active model cannot serve it. Yes applies the
+    switch through the window's save/on_model_change pair and re-greys the
+    language combo; a decline is remembered as the (model, source) pair so
+    config reloads do not re-ask until the mismatch changes. A stored "auto"
+    reaches an offer only in the translation mislabel case (see
+    :func:`propose_language_switch`) and gets a body that names no language.
+    No-op without a candidate."""
     cfg = window._store.config
     source = cfg.stt.source_language
     candidate = propose_language_switch(cfg, window._download_manager, source)
@@ -136,15 +174,16 @@ def run_language_nudge(window) -> None:
         return
     from PySide6.QtWidgets import QMessageBox
 
+    name = whisper_display_name(cfg.stt.model)
+    other = whisper_display_name(candidate)
+    if source == _AUTO:
+        body = tr(_AUTO_SWITCH_OFFER, name=name, other=other)
+    else:
+        body = tr(_SWITCH_OFFER, name=name, language=source, other=other)
     answer = QMessageBox.question(
         window,
         tr("Switch voice model?"),
-        tr(
-            _SWITCH_OFFER,
-            name=whisper_display_name(cfg.stt.model),
-            language=source,
-            other=whisper_display_name(candidate),
-        ),
+        body,
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.Yes,
     )
@@ -155,12 +194,14 @@ def run_language_nudge(window) -> None:
     window._store.save_soon()
     if window._on_model_change is not None:
         window._on_model_change("stt")
-    grey_unsupported_languages(window._source_combo, cfg.stt.model)
+    grey_unsupported_languages(
+        window._source_combo, cfg.stt.model, translating=cfg.translate.enabled
+    )
 
 
 def schedule_language_nudge(window) -> None:
     """Queue :func:`run_language_nudge` once for a stored language the active
-    model cannot transcribe: greying makes that state unreachable from the
+    model cannot serve: greying makes that state unreachable from the
     combo popup, so without this the user gets a disabled-but-selected entry
     and silently wrong captions. Zero-delay so it runs after construction or
     reload settles; the pending flag keeps repeated reloads from stacking
@@ -187,13 +228,16 @@ def _run_scheduled_nudge(window) -> None:
         run_language_nudge(window)
 
 
-def grey_unsupported_languages(combo, model_id: str) -> None:
+def grey_unsupported_languages(combo, model_id: str, *, translating: bool = False) -> None:
     """Disable the spoken-language entries the active voice model can't
-    transcribe, each with a tooltip naming the model. "auto" is enabled only
-    when the model detects the spoken language itself; an unknown model id
-    (hand-edited config) restricts nothing. Symmetric to the model-combo
-    greying: the user switches the voice model first, which re-enables the
-    languages, so the two directions never deadlock."""
+    serve, each with a tooltip naming the model. "auto" needs the model to
+    detect the spoken language itself and, under ``translating``, to report
+    what it detected: the onnx-asr backend tags every auto result "en",
+    which would hand the translator the wrong source, so its tooltip names
+    the ways out (a concrete language, or translation off). An unknown model
+    id (hand-edited config) restricts nothing. Symmetric to the model-combo
+    greying: the user switches the voice model first (or turns translation
+    off), which re-enables the entries, so the directions never deadlock."""
     spec = WHISPER_MODELS.get(model_id)
     tip = tr(_LANGUAGE_LOCKED_TIP, name=whisper_display_name(model_id))
     item_model = combo.model()
@@ -203,9 +247,19 @@ def grey_unsupported_languages(combo, model_id: str) -> None:
             continue
         text = combo.itemText(i)
         if text == _AUTO:
-            enabled = spec is None or spec.auto_language
-        else:
-            lang = LANGUAGES.get(text)
-            enabled = spec is None or lang is None or _covers(spec, lang.whisper)
+            detects = spec is None or spec.auto_language
+            reports = not (
+                spec is not None and spec.backend == "onnx_asr" and translating
+            )
+            item.setEnabled(detects and reports)
+            if detects and not reports:
+                item.setToolTip(
+                    tr(_AUTO_LOCKED_TIP, name=whisper_display_name(model_id))
+                )
+            else:
+                item.setToolTip("" if detects else tip)
+            continue
+        lang = LANGUAGES.get(text)
+        enabled = spec is None or lang is None or _covers(spec, lang.whisper)
         item.setEnabled(enabled)
         item.setToolTip("" if enabled else tip)

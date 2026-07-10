@@ -291,6 +291,8 @@
   "usually takes a few seconds": "ปกติใช้เวลาไม่กี่วินาที",
   "voice model": "โมเดลเสียง",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name} ไม่สามารถบอกโมเดลแปลภาษาได้ว่าได้ยินเป็นภาษาอะไร สลับไปใช้ {other} หรือไม่",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name} ไม่สามารถบอกโมเดลแปลภาษาได้ว่าคุณพูดภาษาอะไร กรุณาเลือกภาษาของคุณ หรือปิดการแปล",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name} ไม่สามารถถอดความภาษานี้ได้ กรุณาเลือกโมเดลเสียงอื่นก่อน",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name} ไม่สามารถถอดความภาษา {language} ได้ สลับไปใช้ {other} หรือไม่",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name} ไม่สามารถทำงานบน GPU ต่อได้ จึงสลับไปใช้ CPU แทน (ช้ากว่า)",

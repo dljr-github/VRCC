@@ -291,6 +291,8 @@
   "usually takes a few seconds": "보통 몇 초 정도 걸립니다",
   "voice model": "음성 모델",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name}은(는) 어떤 언어를 들었는지 번역 모델에 알리지 못합니다. {other}(으)로 전환할까요?",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name}은(는) 어떤 언어로 말하는지 번역 모델에 알리지 못합니다. 언어를 직접 선택하거나 번역을 끄세요.",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name}은(는) 이 언어를 받아쓰지 못합니다. 먼저 다른 음성 모델을 선택하세요.",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name}은(는) {language}을(를) 받아쓰지 못합니다. {other}(으)로 전환할까요?",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name}이(가) GPU에서 계속 실행되지 못해 CPU로 전환했습니다(더 느림).",

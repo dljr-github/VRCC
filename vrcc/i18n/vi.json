@@ -291,6 +291,8 @@
   "usually takes a few seconds": "thường chỉ mất vài giây",
   "voice model": "mô hình giọng nói",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name} không thể cho mô hình dịch biết đã nghe thấy ngôn ngữ nào. Chuyển sang {other}?",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name} không thể cho mô hình dịch biết bạn nói ngôn ngữ nào. Hãy chọn ngôn ngữ của bạn, hoặc tắt tính năng dịch.",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name} không thể phiên âm ngôn ngữ này. Hãy chọn một mô hình giọng nói khác trước.",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name} không thể phiên âm {language}. Chuyển sang {other}?",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name} không thể tiếp tục chạy trên GPU. Đã chuyển sang CPU (chậm hơn).",

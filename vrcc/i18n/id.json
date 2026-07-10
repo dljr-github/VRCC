@@ -291,6 +291,8 @@
   "usually takes a few seconds": "biasanya perlu beberapa detik",
   "voice model": "model suara",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name} tidak dapat memberi tahu model terjemahan bahasa apa yang didengarnya. Beralih ke {other}?",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name} tidak dapat memberi tahu model terjemahan bahasa apa yang kamu ucapkan. Pilih bahasamu, atau matikan terjemahan.",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name} tidak dapat mentranskripsikan bahasa ini. Pilih dulu model suara lain.",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name} tidak dapat mentranskripsikan {language}. Beralih ke {other}?",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name} tidak dapat terus berjalan di GPU. Beralih ke CPU (lebih lambat).",
