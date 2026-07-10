@@ -101,6 +101,75 @@ def test_build_qss_clamps_scale():
     assert "font-size: 7px" in build_qss("dark", 0.01)  # clamp to 0.5 -> 7
 
 
+def test_disabled_popup_items_render_in_muted_color():
+    # The QWidget color rule (and the flat palette) level every color group,
+    # Disabled included, so grey_unsupported_languages is only visible through
+    # the QComboBox::item:disabled rule. Rendered pixels bind the whole chain.
+    # Classification is by color distance only, never glyph position. Where
+    # real fonts exist (Linux offscreen uses fontconfig), antialiased text
+    # edges blend toward the background and pass through the muted band, so
+    # an enabled row legitimately shows some muted-band pixels. The palette
+    # keeps text and muted far apart (~122 RGB distance), which means muted
+    # ink never lands in the text band and vice versa at full strength; the
+    # assertions therefore only inspect full-strength ink per row.
+    import math
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QComboBox
+
+    from vrcc.core.languages import LANGUAGES
+    from vrcc.gui.model_prompts import grey_unsupported_languages
+    from vrcc.gui.style import apply_theme
+
+    def rgb(token):
+        value = PALETTE["dark"][token]
+        return tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+
+    text_rgb, muted_rgb = rgb("text"), rgb("muted")
+
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app, "dark", 1.0)
+    combo = QComboBox()
+    try:
+        combo.addItem("auto")
+        combo.addItems(list(LANGUAGES.keys()))
+        combo.show()
+        grey_unsupported_languages(combo, "parakeet-tdt-0.6b-v3")
+        combo.showPopup()
+        app.processEvents()
+        view = combo.view()
+        img = view.viewport().grab().toImage()
+        model = combo.model()
+        texts = [combo.itemText(i) for i in range(combo.count())]
+
+        def counts(row_text):
+            r = view.visualRect(model.index(texts.index(row_text), 0))
+            text_px = muted_px = 0
+            for y in range(max(0, r.y()), min(img.height(), r.y() + r.height())):
+                for x in range(max(0, r.x()), min(img.width(), r.x() + r.width())):
+                    c = img.pixelColor(x, y)
+                    px = (c.red(), c.green(), c.blue())
+                    if math.dist(px, text_rgb) < 25:
+                        text_px += 1
+                    elif math.dist(px, muted_rgb) < 25:
+                        muted_px += 1
+            return text_px, muted_px
+
+        french_text, _ = counts("French")  # parakeet v3 covers fr
+        japanese_text, japanese_muted = counts("Japanese")  # not in its set
+        # A wrongly greyed French row would leave no pixel near the text
+        # color; a wrongly ungreyed Japanese row would put full-strength
+        # text ink where only muted ink may appear.
+        assert french_text > 0
+        assert japanese_muted > 0 and japanese_text == 0
+    finally:
+        combo.hidePopup()
+        combo.close()
+        combo.deleteLater()
+        app.processEvents()
+
+
 def test_apply_font_scale_never_compounds_across_live_changes():
     # The live text-size path calls apply_font_scale repeatedly; every call
     # must set base*scale from the captured base (Large then Small must not
