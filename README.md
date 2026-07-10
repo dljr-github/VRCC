@@ -85,13 +85,18 @@ Run the app:
 
 ## First run
 
-If the configured models aren't downloaded yet, a first-run wizard opens and
-downloads them for you. Approximate download sizes:
+If the configured models aren't downloaded yet, a first-run wizard opens,
+picks models for your hardware and your spoken language (taken from your
+Windows display language), and downloads them:
 
-| Kind | Model (default) | Size |
-| ---- | --------------- | ---- |
-| Speech-to-text | whisper `small` | ~480 MB |
-| Translation | `nllb-600M-int8` | ~650 MB |
+| Your machine | Speech-to-text | Translation | Download |
+| ------------ | -------------- | ----------- | -------- |
+| NVIDIA GPU with 16 GB+ VRAM | `large-v3-turbo` | `nllb-1.3B-int8` | ~3 GB |
+| Otherwise, a language Parakeet covers | `parakeet-tdt-0.6b-v3` | `nllb-600M-int8` | ~1.3 GB |
+| Otherwise | whisper `small` | `nllb-600M-int8` | ~1.1 GB |
+
+The wizard shows what it picked and lets you switch the run device before
+downloading.
 
 Other options range from whisper `tiny` (~75 MB) up to `large-v3` (~3 GB),
 plus NVIDIA's `parakeet-tdt-0.6b-v3` (~690 MB, very accurate and fast),
