@@ -84,16 +84,18 @@ jobs:
       - name: Build the one-folder app
         # Same invocation the README documents; produces dist/VRCC/VRCC.exe.
         run: pyinstaller packaging/vrcc.spec --noconfirm --distpath dist
-      - name: Package ${{ matrix.zip }}.zip
+      - name: Package ${{ matrix.zip }}-${{ github.ref_name }}.zip
         shell: pwsh
         # Archive the whole dist/VRCC folder so it unzips to a VRCC/ directory
         # with VRCC.exe inside, as the README's "distribute the whole folder"
-        # instructions expect.
-        run: Compress-Archive -Path dist/VRCC -DestinationPath "${{ matrix.zip }}.zip" -Force
+        # instructions expect. The tag rides in the filename so a downloaded
+        # zip identifies its release; the README names the zips by prefix
+        # only, so the suffix cannot stale it.
+        run: Compress-Archive -Path dist/VRCC -DestinationPath "${{ matrix.zip }}-${{ github.ref_name }}.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.zip }}
-          path: ${{ matrix.zip }}.zip
+          name: ${{ matrix.zip }}-${{ github.ref_name }}
+          path: ${{ matrix.zip }}-${{ github.ref_name }}.zip
           retention-days: 7
 
   release:
