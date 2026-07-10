@@ -35,7 +35,7 @@ speed numbers transfer to other languages.
 ## Contributing your machine
 
 1. Install from source with the benchmark extras
-   (see the [main README](../README.md#install-from-source-developers);
+   (see [DEVELOPING.md](../DEVELOPING.md#install-from-source);
    add `.[bench]`, and on NVIDIA machines the CUDA steps):
 
    ```
