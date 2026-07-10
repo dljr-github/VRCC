@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.icons import arrow_svg, dots_svg, gear_svg, mic_svg, x_svg
-from vrcc.gui.widgets import Card, IconButton, MicMeter, icon_label, svg_pixmap
+from vrcc.gui.widgets import Card, IconButton, MicMeter, icon_label, no_wheel, svg_pixmap
 from vrcc.i18n import tr
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ def build_top_bar(w: "MainWindow") -> QWidget:
 
     # -- language flow: You speak [src] -> They read [tgt] (+ up to 3) ----
     bar.addWidget(_flow_label(w, tr("You speak")))
-    w._source_combo = QComboBox()
+    w._source_combo = no_wheel(QComboBox())
     w._source_combo.addItems([_AUTO, *LANGUAGES.keys()])
     _compact_combo(w._source_combo)
     w._source_combo.currentTextChanged.connect(w._on_source_changed)
@@ -88,7 +88,7 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     w._target_checks: list[QCheckBox | None] = []
     w._target_conts: list[QWidget | None] = []
     for slot in range(_NUM_TARGET_SLOTS):
-        combo = QComboBox()
+        combo = no_wheel(QComboBox())
         combo.addItems(list(LANGUAGES.keys()))
         _compact_combo(combo)
         combo.currentTextChanged.connect(w._on_targets_changed)
