@@ -23,11 +23,21 @@ Notes:
 
 import glob
 import os
+import re
 
 from PyInstaller.utils.hooks import (
     collect_data_files,
     collect_dynamic_libs,
     copy_metadata,
+)
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo,
+    StringFileInfo,
+    StringStruct,
+    StringTable,
+    VarFileInfo,
+    VarStruct,
+    VSVersionInfo,
 )
 
 # The repo root, so the analysis can find the ``vrcc`` package as a plain
@@ -35,6 +45,55 @@ from PyInstaller.utils.hooks import (
 # hook that PyInstaller's static analysis cannot follow, and relative
 # ``pathex`` entries resolve against the *current* directory, not the spec.)
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))  # noqa: F821
+
+# The exe version resource is built inline from the version in
+# vrcc/__init__.py, so a version bump can never desync the exe metadata.
+# Read with a regex, not an import: the spec must not trigger package
+# imports (vrcc pulls in Qt and the audio stack at import time).
+with open(
+    os.path.join(REPO_ROOT, "vrcc", "__init__.py"), encoding="utf-8"
+) as f:
+    VERSION = re.search(
+        r'^__version__ = "([^"]+)"', f.read(), re.MULTILINE
+    ).group(1)
+# VS_FIXEDFILEINFO wants exactly four numeric fields. Only the leading
+# dotted release numbers count: digits from a pre-release suffix (1.2.0-rc1)
+# must not land in the fourth field, or the rc's file version would compare
+# newer than the final release that supersedes it.
+_release = re.match(r"\d+(?:\.\d+)*", VERSION).group(0)
+_nums = ([int(n) for n in _release.split(".")] + [0, 0, 0])[:4]
+VERSION_4 = ".".join(str(n) for n in _nums)
+
+version_info = VSVersionInfo(
+    ffi=FixedFileInfo(filevers=tuple(_nums), prodvers=tuple(_nums)),
+    kids=[
+        StringFileInfo(
+            [
+                StringTable(
+                    "040904B0",
+                    [
+                        StringStruct("CompanyName", "dljr-github"),
+                        StringStruct(
+                            "FileDescription",
+                            "Live captions and translation for the "
+                            "VRChat chatbox",
+                        ),
+                        StringStruct("FileVersion", VERSION_4),
+                        StringStruct("InternalName", "VRCC"),
+                        StringStruct(
+                            "LegalCopyright",
+                            "(c) 2026 dljr-github. MIT License.",
+                        ),
+                        StringStruct("OriginalFilename", "VRCC.exe"),
+                        StringStruct("ProductName", "VRCC"),
+                        StringStruct("ProductVersion", VERSION_4),
+                    ],
+                )
+            ]
+        ),
+        VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+    ],
+)
 
 datas = collect_data_files("faster_whisper")
 # onnx-asr ships its preprocessor ONNX graphs (nemo128 mel features etc.) as
@@ -51,6 +110,9 @@ datas += [
     (path, os.path.join("vrcc", "i18n"))
     for path in glob.glob(os.path.join(REPO_ROOT, "vrcc", "i18n", "*.json"))
 ]
+# Window icon: vrcc.gui.style resolves it relative to the vrcc package, so
+# it must land at _internal/vrcc/vrcc.ico, same shape as the i18n catalogs.
+datas += [(os.path.join(REPO_ROOT, "vrcc", "vrcc.ico"), "vrcc")]
 binaries = collect_dynamic_libs("ctranslate2")
 # onnxruntime's own DLLs -- in the CUDA build this includes the CUDA execution
 # provider libraries from the onnxruntime-gpu overlay (see release.yml), which
@@ -111,6 +173,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=os.path.join(REPO_ROOT, "vrcc", "vrcc.ico"),
+    version=version_info,
 )
 
 coll = COLLECT(

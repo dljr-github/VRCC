@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Dark tile keeps the mark legible on light and dark taskbars. -->
+  <rect width="256" height="256" rx="56" fill="#14161d"/>
+  <!-- Speech bubble with a bottom-left tail, one closed path. -->
+  <path fill="#3ea6ff" d="M60 20 H196 A44 44 0 0 1 240 64 V148 A44 44 0 0 1 196 192 H128 L66 228 Q52 238 56 222 L72 192 H60 A44 44 0 0 1 16 148 V64 A44 44 0 0 1 60 20 Z"/>
+  <!-- Caption bars, cut in tile color so they read as text lines. -->
+  <rect x="52" y="62" width="152" height="32" rx="16" fill="#14161d"/>
+  <rect x="52" y="116" width="96" height="32" rx="16" fill="#14161d"/>
+</svg>
