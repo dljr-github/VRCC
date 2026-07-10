@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QComboBox, QMainWindow, QMessageBox, QVBoxLayout, 
 
 from vrcc import __version__
 from vrcc.core.config import ConfigStore, apply_profile
-from vrcc.gui import model_prompts
+from vrcc.gui import model_prompts, status_render
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.caption_log import CaptionModel, empty_state_html, render_rows_html
 from vrcc.gui.icons import FRIENDLY_ERRORS as _FRIENDLY_ERRORS
@@ -184,6 +184,9 @@ class MainWindow(QMainWindow):
         # active/dimmed state directly, else it stays bright when captioning loads off.
         self._mic_meter.set_active(self._captioning_btn.isChecked())
         self._sync_target_visibility()
+        # Settings can move the mute gate (mode/enable edits) through the
+        # shared config with no bus event; re-derive the capture label.
+        self._render_capture_status()
 
     @staticmethod
     def _set_combo_text(combo: QComboBox, text: str) -> None:
@@ -253,26 +256,14 @@ class MainWindow(QMainWindow):
 
     def _on_mute_changed(self, event) -> None:
         self._set_mute_chip(event.muted)
+        # A mute transition moves the pipeline's caption gate, and the capture
+        # label folds that gate in; repaint it alongside the chip.
+        self._render_capture_status()
 
     def _on_vrchat_detected(self, event) -> None:
         # event is None only for the initial "checking" render at construction.
         detected = bool(event.detected) if event is not None else None
-        tip = tr(
-            "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. "
-            "VRChat must be running on this PC."
-        )
-        if detected is True:
-            self._vrchat_label.setText(tr("VRChat: connected"))
-            self._vrchat_label.setStyleSheet(f"color: {self._p['good']}; padding: 2px 8px;")
-            self._vrchat_label.setToolTip(tr("VRChat's OSC service was found on this network."))
-        elif detected is False:
-            self._vrchat_label.setText(tr("VRChat: not detected - enable OSC in-game"))
-            self._vrchat_label.setStyleSheet(f"color: {self._p['warn']}; padding: 2px 8px;")
-            self._vrchat_label.setToolTip(tip)
-        else:
-            self._vrchat_label.setText(tr("VRChat: checking…"))
-            self._vrchat_label.setStyleSheet(f"color: {self._p['muted']}; padding: 2px 8px;")
-            self._vrchat_label.setToolTip(tip)
+        status_render.render_vrchat(self, detected)
 
     def _on_engine_state(self, event) -> None:
         # State drives the caption feed's loading message via _engine_states; it
@@ -349,21 +340,7 @@ class MainWindow(QMainWindow):
     # -- mute chip / status rendering --------------------------------------
 
     def _set_mute_chip(self, muted) -> None:
-        # None (mute-sync state unknown yet) hides the chip entirely rather than
-        # showing an empty "-" box.
-        if muted is None:
-            self._mute_chip.setVisible(False)
-            return
-        if muted:
-            self._mute_chip.setText(tr("MUTED"))
-            color = self._p["bad"]
-        else:
-            self._mute_chip.setText(tr("LIVE"))
-            color = self._p["good"]
-        self._mute_chip.setStyleSheet(
-            f"color: {self._p['on_badge']}; background: {color}; padding: 2px 8px;"
-        )
-        self._mute_chip.setVisible(True)
+        status_render.set_mute_chip(self, muted)
 
     def _flash_status(self, text: str) -> None:
         # showMessage's own timer clears this after _TRANSIENT_MS.
@@ -382,22 +359,7 @@ class MainWindow(QMainWindow):
         self._render_capture_status()
 
     def _render_capture_status(self) -> None:
-        ok = getattr(self, "_capture_ok", None)
-        if ok is None:
-            text, color = tr("Starting…"), self._p["muted"]
-        elif ok is False:
-            reason = getattr(self, "_capture_reason", "")
-            if reason:
-                text = tr("Not listening - {reason}", reason=reason)
-            else:
-                text = tr("Not listening")
-            color = self._p["bad"]
-        elif getattr(self, "_captioning_btn", None) is not None and not self._captioning_btn.isChecked():
-            text, color = tr("Paused - not listening"), self._p["warn"]
-        else:
-            text, color = tr("Listening"), self._p["good"]
-        self._capture_label.setText(text)
-        self._capture_label.setStyleSheet(f"color: {color}; padding: 2px 8px;")
+        status_render.render_capture_status(self)
 
     def reload_from_config(self) -> None:
         """Re-sync the toolbar controls to config (e.g. after the modal Settings

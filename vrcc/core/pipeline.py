@@ -369,9 +369,13 @@ class Pipeline:
             return False
         if self._swapping:  # paused mid model-swap
             return False
-        if self._mute is not None and not self._mute.should_caption():
-            return False
-        return True
+        return not self.mute_gated()
+
+    def mute_gated(self) -> bool:
+        """Whether mute sync is currently holding captions back (GUI-polled
+        so the capture label can name the reason for the pause)."""
+        mute = self._mute
+        return mute is not None and not mute.should_caption()
 
     # -- STT worker --------------------------------------------------------
 

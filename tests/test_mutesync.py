@@ -334,11 +334,12 @@ def test_update_after_stop_publishes_nothing():
     mute.start()
     srv = holder[0]
     mute.stop()
+    after_stop = [e for e in events if isinstance(e, MuteChanged)]
 
     srv.on_mute(True)  # late push after stop: no state change, no event
 
     assert mute.muted is None
-    assert [e for e in events if isinstance(e, MuteChanged)] == []
+    assert [e for e in events if isinstance(e, MuteChanged)] == after_stop
 
 
 def test_late_initial_fetch_after_stop_publishes_nothing():
@@ -360,9 +361,83 @@ def test_late_initial_fetch_after_stop_publishes_nothing():
     )
     mute.start()
     mute.stop()  # stop while the fetch is still in flight
+    after_stop = [e for e in events if isinstance(e, MuteChanged)]
 
     release.set()
     assert _wait_until(lambda: not mute._fetch_thread.is_alive())
 
     assert mute.muted is None
+    assert [e for e in events if isinstance(e, MuteChanged)] == after_stop
+
+
+# -- stop/restart: per-session state must not survive ------------------------
+
+
+def test_stop_clears_state_so_a_restart_trusts_its_fresh_fetch():
+    # Regression: a push in one session left _muted/_push_received behind, so
+    # the next session's initial fetch was dropped by the fetch-after-push
+    # guard and the coordinator resumed on a value VRChat may have changed
+    # while sync was off (Settings enable off/on wedged the GUI on stale mute).
+    bus = EventBus()
+    events = _collect(bus)
+    holder: list = []
+    truth = [True]  # what VRChat would answer to the initial fetch
+    mute = MuteSync(
+        MuteSyncConfig(),
+        "127.0.0.1",
+        bus,
+        server_factory=_factory(holder),
+        initial_fetch=lambda: truth[0],
+    )
+    mute.start()
+    holder[0].on_mute(True)  # a real push arms the fetch-after-push guard
+    assert mute.muted is True
+    mute.stop()
+    assert mute.muted is None
+
+    truth[0] = False  # user unmuted while sync was off; the push was lost
+    mute.start()
+    assert _wait_until(lambda: mute.muted is False)
+    assert mute.should_caption() is True  # default "pause" mode, unmuted
+    changes = [e.muted for e in events if isinstance(e, MuteChanged)]
+    assert changes == [True, None, False]
+    mute.stop()
+
+
+def test_stop_of_an_active_session_publishes_unknown_state():
+    # The GUI's mute chip has no other way to learn the state is no longer
+    # knowable; MuteChanged(None) tells subscribers to drop the last value.
+    bus = EventBus()
+    events = _collect(bus)
+    holder: list = []
+    mute = MuteSync(
+        MuteSyncConfig(),
+        "127.0.0.1",
+        bus,
+        server_factory=_factory(holder),
+        initial_fetch=lambda: None,
+    )
+    mute.start()
+    holder[0].on_mute(True)
+    mute.stop()
+    changes = [e.muted for e in events if isinstance(e, MuteChanged)]
+    assert changes == [True, None]
+
+
+def test_stop_without_an_active_session_publishes_nothing():
+    # stop() is also the shutdown hook for a coordinator that never started
+    # (disabled config, non-localhost OSC); no session, no event.
+    bus = EventBus()
+    events = _collect(bus)
+    holder: list = []
+    mute = MuteSync(
+        MuteSyncConfig(enabled=False),
+        "127.0.0.1",
+        bus,
+        server_factory=_factory(holder),
+        initial_fetch=lambda: None,
+    )
+    mute.start()  # disabled: never becomes active
+    mute.stop()
+    mute.stop()  # idempotent
     assert [e for e in events if isinstance(e, MuteChanged)] == []

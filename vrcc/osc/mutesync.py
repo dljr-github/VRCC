@@ -4,7 +4,8 @@ Owns an :class:`~vrcc.osc.mutesync_server.OscQueryServer` (started only for
 localhost OSC, since OSCQuery/mDNS is local-only) and tracks the latest
 ``MuteSelf`` value, publishing :class:`MuteChanged` on real transitions --
 debouncing pushes vs. the initial fetch and guarding against races so
-subscribers never see an event ordering that contradicts final state. The
+subscribers never see an event ordering that contradicts final state -- plus
+``MuteChanged(None)`` when an active session stops (state unknowable). The
 OSCQuery wire/discovery layer itself (HTTP+OSC servers, mDNS browse) lives in
 :mod:`vrcc.osc.mutesync_server`, which this module composes.
 """
@@ -124,15 +125,30 @@ class MuteSync:
         """Stop the OSCQuery server if running; idempotent. Flips the stopped
         flag so late updates (a straggler push or a resolving initial fetch)
         are dropped instead of mutating state or publishing post-stop.
+
+        Per-session mute state dies here too: VRChat can change it while sync
+        is off, so the next start() must trust its fresh initial fetch rather
+        than resume the old value past the fetch-after-push guard. An active
+        session's stop publishes ``MuteChanged(None)`` so subscribers drop the
+        now-unknowable value instead of rendering it forever.
         """
         with self._lifecycle_lock:
+            was_active = self._active
             with self._state_lock:
                 self._stopped = True
+                self._muted = None
+                self._push_received = False
+                # Invalidate any update that passed _apply but has not
+                # published yet, so it cannot land after the None below.
+                self._generation += 1
             server = self._server
             self._server = None
             self._active = False
             if server is not None:
                 server.stop()
+            if was_active:
+                with self._publish_lock:
+                    self._bus.publish(MuteChanged(None))
 
     # -- state -------------------------------------------------------------
 

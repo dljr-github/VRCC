@@ -150,6 +150,27 @@ def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
         return False
 
 
+def _swap_main_window(old, make_window, detector):
+    """Replace ``old`` with a freshly built MainWindow and carry its runtime
+    state across: nothing replays bus events for a late subscriber, so the
+    fresh window would otherwise sit on "Starting" and "VRChat: checking"
+    until the next transition. The capture label carries verbatim; a red
+    failure must stay red whether or not the pipeline ever started, and
+    paused-vs-listening re-derives from the captioning toggle, which the
+    fresh window reads from the pipeline at construction."""
+    old.disconnect_bridge()
+    fresh = make_window()
+    fresh.restoreGeometry(old.saveGeometry())
+    fresh._engine_states.update(old._engine_states)
+    fresh._render_log()
+    fresh.set_capture_status(old._capture_ok, old._capture_reason)
+    detector.republish()
+    fresh.show()
+    old.hide()
+    old.deleteLater()
+    return fresh
+
+
 def run(portable: bool = False, verbose: bool = False) -> int:
     """Launch the GUI app. Returns the process exit code."""
     paths = default_paths(portable)
@@ -431,28 +452,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     window.show()
 
     def rebuild_main_window() -> None:
-        """Rebuild MainWindow in the new UI language (tr() is read at widget
-        construction). The old window detaches its bridge slots first so events
-        stop reaching it; geometry carries across for a seamless swap.
-
-        Runtime state carries across too: a fresh window starts gray with an
-        empty caption feed, and nothing re-pushes engine/capture state until
-        the next event, so mid-session it would sit on "Starting" over a
-        healthy pipeline."""
         nonlocal window
         apply_ui_language(app, store.config.gui.ui_language)
-        old = window
-        old.disconnect_bridge()
-        fresh = make_window()
-        fresh.restoreGeometry(old.saveGeometry())
-        fresh._engine_states.update(old._engine_states)
-        fresh._render_log()
-        if pipeline_started[0]:
-            fresh.set_capture_status(stack.pipeline.captioning_enabled)
-        window = fresh
-        fresh.show()
-        old.hide()
-        old.deleteLater()
+        window = _swap_main_window(window, make_window, detector)
 
     # Run the driver-floor check before the loader (its flag drives resolve()'s
     # CPU fallback) but after the window subscribes to the bridge, so a
