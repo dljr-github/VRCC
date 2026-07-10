@@ -28,7 +28,7 @@ from vrcc.core.hardware import resolved_device
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui import model_prompts, settings_reset
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
-from vrcc.gui.widgets import SegmentedControl
+from vrcc.gui.widgets import SegmentedControl, no_wheel
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
 
@@ -99,7 +99,7 @@ def _add_deleted_placeholder_if_needed(combo: QComboBox, specs, configured_id) -
 
 def _make_input_device_combo(dlg: "SettingsDialog") -> QComboBox:
     """The microphone picker on the Simple page."""
-    combo = QComboBox()
+    combo = no_wheel(QComboBox())
     combo.addItem(tr("Auto (system default)"), _AUTO)
     try:
         from vrcc.audio.devices import list_input_devices
@@ -214,7 +214,7 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     # (tr() runs at construction), so SettingsDialog rebuilds the main window on
     # close when it changed. Data is the code; labels are each language's own
     # name, so a user stuck in the wrong language can still find theirs.
-    ui_lang = QComboBox()
+    ui_lang = no_wheel(QComboBox())
     ui_lang.addItem(tr("Auto (match my system)"), "auto")
     for code, native_name in UI_LANGUAGES.items():
         ui_lang.addItem(native_name, code)
@@ -255,7 +255,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     form = QFormLayout(page)
     form.setContentsMargins(24, 16, 24, 16)
 
-    dlg._model_combo = QComboBox()
+    dlg._model_combo = no_wheel(QComboBox())
     # Downloaded voice models only (or all, headless). Rebuild the language-
     # limited index list against this FILTERED order so greying lines up with
     # combo rows.
@@ -292,7 +292,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         hint.setWordWrap(True)
         form.addRow("", hint)
 
-    dlg._source_combo = QComboBox()
+    dlg._source_combo = no_wheel(QComboBox())
     dlg._source_combo.addItem(_AUTO)
     dlg._source_combo.addItems(list(LANGUAGES.keys()))
     dlg._set_combo_text(dlg._source_combo, dlg._cfg.stt.source_language)
@@ -403,7 +403,7 @@ def build_translation_page(dlg: "SettingsDialog") -> QWidget:
     note.setWordWrap(True)
     form.addRow(note)
 
-    model = QComboBox()
+    model = no_wheel(QComboBox())
     # List only downloaded translation models (or all, headless).
     mt_specs = dlg._downloaded_mt_specs()
     _add_deleted_placeholder_if_needed(model, mt_specs, dlg._cfg.translate.model)
