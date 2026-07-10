@@ -22,6 +22,7 @@ from vrcc.gui.bridge import BusBridge
 from vrcc.gui.caption_log import CaptionModel, empty_state_html, render_rows_html
 from vrcc.gui.icons import FRIENDLY_ERRORS as _FRIENDLY_ERRORS
 from vrcc.gui.icons import dots_svg as _dots_svg  # re-exported: tests import it from here
+from vrcc.gui.log_follow import LogFollower
 from vrcc.gui.main_parts import (
     build_caption_log,
     build_compose_row,
@@ -108,6 +109,7 @@ class MainWindow(QMainWindow):
         root.addWidget(build_caption_log(self), stretch=1)
         root.addWidget(build_compose_row(self))
         self.setCentralWidget(central)
+        self._log_follow = LogFollower(self._log)
 
         # The capture label is the honest "is the app working?" answer: it stays
         # red "Not listening" after any load/mic/engine failure, so a broken app
@@ -315,16 +317,13 @@ class MainWindow(QMainWindow):
 
     def _render_log(self) -> None:
         # Full re-render from the row model: caption events are low-frequency and
-        # the model is capped, so it's cheap. setHtml resets the scrollbar to the
-        # top, so preserve position -- pin to bottom if there, else hold (setValue
-        # clamps to the new maximum).
-        scrollbar = self._log.verticalScrollBar()
-        at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
-        previous = scrollbar.value()
+        # the model is capped, so it's cheap. Scroll position belongs to the
+        # follower: pinned to the newest row while following, held in place
+        # while the user reads history (setHtml alone resets it to the top).
         rows = self._caption_model.rows()
         colors = self._p
         if rows:
-            self._log.setHtml(render_rows_html(rows, colors, self._scale))
+            html = render_rows_html(rows, colors, self._scale)
         else:
             loading = self._engine_states.get("stt") in (None, "loading")
             if loading:
@@ -334,8 +333,8 @@ class MainWindow(QMainWindow):
                     tr("Say something - captions appear here"),
                     tr("then in your VRChat chatbox"),
                 )
-            self._log.setHtml(empty_state_html(msg, sub, colors, self._scale))
-        scrollbar.setValue(scrollbar.maximum() if at_bottom else previous)
+            html = empty_state_html(msg, sub, colors, self._scale)
+        self._log_follow.set_html(html)
 
     # -- mute chip / status rendering --------------------------------------
 

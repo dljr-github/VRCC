@@ -1,6 +1,8 @@
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from types import SimpleNamespace
+
 import pytest
 from PySide6.QtWidgets import QApplication, QAbstractButton, QLabel
 
@@ -231,13 +233,147 @@ def test_translate_gate_reads_live_config_not_ctor_snapshot(qapp, tmp_path):
     # mt_available=False used to permanently suppress "translating..." even
     # once config turned translation on -- engines hot-swap mid-session now,
     # so only the live config value may decide this.
-    from types import SimpleNamespace
-
     w, bridge = _window(tmp_path, mt_available=False)
     try:
         w._store.config.translate.enabled = True
         w._on_phrase_recognized(SimpleNamespace(utterance_id=1, text="hi"))
         assert "translating" in w._log.toPlainText().lower()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+# -- caption feed follow behavior --------------------------------------------
+
+
+def _say(w, utt, text):
+    w._on_phrase_recognized(SimpleNamespace(utterance_id=utt, text=text))
+
+
+def _settle_layout(qapp, w):
+    # maximum() is only trustworthy after the full document layout, which Qt
+    # defers past setHtml; polling documentSize() forces the remainder.
+    qapp.processEvents()
+    w._log.document().documentLayout().documentSize()
+    qapp.processEvents()
+
+
+def test_feed_follows_when_layout_settles_late(qapp, tmp_path):
+    # Progressive text layout means maximum() read right after setHtml can
+    # undershoot the settled height once later rows are taller than earlier
+    # ones. Measured offscreen at 520x240 with the proximity heuristic: the
+    # pin landed at value 2561 against a settled maximum of 2574, and the
+    # feed then froze at 2561 while the maximum grew to 3546. The follow
+    # flag re-pins on rangeChanged, so the settled view must sit exactly at
+    # the bottom after every caption.
+    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    store.config.translate.enabled = True
+    w, bridge = _window(tmp_path, store=store)
+    try:
+        w.resize(520, 240)
+        w.show()
+        qapp.processEvents()
+        bar = w._log.verticalScrollBar()
+        for i in range(1, 26):
+            _say(w, i, f"row {i} short")
+        for i in range(26, 46):
+            _say(w, i, f"row {i}: " + "a much longer caption that wraps across several lines " * 2)
+            w._on_phrase_translated(SimpleNamespace(
+                utterance_id=i,
+                translations=[
+                    ("Japanese", "とても長い翻訳テキストで、複数の行に折り返されることを意図しています " * 2),
+                    ("Korean", "여러 줄로 줄바꿈되도록 의도된 매우 긴 번역 텍스트입니다 " * 2),
+                ],
+            ))
+            assert bar.value() == bar.maximum()
+            _settle_layout(qapp, w)
+            assert bar.value() == bar.maximum(), f"feed stranded at caption {i}"
+        assert bar.maximum() > 0  # the viewport really overflowed
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_feed_still_follows_after_narrowing_resize(qapp, tmp_path):
+    # Rewrapping to a narrower viewport grows the document after the last
+    # pin (measured with the proximity heuristic: value stuck at 1356 while
+    # the maximum jumped to 1706). The user never scrolled, so the feed must
+    # stay at the bottom.
+    w, bridge = _window(tmp_path)
+    try:
+        w.resize(700, 240)
+        w.show()
+        qapp.processEvents()
+        for i in range(1, 26):
+            _say(w, i, f"row {i}: " + "words that will wrap once the window narrows " * 2)
+        _settle_layout(qapp, w)
+        bar = w._log.verticalScrollBar()
+        assert bar.value() == bar.maximum() > 0
+        w.resize(430, 240)
+        _settle_layout(qapp, w)
+        assert bar.value() == bar.maximum()
+        _say(w, 99, "the next caption")
+        _settle_layout(qapp, w)
+        assert bar.value() == bar.maximum()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_reader_scrolled_up_is_not_yanked_by_new_captions(qapp, tmp_path):
+    w, bridge = _window(tmp_path)
+    try:
+        w.resize(520, 240)
+        w.show()
+        qapp.processEvents()
+        for i in range(1, 31):
+            _say(w, i, f"row {i}: " + "history the user is reading back through " * 2)
+        _settle_layout(qapp, w)
+        bar = w._log.verticalScrollBar()
+        mid = bar.maximum() // 2
+        bar.setValue(mid)  # a user scroll: no programmatic adjustment is active
+        assert w._log_follow.following is False
+        for i in range(31, 36):
+            _say(w, i, f"row {i}: more arrives while reading")
+            _settle_layout(qapp, w)
+            assert bar.value() == mid
+        assert bar.value() < bar.maximum()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_scrolling_back_to_bottom_resumes_following(qapp, tmp_path):
+    w, bridge = _window(tmp_path)
+    try:
+        w.resize(520, 240)
+        w.show()
+        qapp.processEvents()
+        for i in range(1, 31):
+            _say(w, i, f"row {i}: " + "history the user is reading back through " * 2)
+        _settle_layout(qapp, w)
+        bar = w._log.verticalScrollBar()
+        bar.setValue(bar.maximum() // 2)  # user scrolls up
+        assert w._log_follow.following is False
+        bar.setValue(bar.maximum())  # user returns to the bottom
+        assert w._log_follow.following is True
+        for i in range(31, 36):
+            _say(w, i, f"row {i}: arrives after the user came back")
+            _settle_layout(qapp, w)
+            assert bar.value() == bar.maximum()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_empty_state_render_leaves_following_on(qapp, tmp_path):
+    w, bridge = _window(tmp_path)
+    try:
+        w._render_log()  # still no rows: the empty-state path
+        assert w._log_follow.following is True
+        w.resize(520, 240)
+        w.show()
+        qapp.processEvents()
+        for i in range(1, 21):
+            _say(w, i, f"row {i}: " + "enough words to overflow the small viewport " * 2)
+        _settle_layout(qapp, w)
+        bar = w._log.verticalScrollBar()
+        assert bar.value() == bar.maximum() > 0
     finally:
         w.close(); w.deleteLater(); bridge.detach()
 
