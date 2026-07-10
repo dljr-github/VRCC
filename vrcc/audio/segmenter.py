@@ -126,6 +126,19 @@ class Segmenter:
         self._reset_to_idle()
         self._preroll.clear()
 
+    def abort(self) -> list[object]:
+        """Discard the in-flight utterance and the pre-roll immediately,
+        returning the ``SegDiscard`` needed to keep the resolve-every-
+        speculative invariant when the pipeline stops listening mid-utterance
+        (VRChat mute via mute sync, or the captioning toggle). Same threading
+        contract as :meth:`reset`: call only from the thread that feeds
+        :meth:`process`."""
+        events: list[object] = []
+        if self._pending_spec_samples is not None:
+            events.append(SegDiscard(utterance_id=self._utterance_id))
+        self.reset()
+        return events
+
     @property
     def active(self) -> bool:
         """Whether mid-utterance (ACTIVE). The energy pre-gate consults this so

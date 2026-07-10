@@ -40,6 +40,7 @@ class FakeSegmenter:
         self.frames: list = []
         self.active = False  # mirrors Segmenter.active (energy-gate contract)
         self.resets = 0
+        self.aborts = 0
 
     def process(self, frame):
         self.frames.append(frame)
@@ -49,6 +50,12 @@ class FakeSegmenter:
         # Pipeline.start() drops in-flight segmenter state on every run.
         self.resets += 1
         self.active = False
+
+    def abort(self):
+        # The listen gate drops in-flight state when it closes mid-utterance.
+        self.aborts += 1
+        self.active = False
+        return []
 
 
 def make_result(
@@ -157,10 +164,10 @@ class FakeChatbox:
 
 class FakeMute:
     def __init__(self, caption: bool = True) -> None:
-        self._caption = caption
+        self.caption = caption  # public so tests can flip mute mid-stream
 
     def should_caption(self) -> bool:
-        return self._caption
+        return self.caption
 
 
 # -- helpers ---------------------------------------------------------------
@@ -211,6 +218,7 @@ def make_pipeline(
         stt=stt,
         mt=mt,
         chatbox=chatbox,
+        mute=mute,
     )
 
 
