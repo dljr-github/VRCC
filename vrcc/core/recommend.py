@@ -1,6 +1,7 @@
 """Hardware-tier detection and benchmark-derived model recommendations (Qt-free).
 
-Tiers: ``gpu_high`` (CUDA >= 8 GB), ``gpu_low`` (< 8 GB / unknown), ``cpu``.
+Tiers: ``gpu_high`` (usable CUDA, >= 8 GB), ``gpu_low`` (< 8 GB / unknown),
+``cpu`` (no CUDA the install can actually drive).
 ``WHISPER_PREFERENCE`` and the whisper half of ``PRESETS`` are derived at
 import time from the measured ``STT_BENCH`` table via :func:`_rank_whisper`,
 language-blind; :func:`preset_for_choice` and :func:`best_downloaded` take an
@@ -11,7 +12,7 @@ per-tier best-first walk in :func:`best_downloaded`.
 
 from __future__ import annotations
 
-from vrcc.core.hardware import cuda_device_count, total_vram_bytes
+from vrcc.core.hardware import can_run_cuda, total_vram_bytes
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
@@ -186,10 +187,11 @@ _validate()
 
 
 def detect_tier() -> str:
-    """Coarse hardware tier: no CUDA -> ``"cpu"``; CUDA >= 8 GB VRAM ->
-    ``"gpu_high"``; < 8 GB or unknown -> ``"gpu_low"``.
+    """Coarse hardware tier: no usable CUDA (:func:`can_run_cuda`, which a
+    visible device with no loadable cuBLAS fails) -> ``"cpu"``; usable CUDA
+    with >= 8 GB VRAM -> ``"gpu_high"``; < 8 GB or unknown -> ``"gpu_low"``.
     """
-    if cuda_device_count() <= 0:
+    if not can_run_cuda():
         return "cpu"
     vram = total_vram_bytes()
     if vram is not None and vram >= _VRAM_HIGH_BYTES:
@@ -203,7 +205,12 @@ _GPU_DEFAULT_VRAM_BYTES = 16 * 1024**3
 
 
 def default_device_choice() -> str:
-    """Wizard default: ``"gpu"`` when total VRAM >= 16 GB, else ``"cpu"``."""
+    """Wizard default: ``"gpu"`` when CUDA is usable (:func:`can_run_cuda`)
+    and total VRAM >= 16 GB, else ``"cpu"``. VRAM alone is not enough: NVML
+    reads it from the display driver, which says nothing about whether this
+    install ships the CUDA runtime to drive the card."""
+    if not can_run_cuda():
+        return "cpu"
     vram = total_vram_bytes()
     if vram is not None and vram >= _GPU_DEFAULT_VRAM_BYTES:
         return "gpu"
@@ -348,7 +355,7 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
         tier = "gpu_low"
 
     # The wizard's CPU verdict (a small card should stay VRChat's) must bind
-    # the device too: "auto" resolves to cuda whenever CUDA exists, which
+    # the device too: "auto" resolves to cuda whenever CUDA is usable, which
     # would run the CPU-tier models on the GPU the verdict chose to spare and
     # compute the performance mode for the wrong device.
     if choice == "cpu":

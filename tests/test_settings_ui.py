@@ -216,6 +216,34 @@ def test_vram_warning_cancel_reverts_and_skips_hotswap(qapp, tmp_path, monkeypat
         dlg.deleteLater()
 
 
+def test_model_fit_gets_resolved_device_not_raw_auto(qapp, tmp_path, monkeypatch):
+    # An "auto" device that will land on the CPU (no usable CUDA) must not be
+    # sized against a visible graphics card, so the fit check receives the
+    # resolved run device, never the raw config value.
+    w_ids = list(WHISPER_MODELS)
+    m_ids = list(MT_MODELS)
+    store = _store(tmp_path)
+    store.config.stt.model = w_ids[0]
+    store.config.stt.device = "auto"
+    store.config.translate.device = "auto"
+    dm = _FakeDM(whisper=set(w_ids[:2]), mt=set(m_ids[:2]))
+    dlg = SettingsDialog(store, download_manager=dm)
+    try:
+        monkeypatch.setattr(settings_mod.hardware, "can_run_cuda", lambda: False)
+        seen = []
+
+        def record(size_mb, device="auto"):
+            seen.append(device)
+            return None
+
+        monkeypatch.setattr(settings_mod.model_fit, "vram_warning", record)
+        dlg._model_combo.setCurrentIndex(1)
+        dlg._translate_model_combo.setCurrentIndex(1)
+        assert seen == ["cpu", "cpu"]
+    finally:
+        dlg.deleteLater()
+
+
 def test_empty_voice_combo_disabled_when_none_downloaded(qapp, tmp_path):
     store = _store(tmp_path)
     dm = _FakeDM(whisper=set())

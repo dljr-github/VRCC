@@ -1,3 +1,6 @@
+import logging
+import sys
+
 import ctranslate2
 import pytest
 
@@ -60,8 +63,8 @@ class TestBestComputeType:
 
 
 class TestResolve:
-    def test_auto_device_prefers_cuda_when_available(self, monkeypatch):
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+    def test_auto_device_prefers_cuda_when_usable(self, monkeypatch):
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         monkeypatch.setattr(hardware, "compute_capability", lambda index: None)
         monkeypatch.setattr(
             ctranslate2, "get_supported_compute_types", lambda device, index: FULL_SUPPORT
@@ -73,7 +76,7 @@ class TestResolve:
         assert compute == "int8_float16"
 
     def test_auto_device_falls_back_to_cpu_when_no_cuda(self, monkeypatch):
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: False)
         monkeypatch.setattr(
             ctranslate2, "get_supported_compute_types", lambda device, index: CPU_TYPICAL
         )
@@ -82,6 +85,25 @@ class TestResolve:
 
         assert device == "cpu"
         assert compute == "int8"
+
+    def test_auto_device_is_cpu_when_device_visible_but_cuda_unusable(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: False)
+        monkeypatch.setattr(
+            ctranslate2, "get_supported_compute_types", lambda device, index: CPU_TYPICAL
+        )
+
+        device, index, compute = hardware.resolve("auto", 0, "auto")
+
+        assert device == "cpu"
+        assert compute == "int8"
+
+    def test_explicit_cuda_is_not_gated_on_capability(self, monkeypatch):
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: False)
+
+        device, index, compute = hardware.resolve("cuda", 0, "float16")
+
+        assert (device, index, compute) == ("cuda", 0, "float16")
 
     def test_explicit_device_and_compute_pass_through(self, monkeypatch):
         monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
@@ -102,41 +124,160 @@ class TestResolvedDevice:
     _PARAKEET = "parakeet-tdt-0.6b-v3"
 
     def test_auto_gpu_whisper_is_cuda(self, monkeypatch):
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         assert hardware.resolved_device("auto", 0, "small") == "cuda"
 
     def test_auto_gpu_parakeet_is_cpu(self, monkeypatch):
-        # onnx-asr auto override: a GPU is present but the int8 graph runs on CPU.
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        # onnx-asr auto override: a GPU is usable but the int8 graph runs on CPU.
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         assert hardware.resolved_device("auto", 0, self._PARAKEET) == "cpu"
 
     def test_explicit_cuda_parakeet_stays_cuda(self, monkeypatch):
         # The override only applies to "auto"; a pinned "cuda" is honored.
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         assert hardware.resolved_device("cuda", 0, self._PARAKEET) == "cuda"
 
     def test_explicit_cpu_stays_cpu(self, monkeypatch):
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         assert hardware.resolved_device("cpu", 0, "small") == "cpu"
 
     def test_auto_without_gpu_is_cpu(self, monkeypatch):
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: False)
         assert hardware.resolved_device("auto", 0, "small") == "cpu"
+
+    def test_auto_visible_device_without_capability_is_cpu(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: False)
+        assert hardware.resolved_device("auto", 0, "small") == "cpu"
+
+    def test_explicit_cuda_without_capability_stays_cuda(self, monkeypatch):
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: False)
+        assert hardware.resolved_device("cuda", 0, "small") == "cuda"
 
     def test_auto_gpu_unknown_model_mirrors_resolve(self, monkeypatch):
         # No / unknown model id: no onnx override, so it matches resolve()'s cuda.
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         assert hardware.resolved_device("auto", 0, None) == "cuda"
 
     def test_failed_driver_floor_degrades_auto_to_cpu(self, monkeypatch):
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         monkeypatch.setattr(hardware, "_driver_floor_failed", True)
         assert hardware.resolved_device("auto", 0, "small") == "cpu"
 
     def test_failed_driver_floor_degrades_explicit_cuda_to_cpu(self, monkeypatch):
-        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         monkeypatch.setattr(hardware, "_driver_floor_failed", True)
         assert hardware.resolved_device("cuda", 0, "small") == "cpu"
+
+
+class TestCanRunCuda:
+    @pytest.fixture(autouse=True)
+    def _fresh_probe_cache(self, monkeypatch):
+        # The probe result is cached per process; each test starts unprobed.
+        monkeypatch.setattr(hardware, "_cublas_probe_attempted", False)
+        monkeypatch.setattr(hardware, "_cublas_loadable", False)
+
+    def test_no_device_is_false_without_probing(self, monkeypatch):
+        # A raising probe would be swallowed by _cublas_available's except
+        # clause, so record calls instead and require none happened.
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
+        probes = []
+
+        def probe():
+            probes.append(True)
+            return True
+
+        monkeypatch.setattr(hardware, "_probe_cublas", probe)
+        assert hardware.can_run_cuda() is False
+        assert probes == []
+
+    def test_visible_device_with_unloadable_cublas_is_false(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "_probe_cublas", lambda: False)
+        assert hardware.can_run_cuda() is False
+
+    def test_visible_device_with_loadable_cublas_is_true(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "_probe_cublas", lambda: True)
+        assert hardware.can_run_cuda() is True
+
+    def test_probe_runs_once_and_the_result_is_cached(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        calls = []
+
+        def probe():
+            calls.append(True)
+            return True
+
+        monkeypatch.setattr(hardware, "_probe_cublas", probe)
+        assert hardware.can_run_cuda() is True
+        assert hardware.can_run_cuda() is True
+        assert len(calls) == 1
+
+    def test_probe_exception_reads_as_not_loadable(self, monkeypatch):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+
+        def boom():
+            raise OSError("loader blew up")
+
+        monkeypatch.setattr(hardware, "_probe_cublas", boom)
+        assert hardware.can_run_cuda() is False
+
+    def test_failed_probe_logs_once_naming_the_libraries(self, monkeypatch, caplog):
+        monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+        monkeypatch.setattr(hardware, "_probe_cublas", lambda: False)
+        with caplog.at_level(logging.INFO, logger="vrcc.hardware"):
+            hardware.can_run_cuda()
+            hardware.can_run_cuda()
+        infos = [r for r in caplog.records if r.levelno == logging.INFO]
+        assert len(infos) == 1
+        assert "cublas" in infos[0].getMessage().lower()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows DLL search semantics")
+class TestProbeCublasSearch:
+    """The probe must look everywhere ctranslate2's own loader does: the
+    secure default search (the `os.add_dll_directory` dirs), the legacy
+    LoadLibrary search (PATH included), and the `%CUDA_PATH%\\bin`
+    fallback."""
+
+    def _fake_windll(self, monkeypatch, succeeds):
+        calls = []
+
+        def fake(name, winmode=None):
+            calls.append((name, winmode))
+            if succeeds(name, winmode):
+                return object()
+            raise OSError(f"cannot load {name}")
+
+        monkeypatch.setattr(hardware.ctypes, "WinDLL", fake)
+        return calls
+
+    def test_secure_search_hit_needs_no_fallback(self, monkeypatch):
+        calls = self._fake_windll(monkeypatch, lambda name, winmode: winmode is None)
+        assert hardware._probe_cublas() is True
+        assert calls == [(hardware._CUBLAS_NAMES[0], None)]
+
+    def test_path_only_toolkit_loads_via_legacy_search(self, monkeypatch):
+        # The CUDA toolkit installer publishes its bin dir via PATH, which
+        # the secure search never consults; ctranslate2.dll resolves cuBLAS
+        # with the legacy search, so the probe must count this as usable.
+        calls = self._fake_windll(monkeypatch, lambda name, winmode: winmode == 0)
+        assert hardware._probe_cublas() is True
+        assert (hardware._CUBLAS_NAMES[0], 0) in calls
+
+    def test_cuda_path_bin_is_the_last_resort(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CUDA_PATH", str(tmp_path))
+        expected = str(tmp_path / "bin" / hardware._CUBLAS_NAMES[0])
+        calls = self._fake_windll(monkeypatch, lambda name, winmode: name == expected)
+        assert hardware._probe_cublas() is True
+        assert expected in [name for name, _ in calls]
+
+    def test_unloadable_everywhere_is_false(self, monkeypatch):
+        monkeypatch.delenv("CUDA_PATH", raising=False)
+        calls = self._fake_windll(monkeypatch, lambda name, winmode: False)
+        assert hardware._probe_cublas() is False
+        assert len(calls) == 2 * len(hardware._CUBLAS_NAMES)
 
 
 class TestDriverFloor:
@@ -202,6 +343,9 @@ class TestGracefulDegradation:
         count = hardware.cuda_device_count()
         assert isinstance(count, int)
         assert count >= 0
+
+    def test_can_run_cuda_never_raises_and_returns_bool(self):
+        assert isinstance(hardware.can_run_cuda(), bool)
 
     def test_setup_cuda_dlls_never_raises_and_returns_bool(self):
         assert isinstance(hardware.setup_cuda_dlls(), bool)

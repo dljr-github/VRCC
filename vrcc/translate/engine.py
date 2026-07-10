@@ -1,8 +1,9 @@
-"""CTranslate2 translation engine: model load, batched translate, VRAM fallback.
+"""CTranslate2 translation engine: model load, batched translate, CPU fallback.
 
 Wraps one ``Translator`` + :class:`MtTokenizer`, translating a phrase to all N
 targets in a SINGLE ``translate_batch`` (layout keyed off ``spec.prefix_side``,
-noted inline). Lazy ``ctranslate2``; CUDA OOM -> CPU int8 once. Zero Qt.
+noted inline). Lazy ``ctranslate2``; an unusable CUDA (out of VRAM, or missing
+its runtime libraries) -> CPU int8 once. Zero Qt.
 """
 
 from __future__ import annotations
@@ -20,17 +21,26 @@ from vrcc.translate.tokenizers import MtTokenizer
 
 logger = logging.getLogger("vrcc.translate.engine")
 
-# Case-insensitive substrings marking a CUDA out-of-VRAM error (one-shot CPU fallback).
-_OOM_MARKERS = ("out of memory", "cublas_status_alloc_failed")
+# Case-insensitive substrings marking CUDA as unusable (one-shot CPU fallback):
+# out of VRAM, or missing runtime libraries. The last entry is the ctranslate2
+# dynamic-loader message ("Library cublas64_12.dll is not found or cannot be
+# loaded", same phrasing on Windows and Linux), raised at model build or the
+# first CUDA op when a CPU-only install drives a visible GPU.
+_CUDA_FALLBACK_MARKERS = (
+    "out of memory",
+    "cublas_status_alloc_failed",
+    "is not found or cannot be loaded",
+)
 
-# The device/compute the engine falls back to when the GPU is out of VRAM.
+# The device/compute the engine falls back to when CUDA is unusable.
 _CPU_FALLBACK = ("cpu", 0, "int8")
 
 
-def _is_oom(exc: Exception) -> bool:
-    """True if ``exc`` reads like a CUDA out-of-VRAM error."""
+def _is_cuda_unusable(exc: Exception) -> bool:
+    """True if ``exc`` reads like CUDA being unusable: out of VRAM, or a
+    runtime library CTranslate2 needs is missing."""
     text = str(exc).lower()
-    return any(marker in text for marker in _OOM_MARKERS)
+    return any(marker in text for marker in _CUDA_FALLBACK_MARKERS)
 
 
 class TranslateEngine:
@@ -68,9 +78,10 @@ class TranslateEngine:
         """Build the ``Translator`` + ``MtTokenizer`` and announce readiness.
 
         Publishes ``loading`` then ``ready`` (``detail="<device>:<compute>"``).
-        A VRAM-OOM building the GPU translator triggers one ``fallback_cpu`` +
-        rebuild on ``("cpu", 0, "int8")``; any other error publishes ``failed``
-        and re-raises.
+        An unusable CUDA (VRAM OOM, or a missing runtime library) while
+        building the GPU translator triggers one ``fallback_cpu`` + rebuild on
+        ``("cpu", 0, "int8")``; any other error publishes ``failed`` and
+        re-raises.
         """
         self._bus.publish(EngineStateChanged("mt", "loading"))
         try:
@@ -80,7 +91,7 @@ class TranslateEngine:
             try:
                 self._translator = self._build_translator(device, index, compute)
             except RuntimeError as exc:
-                if not _is_oom(exc):
+                if not _is_cuda_unusable(exc):
                     raise
                 self._fallback_to_cpu(str(exc))
 
@@ -175,13 +186,14 @@ class TranslateEngine:
         return translator
 
     def _fallback_to_cpu(self, detail: str) -> None:
-        """Announce the VRAM fallback and rebuild the translator on CPU int8."""
-        logger.warning("MT ran out of VRAM; falling back to CPU int8: %s", detail)
+        """Announce the CUDA fallback and rebuild the translator on CPU int8."""
+        logger.warning("MT cannot use CUDA; falling back to CPU int8: %s", detail)
         self._bus.publish(EngineStateChanged("mt", "fallback_cpu", detail))
         self._translator = self._build_translator(*_CPU_FALLBACK)
 
     def _run_batch(self, source, target_prefix, kwargs):
-        """Call ``translate_batch``, falling back to CPU int8 once on VRAM OOM.
+        """Call ``translate_batch``, falling back to CPU int8 once when CUDA
+        is unusable.
 
         ``fallback_cpu`` is transient (like the load path), so a successful retry
         re-publishes ``("mt", "ready")`` with the new device; a failed retry
@@ -192,7 +204,7 @@ class TranslateEngine:
                 source, target_prefix=target_prefix, **kwargs
             )
         except RuntimeError as exc:
-            if not _is_oom(exc):
+            if not _is_cuda_unusable(exc):
                 raise
             self._fallback_to_cpu(str(exc))
             results = self._translator.translate_batch(

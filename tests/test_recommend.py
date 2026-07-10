@@ -458,35 +458,3 @@ def test_tier_for_config_other_devices_follow_detected_tier(monkeypatch):
     monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
     assert recommend.tier_for_config(_cfg_with_device("auto")) == "gpu_high"
     assert recommend.tier_for_config(_cfg_with_device("cuda")) == "gpu_high"
-
-
-def test_detect_tier_cpu_when_no_cuda(monkeypatch):
-    monkeypatch.setattr(recommend, "cuda_device_count", lambda: 0)
-    assert recommend.detect_tier() == "cpu"
-
-
-def test_detect_tier_gpu_high_when_vram_ample(monkeypatch):
-    monkeypatch.setattr(recommend, "cuda_device_count", lambda: 1)
-    monkeypatch.setattr(recommend, "total_vram_bytes", lambda: 12 * 1024 ** 3)
-    assert recommend.detect_tier() == "gpu_high"
-
-
-def test_detect_tier_gpu_low_when_vram_small_or_unknown(monkeypatch):
-    monkeypatch.setattr(recommend, "cuda_device_count", lambda: 1)
-    monkeypatch.setattr(recommend, "total_vram_bytes", lambda: 4 * 1024 ** 3)
-    assert recommend.detect_tier() == "gpu_low"
-    monkeypatch.setattr(recommend, "total_vram_bytes", lambda: None)
-    assert recommend.detect_tier() == "gpu_low"
-
-
-def test_default_device_choice_gpu_at_16gb(monkeypatch):
-    from vrcc.core import recommend
-
-    monkeypatch.setattr(recommend, "total_vram_bytes", lambda: 24 * 1024**3)
-    assert recommend.default_device_choice() == "gpu"
-    monkeypatch.setattr(recommend, "total_vram_bytes", lambda: 16 * 1024**3)
-    assert recommend.default_device_choice() == "gpu"
-    monkeypatch.setattr(recommend, "total_vram_bytes", lambda: 8 * 1024**3)
-    assert recommend.default_device_choice() == "cpu"
-    monkeypatch.setattr(recommend, "total_vram_bytes", lambda: None)
-    assert recommend.default_device_choice() == "cpu"

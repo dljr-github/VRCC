@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from vrcc.core import recommend
+from vrcc.core import hardware, recommend
 from vrcc.core.config import ConfigStore
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.bridge import BusBridge
@@ -185,9 +185,17 @@ class FirstRunWizard(QDialog):
         )
         self._device_choice.setToolTip(tr(_DEVICE_TOOLTIP))
         if self.tier == "cpu":
-            self._device_choice.set_option_enabled(
-                "GPU", False, tooltip=tr("No graphics card detected.")
-            )
+            # Disabled even when a card is visible: the wizard only offers
+            # what the recommender stands behind, and an expert can still
+            # pin cuda in Settings.
+            if hardware.cuda_device_count() > 0:
+                tooltip = tr(
+                    "This version of VRCC cannot use your graphics card. "
+                    "The CUDA download can use it."
+                )
+            else:
+                tooltip = tr("No graphics card detected.")
+            self._device_choice.set_option_enabled("GPU", False, tooltip=tooltip)
         self._device_choice.changed.connect(self._on_device_changed)
         device_row.addWidget(self._device_choice)
         device_row.addStretch(1)
@@ -272,7 +280,7 @@ class FirstRunWizard(QDialog):
         tier_label = {
             "gpu_high": tr("fast graphics card"),
             "gpu_low": tr("graphics card"),
-            "cpu": tr("no graphics card, using your processor"),
+            "cpu": self._cpu_tier_label(),
         }[self.tier]
         lines = [
             tr("Detected: {tier}", tier=tier_label), "",
@@ -287,6 +295,17 @@ class FirstRunWizard(QDialog):
         lines.append("")
         lines.append(tr("Total download: {size}", size=fmt_size(self._total_mb())))
         self._summary_label.setText("\n".join(lines))
+
+    @staticmethod
+    def _cpu_tier_label() -> str:
+        """Detected-line label for the "cpu" tier. That tier also covers a
+        visible CUDA device this install cannot drive (no loadable cuBLAS),
+        where "no graphics card" would be plainly false."""
+        if hardware.cuda_device_count() > 0:
+            return tr(
+                "graphics card that this version cannot use, using your processor"
+            )
+        return tr("no graphics card, using your processor")
 
     # -- language picker -----------------------------------------------------
 
