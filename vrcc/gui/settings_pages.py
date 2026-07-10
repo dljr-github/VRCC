@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSlider,
     QWidget,
 )
@@ -236,6 +237,15 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
             dlg._changed()
     dlg._text_size.changed.connect(on_text_size)
     form.addRow(tr("Text size"), dlg._text_size)
+
+    # The recommended reset lives with the everyday controls. Switching Mode
+    # above applies the same presets, so the per-profile reset buttons are
+    # gone; re-applying the CURRENT profile over hand-tuned Advanced knobs
+    # now goes through this reset (a deliberate trade for a simpler page).
+    reset = QPushButton(settings_reset.reset_button_text())
+    reset.setToolTip(settings_reset.reset_button_tooltip())
+    reset.clicked.connect(lambda: settings_reset.confirm_and_reset(dlg))
+    form.addRow("", reset)
 
     return page
 
