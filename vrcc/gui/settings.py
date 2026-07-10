@@ -35,6 +35,7 @@ from vrcc.core import hardware, languages
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.gui import model_fit, model_prompts, settings_advanced, settings_live, settings_pages
 from vrcc.gui.style import PALETTE, apply_font_scale, apply_theme_guarded, resolve_theme
+from vrcc.gui.widgets import no_wheel
 from vrcc.i18n import tr
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
@@ -310,7 +311,7 @@ class SettingsDialog(QDialog):
         s = QSpinBox()
         s.setRange(lo, hi)
         s.setValue(int(value))
-        return s
+        return no_wheel(s)
 
     def _dspin(self, lo: float, hi: float, value: float, decimals: int, step: float) -> QDoubleSpinBox:
         s = QDoubleSpinBox()
@@ -318,7 +319,7 @@ class SettingsDialog(QDialog):
         s.setDecimals(decimals)
         s.setSingleStep(step)
         s.setValue(float(value))
-        return s
+        return no_wheel(s)
 
     def _anchored_slider(self, slider: QSlider, extra: QWidget | None = None):
         low, high = QLabel(tr("Low")), QLabel(tr("High"))

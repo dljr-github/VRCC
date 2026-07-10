@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from vrcc.core.hardware import device_names
 from vrcc.gui import model_prompts, settings_reset
+from vrcc.gui.widgets import no_wheel
 from vrcc.i18n import tr
 
 if TYPE_CHECKING:
@@ -59,7 +60,7 @@ def _device_choices():
 
 
 def _make_device_combo(dlg: "SettingsDialog", section) -> QComboBox:
-    combo = QComboBox()
+    combo = no_wheel(QComboBox())
     for label, device, index in _device_choices():
         combo.addItem(label, (device, index))
     current = (section.device, section.device_index)
@@ -98,7 +99,7 @@ def _make_compute_combo(dlg: "SettingsDialog", section) -> QComboBox:
             if ct not in seen:
                 seen.add(ct)
                 values.append(ct)
-    combo = QComboBox()
+    combo = no_wheel(QComboBox())
     combo.addItems(values)
     if section.compute_type not in values:
         combo.addItem(section.compute_type)
@@ -158,7 +159,7 @@ def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
     # Chatbox message format.
     fmt = QGroupBox(tr("Chatbox message"))
     fmt_form = QFormLayout(fmt)
-    overflow = QComboBox()
+    overflow = no_wheel(QComboBox())
     for label, value in (
         (tr("Send in parts"), "split"),
         (tr("Shorten to fit"), "truncate"),

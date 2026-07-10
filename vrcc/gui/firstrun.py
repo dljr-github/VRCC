@@ -29,7 +29,7 @@ from vrcc.gui.bridge import BusBridge
 from vrcc.gui.model_labels import fmt_size, mt_display_name, whisper_display_name
 from vrcc.gui.models_dialog import ModelsDialog
 from vrcc.gui.style import PALETTE, resolve_theme
-from vrcc.gui.widgets import SegmentedControl, arrow_svg, icon_label
+from vrcc.gui.widgets import SegmentedControl, arrow_svg, icon_label, no_wheel
 from vrcc.i18n import tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
@@ -145,7 +145,7 @@ class FirstRunWizard(QDialog):
         lang_row = QHBoxLayout()
         lang_row.setSpacing(8)
         lang_row.addWidget(QLabel(tr("You speak")))
-        self._source_combo = QComboBox()
+        self._source_combo = no_wheel(QComboBox())
         self._source_combo.addItems([_AUTO, *LANGUAGES.keys()])
         self._set_combo_text(self._source_combo, self._store.config.stt.source_language)
         self._source_combo.currentTextChanged.connect(self._on_source_changed)
@@ -155,7 +155,7 @@ class FirstRunWizard(QDialog):
             icon_label(arrow_svg(self._p["muted"]), 16, colors=self._p, fallback_text="->")
         )
         lang_row.addWidget(QLabel(tr("They read")))
-        self._target_combo = QComboBox()
+        self._target_combo = no_wheel(QComboBox())
         self._target_combo.addItems(list(LANGUAGES.keys()))
         existing_targets = self._store.config.translate.targets
         self._set_combo_text(

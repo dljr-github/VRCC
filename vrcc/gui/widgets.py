@@ -13,6 +13,14 @@ from vrcc.gui.icons import arrow_svg, mic_svg  # re-exported: icons.py is the si
 from vrcc.gui.style import PALETTE
 
 
+def no_wheel(widget: QWidget) -> QWidget:
+    """Make ``widget`` ignore the scroll wheel. Spin boxes and combo boxes
+    step their value when the pointer crosses them mid-scroll; ignoring the
+    event lets it bubble up to the enclosing scroll area instead."""
+    widget.wheelEvent = lambda event: event.ignore()
+    return widget
+
+
 def svg_pixmap(svg: str, size: int) -> QPixmap | None:
     """Render an inline SVG to a transparent pixmap; ``None`` if invalid."""
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
