@@ -171,7 +171,10 @@ def test_load_auto_device_prefers_cpu_over_available_cuda(model_dir, monkeypatch
 
     from vrcc.core import hardware
 
-    monkeypatch.setattr(hardware, "cuda_device_count", lambda: 1)
+    # can_run_cuda (not just a visible device) is what resolve() gates "auto"
+    # on; patching it keeps the test on the override branch regardless of the
+    # machine's real cuBLAS state or the process-wide probe cache.
+    monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
     monkeypatch.setattr(
         onnxruntime,
         "get_available_providers",

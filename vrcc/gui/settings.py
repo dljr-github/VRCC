@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from vrcc.core import languages
+from vrcc.core import hardware, languages
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.gui import model_fit, model_prompts, settings_advanced, settings_live, settings_pages
 from vrcc.gui.style import PALETTE, apply_font_scale, apply_theme_guarded, resolve_theme
@@ -165,7 +165,10 @@ class SettingsDialog(QDialog):
 
     def _confirm_model_fit(self, model_id: str, registry: dict, device: str) -> bool:
         """Whether a switch to ``model_id`` proceeds; ``False`` only when a
-        :func:`model_fit.vram_warning` prompt is declined (caller reverts)."""
+        :func:`model_fit.vram_warning` prompt is declined (caller reverts).
+        ``device`` is the resolved run device, not the raw config value: an
+        "auto" that will land on the processor must not draw a graphics-card
+        warning."""
         spec = registry.get(model_id)
         if spec is None:
             return True
@@ -217,7 +220,10 @@ class SettingsDialog(QDialog):
         new_id = self._model_combo.currentData()
         if new_id is None:
             return
-        if not self._confirm_model_fit(new_id, WHISPER_MODELS, self._cfg.stt.device):
+        device = hardware.resolved_device(
+            self._cfg.stt.device, self._cfg.stt.device_index, new_id
+        )
+        if not self._confirm_model_fit(new_id, WHISPER_MODELS, device):
             self._revert_combo(self._model_combo, self._voice_selected_id)
             return
         self._voice_selected_id = new_id
@@ -243,7 +249,10 @@ class SettingsDialog(QDialog):
         new_id = self._translate_model_combo.currentData()
         if new_id is None:
             return
-        if not self._confirm_model_fit(new_id, MT_MODELS, self._cfg.translate.device):
+        device = hardware.resolved_device(
+            self._cfg.translate.device, self._cfg.translate.device_index
+        )
+        if not self._confirm_model_fit(new_id, MT_MODELS, device):
             self._revert_combo(self._translate_model_combo, self._mt_selected_id)
             return
         self._mt_selected_id = new_id

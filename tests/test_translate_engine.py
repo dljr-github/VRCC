@@ -1,6 +1,7 @@
 """Tests for :mod:`vrcc.translate.engine` with a fake translator factory
 (no CTranslate2): ctor device/compute/threads, one translate_batch per N
-targets with per-family layout, kwargs merge, and the VRAM-OOM CPU fallback.
+targets with per-family layout, kwargs merge, and the CUDA-unusable CPU
+fallback.
 """
 
 from __future__ import annotations
@@ -84,30 +85,42 @@ def _collect(bus: EventBus) -> list[EngineStateChanged]:
     return events
 
 
+_OOM_TEXT = "CUDA failed with error out of memory (CUBLAS_STATUS_ALLOC_FAILED)"
+# Verbatim CTranslate2 dynamic-loader error from a CPU-only install driving a
+# visible GPU: cudart is statically linked, so the device enumerates, and the
+# load dies at model build or the first CUDA op instead.
+_MISSING_LIBRARY_TEXT = "Library cublas64_12.dll is not found or cannot be loaded"
+
+# Both shapes of CUDA-unusable RuntimeError must take the one-shot CPU fallback.
+_CUDA_UNUSABLE_TEXTS = [_OOM_TEXT, _MISSING_LIBRARY_TEXT]
+
+
 class _FakeTranslator:
     """Records translate_batch calls; echoes each source list as its hypothesis."""
 
-    def __init__(self, oom_on_translate: bool = False) -> None:
-        self.oom_on_translate = oom_on_translate
+    def __init__(self, fail_on_translate: bool = False, error_text: str = _OOM_TEXT) -> None:
+        self.fail_on_translate = fail_on_translate
+        self.error_text = error_text
         self.batch_calls: list[SimpleNamespace] = []
 
     def translate_batch(self, source, target_prefix=None, **kwargs):
         self.batch_calls.append(
             SimpleNamespace(source=source, target_prefix=target_prefix, kwargs=kwargs)
         )
-        if self.oom_on_translate:
-            raise RuntimeError("CUDA failed with error out of memory")
+        if self.fail_on_translate:
+            raise RuntimeError(self.error_text)
         return [SimpleNamespace(hypotheses=[list(s)], scores=[0.0]) for s in source]
 
 
 class _RecordingFactory:
     """Fake ``ctranslate2.Translator`` factory recording every ctor call."""
 
-    def __init__(self, ctor_oom_at=(), translate_oom_at=()) -> None:
+    def __init__(self, ctor_fail_at=(), translate_fail_at=(), error_text=_OOM_TEXT) -> None:
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeTranslator] = []
-        self._ctor_oom_at = set(ctor_oom_at)
-        self._translate_oom_at = set(translate_oom_at)
+        self._ctor_fail_at = set(ctor_fail_at)
+        self._translate_fail_at = set(translate_fail_at)
+        self._error_text = error_text
 
     def __call__(
         self,
@@ -132,11 +145,12 @@ class _RecordingFactory:
                 max_queued_batches=max_queued_batches,
             )
         )
-        if idx in self._ctor_oom_at:
-            raise RuntimeError(
-                "CUDA failed with error out of memory (CUBLAS_STATUS_ALLOC_FAILED)"
-            )
-        t = _FakeTranslator(oom_on_translate=idx in self._translate_oom_at)
+        if idx in self._ctor_fail_at:
+            raise RuntimeError(self._error_text)
+        t = _FakeTranslator(
+            fail_on_translate=idx in self._translate_fail_at,
+            error_text=self._error_text,
+        )
         self.built.append(t)
         return t
 
@@ -253,17 +267,20 @@ def test_translate_batch_kwargs_merge_extra_overrides_beam_size(model_dir: Path)
 
 
 # --------------------------------------------------------------------------
-# VRAM OOM fallback
+# CUDA-unusable fallback (VRAM OOM or missing runtime library)
 # --------------------------------------------------------------------------
 
-def test_oom_in_ctor_rebuilds_on_cpu_int8_with_fallback_event(model_dir: Path, monkeypatch):
+@pytest.mark.parametrize("error_text", _CUDA_UNUSABLE_TEXTS)
+def test_cuda_unusable_in_ctor_rebuilds_on_cpu_int8_with_fallback_event(
+    model_dir: Path, monkeypatch, error_text
+):
     monkeypatch.setattr(
         "vrcc.translate.engine.resolve",
         lambda *a: ("cuda", 0, "int8_float16"),
     )
     bus = EventBus()
     events = _collect(bus)
-    factory = _RecordingFactory(ctor_oom_at=[0])
+    factory = _RecordingFactory(ctor_fail_at=[0], error_text=error_text)
     cfg = _cfg(device="cuda", compute_type="int8_float16", inter_threads=3, intra_threads=5)
     eng = TranslateEngine(_spec("nllb"), model_dir, cfg, bus, translator_factory=factory)
 
@@ -285,14 +302,17 @@ def test_oom_in_ctor_rebuilds_on_cpu_int8_with_fallback_event(model_dir: Path, m
     assert out == [("Japanese", "hello world")]
 
 
-def test_oom_in_translate_rebuilds_cpu_and_retries_once(model_dir: Path, monkeypatch):
+@pytest.mark.parametrize("error_text", _CUDA_UNUSABLE_TEXTS)
+def test_cuda_unusable_in_translate_rebuilds_cpu_and_retries_once(
+    model_dir: Path, monkeypatch, error_text
+):
     monkeypatch.setattr(
         "vrcc.translate.engine.resolve",
         lambda *a: ("cuda", 0, "int8_float16"),
     )
     bus = EventBus()
     events = _collect(bus)
-    factory = _RecordingFactory(translate_oom_at=[0])  # first (cuda) translator OOMs
+    factory = _RecordingFactory(translate_fail_at=[0], error_text=error_text)
     cfg = _cfg(device="cuda", compute_type="int8_float16")
     eng = TranslateEngine(_spec("nllb"), model_dir, cfg, bus, translator_factory=factory)
     eng.load()
@@ -321,7 +341,7 @@ def test_second_oom_after_fallback_propagates(model_dir: Path, monkeypatch):
         lambda *a: ("cuda", 0, "int8_float16"),
     )
     # both the cuda translator AND the rebuilt cpu translator OOM on translate.
-    factory = _RecordingFactory(translate_oom_at=[0, 1])
+    factory = _RecordingFactory(translate_fail_at=[0, 1])
     cfg = _cfg(device="cuda", compute_type="int8_float16")
     eng = TranslateEngine(_spec("nllb"), model_dir, cfg, EventBus(), translator_factory=factory)
     eng.load()
@@ -331,7 +351,7 @@ def test_second_oom_after_fallback_propagates(model_dir: Path, monkeypatch):
     assert len(factory.calls) == 2  # rebuilt exactly once, no infinite retry
 
 
-def test_non_oom_error_in_ctor_publishes_failed_and_reraises(model_dir: Path):
+def test_unrecognized_error_in_ctor_publishes_failed_and_reraises(model_dir: Path):
     bus = EventBus()
     events = _collect(bus)
 

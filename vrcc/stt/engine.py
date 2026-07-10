@@ -1,8 +1,9 @@
-"""faster-whisper STT engine: model load, quality-gated transcription, VRAM fallback.
+"""faster-whisper STT engine: model load, quality-gated transcription, CPU fallback.
 
 Wraps one ``WhisperModel``, turning mono float32 audio into an :class:`SttResult`
 or ``None`` when it fails the quality gates. ``faster_whisper`` is imported lazily
-in :meth:`load`; a CUDA OOM falls back to CPU int8 once. Zero Qt.
+in :meth:`load`; an unusable CUDA (out of VRAM, or missing its runtime
+libraries) falls back to CPU int8 once. Zero Qt.
 """
 
 from __future__ import annotations
@@ -21,20 +22,29 @@ from vrcc.core.languages import get
 
 logger = logging.getLogger("vrcc.stt.engine")
 
-# Case-insensitive substrings marking a CUDA out-of-VRAM error (one-shot CPU fallback).
-_OOM_MARKERS = ("out of memory", "cublas_status_alloc_failed")
+# Case-insensitive substrings marking CUDA as unusable (one-shot CPU fallback):
+# out of VRAM, or missing runtime libraries. The last entry is the ctranslate2
+# dynamic-loader message ("Library cublas64_12.dll is not found or cannot be
+# loaded", same phrasing on Windows and Linux), raised at model build or the
+# first CUDA op when a CPU-only install drives a visible GPU.
+_CUDA_FALLBACK_MARKERS = (
+    "out of memory",
+    "cublas_status_alloc_failed",
+    "is not found or cannot be loaded",
+)
 
-# The device/compute the engine falls back to when the GPU is out of VRAM.
+# The device/compute the engine falls back to when CUDA is unusable.
 _CPU_FALLBACK = ("cpu", 0, "int8")
 
 # warm_up() transcribes this much silence (0.5s at faster-whisper's 16kHz).
 _WARM_UP_SAMPLES = 8000
 
 
-def _is_oom(exc: Exception) -> bool:
-    """True if ``exc`` reads like a CUDA out-of-VRAM error."""
+def _is_cuda_unusable(exc: Exception) -> bool:
+    """True if ``exc`` reads like CUDA being unusable: out of VRAM, or a
+    runtime library CTranslate2 needs is missing."""
     text = str(exc).lower()
-    return any(marker in text for marker in _OOM_MARKERS)
+    return any(marker in text for marker in _CUDA_FALLBACK_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -77,8 +87,9 @@ class SttEngine:
         """Build the ``WhisperModel`` and announce readiness.
 
         Publishes ``loading`` then ``ready`` (``detail="<device>:<compute>"``).
-        A VRAM-OOM building the GPU model triggers one ``fallback_cpu`` + rebuild
-        on ``("cpu", 0, "int8")``; any other error publishes ``failed`` and
+        An unusable CUDA (VRAM OOM, or a missing runtime library) while
+        building the GPU model triggers one ``fallback_cpu`` + rebuild on
+        ``("cpu", 0, "int8")``; any other error publishes ``failed`` and
         re-raises.
         """
         self._bus.publish(EngineStateChanged("stt", "loading"))
@@ -89,7 +100,7 @@ class SttEngine:
             try:
                 self._model = self._build_model(device, index, compute)
             except RuntimeError as exc:
-                if not _is_oom(exc):
+                if not _is_cuda_unusable(exc):
                     raise
                 self._fallback_to_cpu(str(exc))
 
@@ -160,8 +171,8 @@ class SttEngine:
         return model
 
     def _fallback_to_cpu(self, detail: str) -> None:
-        """Announce the VRAM fallback and rebuild the model on CPU int8."""
-        logger.warning("STT ran out of VRAM; falling back to CPU int8: %s", detail)
+        """Announce the CUDA fallback and rebuild the model on CPU int8."""
+        logger.warning("STT cannot use CUDA; falling back to CPU int8: %s", detail)
         self._bus.publish(EngineStateChanged("stt", "fallback_cpu", detail))
         self._model = self._build_model(*_CPU_FALLBACK)
 
@@ -188,7 +199,8 @@ class SttEngine:
         return kwargs
 
     def _run_transcribe(self, samples: np.ndarray, kwargs: dict):
-        """Call ``model.transcribe``, falling back to CPU int8 once on VRAM OOM.
+        """Call ``model.transcribe``, falling back to CPU int8 once when CUDA
+        is unusable.
 
         ``fallback_cpu`` is transient (like the load path), so a successful retry
         re-publishes ``("stt", "ready")`` with the new device; a failed retry
@@ -198,7 +210,7 @@ class SttEngine:
             segments_gen, info = self._model.transcribe(samples, **kwargs)
             return list(segments_gen), info
         except RuntimeError as exc:
-            if not _is_oom(exc):
+            if not _is_cuda_unusable(exc):
                 raise
             self._fallback_to_cpu(str(exc))
             segments_gen, info = self._model.transcribe(samples, **kwargs)

@@ -1,6 +1,6 @@
 """Tests for :mod:`vrcc.stt.engine` with a fake model factory (no
 faster-whisper): ctor device/compute/threads, transcribe kwargs, result
-text/logprob aggregation, quality gates, and the VRAM-OOM CPU fallback.
+text/logprob aggregation, quality gates, and the CUDA-unusable CPU fallback.
 """
 
 from __future__ import annotations
@@ -16,6 +16,15 @@ from vrcc.core.config import SttConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.stt.engine import SttEngine, SttResult
 
+_OOM_TEXT = "CUDA failed with error out of memory (CUBLAS_STATUS_ALLOC_FAILED)"
+# Verbatim CTranslate2 dynamic-loader error from a CPU-only install driving a
+# visible GPU: cudart is statically linked, so the device enumerates, and the
+# load dies at model build or the first CUDA op instead.
+_MISSING_LIBRARY_TEXT = "Library cublas64_12.dll is not found or cannot be loaded"
+
+# Both shapes of CUDA-unusable RuntimeError must take the one-shot CPU fallback.
+_CUDA_UNUSABLE_TEXTS = [_OOM_TEXT, _MISSING_LIBRARY_TEXT]
+
 
 def _seg(text: str, start: float, end: float, avg_logprob: float, no_speech_prob: float):
     return SimpleNamespace(
@@ -26,29 +35,37 @@ def _seg(text: str, start: float, end: float, avg_logprob: float, no_speech_prob
 class _FakeModel:
     """Records transcribe() calls; returns a canned (segments, info) pair."""
 
-    def __init__(self, segments=None, language="en", oom_on_transcribe: bool = False) -> None:
+    def __init__(
+        self, segments=None, language="en", fail_on_transcribe: bool = False,
+        error_text: str = _OOM_TEXT,
+    ) -> None:
         self.segments = segments if segments is not None else []
         self.language = language
-        self.oom_on_transcribe = oom_on_transcribe
+        self.fail_on_transcribe = fail_on_transcribe
+        self.error_text = error_text
         self.calls: list[SimpleNamespace] = []
 
     def transcribe(self, samples, **kwargs):
         self.calls.append(SimpleNamespace(samples=samples, kwargs=kwargs))
-        if self.oom_on_transcribe:
-            raise RuntimeError("CUDA failed with error out of memory")
+        if self.fail_on_transcribe:
+            raise RuntimeError(self.error_text)
         return iter(self.segments), SimpleNamespace(language=self.language)
 
 
 class _RecordingFactory:
     """Fake ``faster_whisper.WhisperModel`` factory recording every ctor call."""
 
-    def __init__(self, ctor_oom_at=(), transcribe_oom_at=(), segments=None, language="en") -> None:
+    def __init__(
+        self, ctor_fail_at=(), transcribe_fail_at=(), segments=None, language="en",
+        error_text=_OOM_TEXT,
+    ) -> None:
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeModel] = []
-        self._ctor_oom_at = set(ctor_oom_at)
-        self._transcribe_oom_at = set(transcribe_oom_at)
+        self._ctor_fail_at = set(ctor_fail_at)
+        self._transcribe_fail_at = set(transcribe_fail_at)
         self._segments = segments if segments is not None else []
         self._language = language
+        self._error_text = error_text
 
     def __call__(
         self,
@@ -73,14 +90,13 @@ class _RecordingFactory:
                 local_files_only=local_files_only,
             )
         )
-        if idx in self._ctor_oom_at:
-            raise RuntimeError(
-                "CUDA failed with error out of memory (CUBLAS_STATUS_ALLOC_FAILED)"
-            )
+        if idx in self._ctor_fail_at:
+            raise RuntimeError(self._error_text)
         m = _FakeModel(
             segments=list(self._segments),
             language=self._language,
-            oom_on_transcribe=idx in self._transcribe_oom_at,
+            fail_on_transcribe=idx in self._transcribe_fail_at,
+            error_text=self._error_text,
         )
         self.built.append(m)
         return m
@@ -296,14 +312,20 @@ def test_gate_drops_high_no_speech_prob():
 
 
 # --------------------------------------------------------------------------
-# VRAM OOM fallback
+# CUDA-unusable fallback (VRAM OOM or missing runtime library)
 # --------------------------------------------------------------------------
 
-def test_oom_in_ctor_rebuilds_on_cpu_int8_with_fallback_event(monkeypatch):
+@pytest.mark.parametrize("error_text", _CUDA_UNUSABLE_TEXTS)
+def test_cuda_unusable_in_ctor_rebuilds_on_cpu_int8_with_fallback_event(
+    monkeypatch, error_text
+):
     monkeypatch.setattr("vrcc.stt.engine.resolve", lambda *a: ("cuda", 0, "int8_float16"))
     bus = EventBus()
     events = _collect(bus)
-    factory = _RecordingFactory(ctor_oom_at=[0], segments=[_seg("hi", 0.0, 1.0, -0.1, 0.05)])
+    factory = _RecordingFactory(
+        ctor_fail_at=[0], segments=[_seg("hi", 0.0, 1.0, -0.1, 0.05)],
+        error_text=error_text,
+    )
     cfg = _cfg(device="cuda", compute_type="int8_float16", cpu_threads=4, num_workers=2)
     eng = SttEngine(cfg, MODEL_DIR, bus, model_factory=factory)
 
@@ -325,12 +347,16 @@ def test_oom_in_ctor_rebuilds_on_cpu_int8_with_fallback_event(monkeypatch):
     assert result is not None
 
 
-def test_oom_in_transcribe_rebuilds_cpu_and_retries_once(monkeypatch):
+@pytest.mark.parametrize("error_text", _CUDA_UNUSABLE_TEXTS)
+def test_cuda_unusable_in_transcribe_rebuilds_cpu_and_retries_once(
+    monkeypatch, error_text
+):
     monkeypatch.setattr("vrcc.stt.engine.resolve", lambda *a: ("cuda", 0, "int8_float16"))
     bus = EventBus()
     events = _collect(bus)
     factory = _RecordingFactory(
-        transcribe_oom_at=[0], segments=[_seg("hi", 0.0, 1.0, -0.1, 0.05)]
+        transcribe_fail_at=[0], segments=[_seg("hi", 0.0, 1.0, -0.1, 0.05)],
+        error_text=error_text,
     )
     cfg = _cfg(device="cuda", compute_type="int8_float16")
     eng = SttEngine(cfg, MODEL_DIR, bus, model_factory=factory)
@@ -354,7 +380,7 @@ def test_oom_in_transcribe_rebuilds_cpu_and_retries_once(monkeypatch):
 
 def test_second_oom_after_fallback_propagates(monkeypatch):
     monkeypatch.setattr("vrcc.stt.engine.resolve", lambda *a: ("cuda", 0, "int8_float16"))
-    factory = _RecordingFactory(transcribe_oom_at=[0, 1])
+    factory = _RecordingFactory(transcribe_fail_at=[0, 1])
     cfg = _cfg(device="cuda", compute_type="int8_float16")
     eng = SttEngine(cfg, MODEL_DIR, EventBus(), model_factory=factory)
     eng.load()
@@ -364,7 +390,7 @@ def test_second_oom_after_fallback_propagates(monkeypatch):
     assert len(factory.calls) == 2  # rebuilt exactly once, no infinite retry
 
 
-def test_non_oom_error_in_ctor_publishes_failed_and_reraises():
+def test_unrecognized_error_in_ctor_publishes_failed_and_reraises():
     bus = EventBus()
     events = _collect(bus)
 

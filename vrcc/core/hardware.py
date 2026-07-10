@@ -2,12 +2,16 @@
 
 Never imports torch. CUDA discovery via `ctranslate2`; richer details via
 optional `pynvml` (functions degrade rather than raise when it's absent).
+A visible device is not a usable one: CT2 links cudart statically, so it
+enumerates GPUs from the display driver even in an install that ships no
+cuBLAS. `can_run_cuda()` answers the usability question.
 `setup_cuda_dlls()` must run before the first CT2 GPU call. Zero Qt.
 """
 
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import importlib.util
 import io
 import logging
@@ -154,6 +158,95 @@ def cuda_device_count() -> int:
         return 0
 
 
+# cuBLAS names the probe tries, one per CUDA major CT2 may link against.
+if sys.platform == "win32":
+    _CUBLAS_NAMES = ("cublas64_12.dll", "cublas64_13.dll")
+else:
+    _CUBLAS_NAMES = ("libcublas.so.12", "libcublas.so.13")
+
+_cublas_lock = threading.Lock()
+_cublas_loadable = False
+_cublas_probe_attempted = False
+
+
+def _cublas_load_attempts(name: str) -> list:
+    """Loader calls for ``name`` covering every place CTranslate2's own
+    loader looks. On Windows the default `WinDLL` search is the secure one
+    (System32 plus the `os.add_dll_directory` dirs `setup_cuda_dlls()`
+    registered for the nvidia wheels) and never consults PATH, while
+    ctranslate2.dll resolves cuBLAS with the legacy LoadLibrary search
+    (PATH included; `winmode=0` here) and then falls back to
+    `%CUDA_PATH%\\bin`. Probing only the secure search would read a
+    system-wide CUDA toolkit as unusable."""
+    if sys.platform != "win32":
+        return [lambda: ctypes.CDLL(name)]
+    attempts = [
+        lambda: ctypes.WinDLL(name),
+        lambda: ctypes.WinDLL(name, winmode=0),
+    ]
+    cuda_path = os.environ.get("CUDA_PATH")
+    if cuda_path:
+        attempts.append(
+            lambda: ctypes.WinDLL(os.path.join(cuda_path, "bin", name))
+        )
+    return attempts
+
+
+def _probe_cublas() -> bool:
+    """Whether one of the cuBLAS libraries loads from anywhere CT2's loader
+    would find it (see `_cublas_load_attempts`)."""
+    for name in _CUBLAS_NAMES:
+        for attempt in _cublas_load_attempts(name):
+            try:
+                attempt()
+            except OSError:
+                continue
+            return True
+    return False
+
+
+def _cublas_available() -> bool:
+    """Cached `_probe_cublas()` (same once-per-process pattern as `_pynvml`).
+    The first caller decides the session's answer, so this must not run
+    before `setup_cuda_dlls()` has registered the nvidia wheel DLL dirs
+    (app startup does, ahead of any tier or resolve call); probing earlier
+    would pin a wheels-only install to CPU for the whole process. A failed
+    probe logs once at info level naming what it tried, because it silently
+    turns every recommendation and `"auto"` resolution to CPU and a support
+    question starts from that line. Never raises."""
+    global _cublas_loadable, _cublas_probe_attempted
+    with _cublas_lock:
+        if _cublas_probe_attempted:
+            return _cublas_loadable
+        _cublas_probe_attempted = True
+        try:
+            _cublas_loadable = _probe_cublas()
+        except Exception:
+            logger.debug("cuBLAS probe raised", exc_info=True)
+            _cublas_loadable = False
+        if not _cublas_loadable:
+            logger.info(
+                "cuBLAS is not loadable (tried %s); CUDA devices are "
+                "treated as unusable and everything runs on CPU",
+                ", ".join(_CUBLAS_NAMES),
+            )
+        return _cublas_loadable
+
+
+def can_run_cuda() -> bool:
+    """Whether CUDA is usable, not merely visible.
+
+    CT2 links cudart statically, so `cuda_device_count()` reports devices
+    from the display driver even in a CPU-only install that ships no cuBLAS;
+    a model built there dies at the first CUDA op with a missing-library
+    RuntimeError. Usable means a device is visible AND the cuBLAS runtime
+    CT2 needs is loadable. Skips the probe when no device is visible.
+    Never raises."""
+    if cuda_device_count() <= 0:
+        return False
+    return _cublas_available()
+
+
 def device_names() -> list[str]:
     """Human-readable GPU names for every visible CUDA device, via
     `pynvml` if it's importable and NVML initializes; otherwise a generic
@@ -254,13 +347,18 @@ def resolve(
 ) -> tuple[str, int, str]:
     """Resolve config device/compute settings into concrete values.
 
-    `"auto"` device -> `"cuda"` if a device is visible else `"cpu"`; a failed
+    `"auto"` device -> `"cuda"` only when `can_run_cuda()` holds (a visible
+    device without a loadable cuBLAS runs on CPU), else `"cpu"`; a failed
     driver-floor check downgrades any `"cuda"` (auto or pinned) to `"cpu"`.
-    `"auto"` compute -> `best_compute_type()`; other values and `device_index`
-    pass through unchanged.
+    An explicit `"cuda"` is deliberately not gated on `can_run_cuda()`: the
+    engines fall back to CPU once, with a visible fallback_cpu event, when
+    CUDA turns out unusable, which beats silently overriding a pinned
+    choice; and an install whose system-wide CUDA runtime the probe can
+    load passes anyway. `"auto"` compute -> `best_compute_type()`; other
+    values and `device_index` pass through unchanged.
     """
     if device_cfg == "auto":
-        device = "cuda" if cuda_device_count() > 0 else "cpu"
+        device = "cuda" if can_run_cuda() else "cpu"
     else:
         device = device_cfg
 
@@ -289,15 +387,17 @@ def resolved_device(
 ) -> str:
     """Concrete run device (`"cuda"`/`"cpu"`) for a config device choice.
 
-    Mirrors :func:`resolve`'s device decision (`"auto"` -> `"cuda"` when a CUDA
-    device is visible else `"cpu"`; a failed driver-floor check downgrades a
-    `"cuda"` to `"cpu"`), then applies the onnx-asr override: under `"auto"` the
-    onnx-asr voice models (Parakeet) resolve to `"cpu"` even with a GPU present,
-    because their int8 graphs run about as fast there and leave VRAM for VRChat
-    (see vrcc.stt.onnx_asr.load). An explicit `"cuda"` stays `"cuda"`.
+    Mirrors :func:`resolve`'s device decision (`"auto"` -> `"cuda"` only when
+    :func:`can_run_cuda` holds, else `"cpu"`; a failed driver-floor check
+    downgrades a `"cuda"` to `"cpu"`; an explicit `"cuda"` is not gated on
+    the capability probe, for the reasons on :func:`resolve`), then applies
+    the onnx-asr override: under `"auto"` the onnx-asr voice models (Parakeet)
+    resolve to `"cpu"` even with a usable GPU, because their int8 graphs run
+    about as fast there and leave VRAM for VRChat (see vrcc.stt.onnx_asr.load).
+    An explicit `"cuda"` stays `"cuda"`.
     """
     if device_cfg == "auto":
-        device = "cuda" if cuda_device_count() > 0 else "cpu"
+        device = "cuda" if can_run_cuda() else "cpu"
     else:
         device = device_cfg
     if device == "cuda" and _driver_floor_failed:

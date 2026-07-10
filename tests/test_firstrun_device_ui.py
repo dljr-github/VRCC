@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 from tests.test_firstrun_ui import _FakeDownloadManager, _bridge, _store
-from vrcc.core import recommend
+from vrcc.core import hardware, recommend
 from vrcc.stt.registry import WHISPER_MODELS
 
 
@@ -26,12 +26,16 @@ def qapp():
     return app
 
 
-def _wizard(tmp_path, monkeypatch, tier="gpu_high", default_choice="cpu"):
+def _wizard(
+    tmp_path, monkeypatch, tier="gpu_high", default_choice="cpu", device_count=0
+):
     from vrcc.gui.firstrun import FirstRunWizard
 
     monkeypatch.setattr(recommend, "detect_tier", lambda: tier)
     # Pin the VRAM-driven default so tests are deterministic on any machine.
     monkeypatch.setattr(recommend, "default_device_choice", lambda: default_choice)
+    # The cpu-tier wording depends on whether a CUDA device is visible; pin it.
+    monkeypatch.setattr(hardware, "cuda_device_count", lambda: device_count)
     store = _store(tmp_path)
     dm = _FakeDownloadManager(tmp_path / "models")
     bridge = _bridge()
@@ -101,6 +105,50 @@ def test_firstrun_gpu_segment_disabled_when_no_gpu(qapp, tmp_path, monkeypatch):
         assert gpu_btn.toolTip() == "No graphics card detected."
         assert wiz._device_choice._buttons["CPU"].isEnabled()
         assert wiz._device_choice.value() == "CPU"
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_firstrun_cpu_tier_with_visible_card_names_the_capability_gap(
+    qapp, tmp_path, monkeypatch
+):
+    """detect_tier returns "cpu" for a visible card this install cannot drive
+    (no loadable cuBLAS), so the wizard must not claim the card is absent. The
+    GPU segment still stays disabled: the wizard only offers what the
+    recommender stands behind, and an expert can pin cuda in Settings."""
+    wiz, _store_, _dm, bridge = _wizard(
+        tmp_path, monkeypatch, tier="cpu", device_count=1
+    )
+    try:
+        gpu_btn = wiz._device_choice._buttons["GPU"]
+        assert not gpu_btn.isEnabled()
+        assert gpu_btn.toolTip() == (
+            "This version of VRCC cannot use your graphics card. "
+            "The CUDA download can use it."
+        )
+        assert (
+            "Detected: graphics card that this version cannot use, "
+            "using your processor"
+        ) in wiz._summary_label.text()
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_firstrun_cpu_tier_without_card_keeps_absence_wording(
+    qapp, tmp_path, monkeypatch
+):
+    wiz, _store_, _dm, bridge = _wizard(
+        tmp_path, monkeypatch, tier="cpu", device_count=0
+    )
+    try:
+        assert (
+            wiz._device_choice._buttons["GPU"].toolTip()
+            == "No graphics card detected."
+        )
+        assert (
+            "Detected: no graphics card, using your processor"
+            in wiz._summary_label.text()
+        )
     finally:
         _teardown(wiz, bridge)
 
@@ -245,6 +293,7 @@ def _wizard_with_language(tmp_path, monkeypatch, tier, language, default_choice=
 
     monkeypatch.setattr(recommend, "detect_tier", lambda: tier)
     monkeypatch.setattr(recommend, "default_device_choice", lambda: default_choice)
+    monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
     store = _store(tmp_path)
     store.config.stt.source_language = language
     dm = _FakeDownloadManager(tmp_path / "models")
