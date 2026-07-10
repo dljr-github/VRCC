@@ -24,7 +24,11 @@ Notes:
 import glob
 import os
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    copy_metadata,
+)
 
 # The repo root, so the analysis can find the ``vrcc`` package as a plain
 # source directory. (An editable ``pip install -e .`` uses a PEP 660 import
@@ -36,6 +40,10 @@ datas = collect_data_files("faster_whisper")
 # onnx-asr ships its preprocessor ONNX graphs (nemo128 mel features etc.) as
 # package data; the Parakeet engine needs them at runtime.
 datas += collect_data_files("onnx_asr")
+# onnx_asr reads its own version from dist metadata at import time, so the
+# frozen app must ship the dist-info or the Parakeet engine load raises
+# PackageNotFoundError.
+datas += copy_metadata("onnx-asr")
 # UI translation catalogs: vrcc.i18n loads them from the directory of its own
 # __file__, which in a frozen build is _internal/vrcc/i18n/ -- exactly where
 # this lands them.
@@ -64,7 +72,7 @@ hiddenimports = [
     # Imported lazily by vrcc.core.hardware / vrcc.gui.firstrun for VRAM /
     # compute-capability / driver-version queries (nvidia-ml-py).
     "pynvml",
-    # Imported lazily by vrcc.stt.parakeet at engine load time.
+    # Imported lazily by vrcc.stt.onnx_asr at engine load time.
     "onnx_asr",
 ]
 
