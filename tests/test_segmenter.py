@@ -355,3 +355,88 @@ class TestDiscardOnResume:
         assert specs[0].utterance_id == 1
         assert specs[1].utterance_id == 1
         assert final.utterance_id == 1
+
+
+# Quick-finalize config shared by the abort tests: no speculative, 2-frame
+# pre-roll and finalize, so a post-abort utterance completes in 3 frames.
+_ABORT_CFG = dict(
+    pre_roll_ms=64,                 # 2 frames
+    speculative_silence_ms=64_000,  # disabled
+    finalize_silence_ms=64,         # 2 frames
+    min_utterance_ms=32,
+)
+
+
+class TestAbort:
+    def test_abort_with_pending_speculative_returns_discard(self):
+        # Speech, then 11 silence frames -> speculative in flight. Abort must
+        # return exactly the SegDiscard that resolves it, leave the segmenter
+        # idle, and hand the next utterance a fresh id.
+        cfg = VadConfig()
+        vad = ScriptedVad([0.9] * 5 + [0.1] * 11 + [0.9])
+        seg = Segmenter(cfg, vad)
+        specs = []
+        for _ in range(16):
+            specs.extend(_by_type(seg.process(_frame()), SegSpeculative))
+        assert len(specs) == 1  # the speculative is pending
+
+        events = seg.abort()
+        assert events == [SegDiscard(utterance_id=1)]
+        assert seg.active is False
+
+        starts = _by_type(seg.process(_frame()), SegSpeechStart)
+        assert len(starts) == 1
+        assert starts[0].utterance_id == 2
+
+    def test_abort_before_speculative_returns_nothing_and_drops_buffer(self):
+        # No speculative in flight -> nothing to resolve, so abort returns [].
+        # The buffered pre-abort audio (fill 0.25) must be gone: a fresh
+        # utterance finalized afterwards carries only post-abort fill (0.5).
+        cfg = VadConfig(**_ABORT_CFG)
+        vad = ScriptedVad([0.9] * 3 + [0.9, 0.2, 0.2])
+        seg = Segmenter(cfg, vad)
+        for _ in range(3):
+            seg.process(_frame(0.25))
+        assert seg.active is True
+
+        assert seg.abort() == []
+        assert seg.active is False
+
+        final = None
+        for _ in range(3):
+            for e in _by_type(seg.process(_frame(0.5)), SegFinal):
+                final = e
+        assert final is not None
+        assert not np.any(final.samples == np.float32(0.25))
+        assert np.all(final.samples == np.float32(0.5))
+
+    def test_abort_clears_preroll(self):
+        # Idle (non-speech) frames only fill the pre-roll ring; abort must
+        # empty it so the next utterance is not seeded with pre-abort audio.
+        cfg = VadConfig(**_ABORT_CFG)
+        vad = ScriptedVad([0.1, 0.1] + [0.9, 0.2, 0.2])
+        seg = Segmenter(cfg, vad)
+        for _ in range(2):
+            seg.process(_frame(0.25))
+
+        assert seg.abort() == []
+
+        final = None
+        for _ in range(3):
+            for e in _by_type(seg.process(_frame(0.5)), SegFinal):
+                final = e
+        assert final is not None
+        assert not np.any(final.samples == np.float32(0.25))
+        assert final.samples.shape[0] == 3 * FRAME
+
+    def test_abort_while_idle_is_harmless(self):
+        cfg = VadConfig(**_ABORT_CFG)
+        vad = ScriptedVad([0.9, 0.2, 0.2])
+        seg = Segmenter(cfg, vad)
+
+        assert seg.abort() == []
+
+        finals = []
+        for _ in range(3):
+            finals.extend(_by_type(seg.process(_frame()), SegFinal))
+        assert len(finals) == 1

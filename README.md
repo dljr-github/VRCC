@@ -81,10 +81,12 @@ speed.
 4. **Typed messages:** the text box at the bottom of the main window sends
    typed text through the same translate → chatbox path (useful when you'd
    rather not speak).
-5. **Mute sync:** when enabled, muting yourself in VRChat pauses
-   captioning (configurable to ignore or invert). This uses VRChat's
-   OSCQuery discovery and works **only when VRChat runs on the same PC**
-   (localhost); captioning itself works regardless.
+5. **Mute sync:** when enabled, muting yourself in VRChat makes VRCC stop
+   listening entirely (configurable to ignore or invert). Speech made
+   while muted is never captured, so unmuting mid-sentence captions only
+   what you say after the unmute. This uses VRChat's OSCQuery discovery
+   and works **only when VRChat runs on the same PC** (localhost);
+   captioning itself works regardless.
 
 ![Main window captioning with Japanese and Spanish translations](assets/images/main-window.png)
 

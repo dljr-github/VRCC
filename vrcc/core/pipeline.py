@@ -2,8 +2,9 @@
 
 Owns four run-bound worker threads (audio callback, segmenter, STT, MT);
 composes the speculative-reuse/typing state (pipeline_state) and delegates
-per-job work to pipeline_jobs. Zero Qt so any layer can drive it; the
-load-bearing thread/lock contracts are noted inline at each site.
+per-frame work to pipeline_frames and per-job work to pipeline_jobs. Zero Qt
+so any layer can drive it; the load-bearing thread/lock contracts are noted
+inline at each site.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import numpy as np
 from vrcc.audio.segmenter import (
     SegDiscard, SegFinal, SegLevel, SegSpeculative, SegSpeechStart,
 )
-from vrcc.core import energy_gate, languages, pipeline_jobs
+from vrcc.core import languages, pipeline_frames, pipeline_jobs
 from vrcc.core.events import AppError, MicLevel, PhraseRecognized, SpeechStarted
 from vrcc.core.pipeline_jobs import _NO_ENGINE, _MtJob
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
@@ -72,9 +73,14 @@ class Pipeline:
         self._chatbox = chatbox
         self._mute = mute
 
-        # Master captioning toggle; gates STT enqueue like a muted mute-sync.
-        # Starts off: the user opts in via the main-window toggle each launch.
+        # Master captioning toggle; joins the segmenter worker's listen gate
+        # (frames are dropped, nothing buffered) and gates STT enqueue like a
+        # muted mute-sync. Starts off: the user opts in via the main-window
+        # toggle each launch.
         self._captioning = False
+        # Transition memory for the segmenter worker's listen gate, owned by
+        # that thread.
+        self._frame_gated = False
 
         # _stt_lock/_mt_lock guard engine calls AND swaps, so an engine is
         # never unloaded mid-call; _swapping pauses new-caption creation during
@@ -132,6 +138,7 @@ class Pipeline:
             self._spec.reset()
             self._typing.reset()
             self._segmenter.reset()
+            self._frame_gated = False
             self._dropped_frames = 0
 
             # Each worker is bound to THIS run's queue + stop event via thread
@@ -196,7 +203,8 @@ class Pipeline:
         return self._captioning
 
     def set_captioning(self, enabled: bool) -> None:
-        """Master captioning toggle; when off, STT jobs aren't created."""
+        """Master captioning toggle; when off, the segmenter worker drops
+        frames (nothing is buffered) and STT jobs aren't created."""
         self._captioning = bool(enabled)
 
     # -- live model swap ---------------------------------------------------
@@ -230,9 +238,10 @@ class Pipeline:
             self._mt = engine
 
     def set_mute(self, mute: "MuteSync | None") -> None:
-        """Install a mute-sync coordinator (``None`` removes it). Read by the
-        STT worker between utterances; the attribute write is atomic and a
-        swap mid-utterance only decides the next one."""
+        """Install a mute-sync coordinator (``None`` removes it). The
+        segmenter worker reads it per frame through the listen gate; the
+        attribute write is atomic and a flip mid-frame takes effect on the
+        next frame."""
         self._mute = mute
 
     def restart_source(self, new_source: "AudioSource") -> bool:
@@ -326,28 +335,7 @@ class Pipeline:
                 return
             if stop.is_set():
                 continue  # stopping/abandoned: drain to the sentinel
-            if self._energy_gated(frame):
-                continue  # near-silent frame: meter published, VAD skipped
-            try:
-                events = self._segmenter.process(frame)
-            except Exception as exc:  # noqa: BLE001 -- must not kill the thread
-                logger.exception("segmenter.process raised; dropping frame")
-                self._bus.publish(AppError("SEGMENTER_FAILED", str(exc)))
-                continue
-            for event in events:
-                self._on_seg_event(event)
-
-    def _energy_gated(self, frame: np.ndarray) -> bool:
-        """Cheap RMS pre-gate (numeric decision in :mod:`vrcc.core.energy_gate`):
-        a gated near-silent frame still publishes its :class:`MicLevel` here so
-        the meter keeps moving, but skips the ~1 ms ONNX VAD."""
-        level = energy_gate.gated_level(
-            frame, self._config.audio, self._segmenter.active
-        )
-        if level is None:
-            return False
-        self._bus.publish(MicLevel(rms=level, vad_prob=0.0))
-        return True
+            pipeline_frames.process_frame(self, frame)
 
     def _on_seg_event(self, event: object) -> None:
         """Dispatch one segmenter event. **Documented test seam** -- tests
@@ -373,7 +361,8 @@ class Pipeline:
 
     def mute_gated(self) -> bool:
         """Whether mute sync is currently holding captions back (GUI-polled
-        so the capture label can name the reason for the pause)."""
+        so the capture label can name the reason for the pause). The segmenter
+        worker's listen gate also reads it per frame."""
         mute = self._mute
         return mute is not None and not mute.should_caption()
 
