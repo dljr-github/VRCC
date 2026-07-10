@@ -105,6 +105,10 @@ def build_qss(theme: str, scale: float = 1.0) -> str:
         background: {p['surface']}; border-color: {p['border']}; }}
     QComboBox::drop-down {{ border: none; background: transparent; width: 26px; }}
     QComboBox::down-arrow {{ image: url("{icon('chevron-down.svg')}"); width: 12px; height: 12px; }}
+    /* The QWidget color above overrides every palette color group, Disabled
+       included, so without an explicit item:disabled color the language and
+       model greying is invisible in combo popups. */
+    QComboBox::item:disabled {{ color: {p['muted']}; }}
     QSpinBox::up-button, QDoubleSpinBox::up-button,
     QSpinBox::down-button, QDoubleSpinBox::down-button {{
         subcontrol-origin: border; width: 18px; border: none; background: transparent; }}
