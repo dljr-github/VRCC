@@ -7,6 +7,7 @@ Imports from ``settings`` are type-only (settings imports this, never reverse).
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -32,6 +33,8 @@ from vrcc.stt.registry import WHISPER_MODELS
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
+
+logger = logging.getLogger("vrcc.gui.settings_pages")
 
 _AUTO = "auto"
 
@@ -93,12 +96,40 @@ def _add_deleted_placeholder_if_needed(combo: QComboBox, specs, configured_id) -
         combo.model().item(0).setEnabled(False)
 
 
+def _make_input_device_combo(dlg: "SettingsDialog") -> QComboBox:
+    """The microphone picker on the Simple page."""
+    combo = QComboBox()
+    combo.addItem(tr("Auto (system default)"), _AUTO)
+    try:
+        from vrcc.audio.devices import list_input_devices
+
+        for _index, name in list_input_devices():
+            combo.addItem(name, name)
+    except Exception:  # noqa: BLE001
+        logger.debug("could not list input devices", exc_info=True)
+    cur = dlg._cfg.audio.device
+    idx = combo.findData(cur)
+    if idx < 0:
+        combo.addItem(cur, cur)
+        idx = combo.findData(cur)
+    combo.setCurrentIndex(idx)
+    combo.setToolTip(tr("Which microphone to listen to."))
+
+    def on_device(_i):
+        if dlg._loading:
+            return
+        dlg._cfg.audio.device = combo.currentData()
+        dlg._changed()
+    combo.currentIndexChanged.connect(on_device)
+    return combo
+
+
 def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     page = QWidget()
     form = QFormLayout(page)
     form.setContentsMargins(24, 16, 24, 16)
 
-    form.addRow(tr("Microphone"), dlg._make_input_device_combo())
+    form.addRow(tr("Microphone"), _make_input_device_combo(dlg))
 
     dlg._sensitivity = QSlider(Qt.Orientation.Horizontal)
     dlg._sensitivity.setRange(30, 60)
@@ -224,7 +255,9 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     for spec in voice_specs:
         i = dlg._model_combo.count()
         dlg._model_combo.addItem(whisper_display_name(spec.id), spec.id)
-        if spec.languages is not None:
+        # onnx-asr models join even without a language restriction: the
+        # auto-plus-translation greying keys on the backend, not the set.
+        if spec.languages is not None or spec.backend == "onnx_asr":
             dlg._limited_model_indices.append((i, spec))
     mi = dlg._model_combo.findData(dlg._cfg.stt.model)
     if mi >= 0:
@@ -343,7 +376,10 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     form.addRow(adv)
 
     dlg._update_language_limited_items()
-    model_prompts.grey_unsupported_languages(dlg._source_combo, dlg._cfg.stt.model)
+    model_prompts.grey_unsupported_languages(
+        dlg._source_combo, dlg._cfg.stt.model,
+        translating=dlg._cfg.translate.enabled,
+    )
     return page
 
 

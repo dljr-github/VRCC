@@ -212,4 +212,6 @@ def _resync_all_widgets(dlg: "SettingsDialog") -> None:
     source = getattr(dlg, "_source_combo", None)
     if source is not None:
         dlg._update_language_limited_items()
-        model_prompts.grey_unsupported_languages(source, cfg.stt.model)
+        model_prompts.grey_unsupported_languages(
+            source, cfg.stt.model, translating=cfg.translate.enabled
+        )

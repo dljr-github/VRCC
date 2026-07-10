@@ -291,6 +291,8 @@
   "usually takes a few seconds": "通常只需要幾秒鐘",
   "voice model": "語音模型",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name}無法告訴翻譯模型它聽到的是哪種語言。要切換至{other}嗎？",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name}無法告訴翻譯模型你說的是哪種語言。請選擇你的語言，或關閉翻譯。",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name}無法轉寫這種語言。請先選擇其他語音模型。",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name}無法轉寫{language}。要切換至{other}嗎？",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name}無法繼續在 GPU 上執行，已切換至 CPU（較慢）。",

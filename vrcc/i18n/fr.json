@@ -291,6 +291,8 @@
   "usually takes a few seconds": "prend généralement quelques secondes",
   "voice model": "modèle vocal",
   "{mb} MB": "{mb} Mo",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name} ne peut pas indiquer au modèle de traduction quelle langue il a entendue. Passer à {other} ?",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name} ne peut pas indiquer au modèle de traduction quelle langue tu parles. Choisis ta langue, ou désactive la traduction.",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name} ne peut pas transcrire cette langue. Choisis d'abord un autre modèle vocal.",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name} ne peut pas transcrire {language}. Passer à {other} ?",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "Le {name} n'a pas pu rester sur le GPU. Passage sur CPU (plus lent).",

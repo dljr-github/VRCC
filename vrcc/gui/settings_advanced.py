@@ -28,11 +28,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from vrcc.gui import settings_reset
+from vrcc.core.hardware import device_names
+from vrcc.gui import model_prompts, settings_reset
 from vrcc.i18n import tr
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
+
+_AUTO = "auto"
 
 
 def _auto_label(dlg: "SettingsDialog") -> QLabel:
@@ -42,6 +45,66 @@ def _auto_label(dlg: "SettingsDialog") -> QLabel:
     label.setWordWrap(True)
     label.setVisible(False)
     return label
+
+
+def _device_choices():
+    choices = [(tr("Auto"), _AUTO, 0), (tr("CPU"), "cpu", 0)]
+    try:
+        names = device_names()
+    except Exception:  # noqa: BLE001
+        names = []
+    for i, name in enumerate(names):
+        choices.append((tr("GPU {index}: {name}", index=i, name=name), "cuda", i))
+    return choices
+
+
+def _make_device_combo(dlg: "SettingsDialog", section) -> QComboBox:
+    combo = QComboBox()
+    for label, device, index in _device_choices():
+        combo.addItem(label, (device, index))
+    current = (section.device, section.device_index)
+    for i in range(combo.count()):
+        if combo.itemData(i) == current:
+            combo.setCurrentIndex(i)
+            break
+
+    def on_change(_i):
+        if dlg._loading:
+            return
+        device, index = combo.currentData()
+        section.device = device
+        section.device_index = index
+        if device == "cuda" and section is dlg._cfg.stt:
+            model_prompts.maybe_prefer_cpu(dlg, dlg._cfg.stt.model)
+        dlg._changed()
+    combo.currentIndexChanged.connect(on_change)
+    return combo
+
+
+def _supported_compute_types(device: str, index: int):
+    try:
+        import ctranslate2
+
+        return sorted(ctranslate2.get_supported_compute_types(device, index))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _make_compute_combo(dlg: "SettingsDialog", section) -> QComboBox:
+    values = [_AUTO]
+    seen = {_AUTO}
+    for device, index in (("cpu", 0), ("cuda", 0)):
+        for ct in _supported_compute_types(device, index):
+            if ct not in seen:
+                seen.add(ct)
+                values.append(ct)
+    combo = QComboBox()
+    combo.addItems(values)
+    if section.compute_type not in values:
+        combo.addItem(section.compute_type)
+    combo.setCurrentText(section.compute_type)
+    dlg._bind_text_combo(combo, section, "compute_type")
+    return combo
 
 
 def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
@@ -191,7 +254,7 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     outer.addLayout(form)
 
     # Run on GPU/CPU + processing precision.
-    dlg._stt_device_combo = dlg._make_device_combo(dlg._cfg.stt)
+    dlg._stt_device_combo = _make_device_combo(dlg, dlg._cfg.stt)
     dlg._stt_device_combo.setToolTip(
         tr("Use your graphics card (faster) or the processor.")
     )
@@ -202,13 +265,13 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         lambda _i: settings_reset.refresh_after_stt_device(dlg)
     )
 
-    dlg._stt_compute_combo = dlg._make_compute_combo(dlg._cfg.stt)
+    dlg._stt_compute_combo = _make_compute_combo(dlg, dlg._cfg.stt)
     dlg._stt_compute_combo.setToolTip(
         tr("Lower precision is faster and uses less memory.")
     )
     form.addRow(tr("Voice processing precision"), dlg._stt_compute_combo)
 
-    dlg._mt_device_combo = dlg._make_device_combo(dlg._cfg.translate)
+    dlg._mt_device_combo = _make_device_combo(dlg, dlg._cfg.translate)
     dlg._mt_device_combo.setToolTip(
         tr("Use your graphics card (faster) or the processor.")
     )
@@ -219,7 +282,7 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         lambda _i: settings_reset.update_device_auto_labels(dlg)
     )
 
-    dlg._mt_compute_combo = dlg._make_compute_combo(dlg._cfg.translate)
+    dlg._mt_compute_combo = _make_compute_combo(dlg, dlg._cfg.translate)
     dlg._mt_compute_combo.setToolTip(
         tr("Lower precision is faster and uses less memory.")
     )

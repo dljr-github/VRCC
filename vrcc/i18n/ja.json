@@ -291,6 +291,8 @@
   "usually takes a few seconds": "通常は数秒かかります",
   "voice model": "音声モデル",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name}はどの言語を聞き取ったかを翻訳モデルに伝えられません。{other}に切り替えますか？",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name}はどの言語を話しているかを翻訳モデルに伝えられません。言語を選ぶか、翻訳をオフにしてください。",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name}はこの言語を文字起こしできません。先に別の音声モデルを選んでください。",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name}は{language}を文字起こしできません。{other}に切り替えますか？",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name}が GPU で動作を続けられませんでした。CPU に切り替えました（低速）。",

@@ -291,6 +291,8 @@
   "usually takes a few seconds": "genellikle birkaç saniye sürer",
   "voice model": "ses modeli",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name}, duyduğu dili çeviri modeline bildiremiyor. {other} modeline geçilsin mi?",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name}, konuştuğun dili çeviri modeline bildiremiyor. Dilini seç veya çeviriyi kapat.",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name} bu dili yazıya dökemiyor. Önce başka bir ses modeli seçin.",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name}, {language} dilini yazıya dökemiyor. {other} modeline geçilsin mi?",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "{name} GPU üzerinde çalışmaya devam edemedi. CPU'ya geçildi (daha yavaş).",

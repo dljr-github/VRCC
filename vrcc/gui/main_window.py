@@ -156,10 +156,14 @@ class MainWindow(QMainWindow):
     def _load_from_config(self) -> None:
         cfg = self._store.config
 
-        # Grey the spoken languages the active voice model can't transcribe,
-        # then point the combo at the stored language (re-run on every re-sync
-        # so a model change made in Settings re-enables the right languages).
-        model_prompts.grey_unsupported_languages(self._source_combo, cfg.stt.model)
+        # Grey the spoken languages the active voice model can't serve; while
+        # translation is on that includes "auto" for onnx-asr models, which
+        # detect but can't report the language. Point the combo at the stored
+        # language after (re-run on every re-sync so model or translation
+        # changes made in Settings re-enable the right entries).
+        model_prompts.grey_unsupported_languages(
+            self._source_combo, cfg.stt.model, translating=cfg.translate.enabled
+        )
         self._set_combo_text(self._source_combo, cfg.stt.source_language)
         # A stored language the greying just disabled would caption wrongly in
         # silence; offer a better downloaded model once construction settles.

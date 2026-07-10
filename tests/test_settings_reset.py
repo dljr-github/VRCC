@@ -54,7 +54,7 @@ def _answer(monkeypatch, button):
 # Non-default engine values + personal sentinels, so a reset must visibly move
 # every engine field while leaving the personal choices untouched.
 def _dialog(tmp_path, monkeypatch, *, apply=None, on_model_change=None):
-    monkeypatch.setattr(settings_mod, "device_names", lambda: ["Fake GPU"])
+    monkeypatch.setattr(settings_mod.settings_advanced, "device_names", lambda: ["Fake GPU"])
     monkeypatch.setattr(settings_mod.model_fit, "vram_warning", lambda *a, **k: None)
     # Pin the hardware verdict: a CPU verdict makes the reset bind the device
     # to "cpu" (by design), so unpinned tests would assert different devices
@@ -212,7 +212,7 @@ def test_yes_pushes_vad_timings_live_exactly_once(qapp, tmp_path, monkeypatch):
 
 
 def test_headless_construction_and_reset_do_not_raise(qapp, tmp_path, monkeypatch):
-    monkeypatch.setattr(settings_mod, "device_names", lambda: ["Fake GPU"])
+    monkeypatch.setattr(settings_mod.settings_advanced, "device_names", lambda: ["Fake GPU"])
     # Bare construction skips the _dialog helper, so the hardware verdict is
     # pinned here too: a CPU verdict binds the device to "cpu" by design.
     monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")

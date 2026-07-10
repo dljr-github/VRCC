@@ -291,6 +291,8 @@
   "usually takes a few seconds": "duurt meestal een paar seconden",
   "voice model": "spraakmodel",
   "{mb} MB": "{mb} MB",
+  "{name} cannot tell the translator which language it heard. Switch to {other}?": "{name} kan het vertaalmodel niet vertellen welke taal het gehoord heeft. Overschakelen naar {other}?",
+  "{name} cannot tell the translator which language you speak. Pick your language, or turn translation off.": "{name} kan het vertaalmodel niet vertellen welke taal je spreekt. Kies je taal, of zet vertaling uit.",
   "{name} cannot transcribe this language. Choose another voice model first.": "{name} kan deze taal niet transcriberen. Kies eerst een ander spraakmodel.",
   "{name} cannot transcribe {language}. Switch to {other}?": "{name} kan {language} niet transcriberen. Overschakelen naar {other}?",
   "{name} could not stay on the GPU. Switched to CPU (slower).": "Het {name} kon niet op de GPU blijven draaien. Overgeschakeld naar CPU (langzamer).",

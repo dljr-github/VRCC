@@ -26,7 +26,7 @@ def _dialog(tmp_path, monkeypatch, model_id="small", device="auto"):
     # The fit prompt is not under test and would block offscreen; skip it.
     monkeypatch.setattr(settings_mod.model_fit, "vram_warning", lambda *a, **k: None)
     # A cuda combo entry must exist even on GPU-less test machines.
-    monkeypatch.setattr(settings_mod, "device_names", lambda: ["Fake GPU"])
+    monkeypatch.setattr(settings_mod.settings_advanced, "device_names", lambda: ["Fake GPU"])
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     store.config.stt.model = model_id
     store.config.stt.device = device
@@ -123,7 +123,7 @@ def test_accepted_offer_rebuilds_the_engine_exactly_once(qapp, tmp_path, monkeyp
     # is re-read at build); the debounced flush must not force a second,
     # identical rebuild against its stale device baseline.
     monkeypatch.setattr(settings_mod.model_fit, "vram_warning", lambda *a, **k: None)
-    monkeypatch.setattr(settings_mod, "device_names", lambda: ["Fake GPU"])
+    monkeypatch.setattr(settings_mod.settings_advanced, "device_names", lambda: ["Fake GPU"])
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     store.config.stt.model = "small"
     store.config.stt.device = "cuda"
