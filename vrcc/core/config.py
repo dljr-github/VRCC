@@ -70,6 +70,8 @@ class TranslateConfig(BaseModel):
     max_queued_batches: int = 0
     targets: list[str] = Field(default_factory=lambda: ["Japanese"])  # display names, max 3
     beam_size: int = 1
+    repetition_penalty: float = 1.1
+    no_repeat_ngram_size: int = 3
     extra_translate_kwargs: dict = Field(default_factory=dict)
 
 

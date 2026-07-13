@@ -435,6 +435,22 @@ def build_translation_page(dlg: "SettingsDialog") -> QWidget:
     dlg._bind_int(beam, dlg._cfg.translate, "beam_size")
     dlg._mt_beam_spin = beam
     adv_form.addRow(tr("Search width"), beam)
+
+    rep = dlg._dspin(1.0, 2.0, dlg._cfg.translate.repetition_penalty, 2, 0.05)
+    rep.setToolTip(
+        tr("Discourages the model from repeating itself when it gets stuck.")
+    )
+    dlg._bind_float(rep, dlg._cfg.translate, "repetition_penalty")
+    dlg._mt_rep_spin = rep
+    adv_form.addRow(tr("Repetition guard"), rep)
+
+    norepeat = dlg._spin(0, 6, dlg._cfg.translate.no_repeat_ngram_size)
+    norepeat.setToolTip(
+        tr("Stops the model looping on the same short phrase. 0 turns it off.")
+    )
+    dlg._bind_int(norepeat, dlg._cfg.translate, "no_repeat_ngram_size")
+    dlg._mt_norepeat_spin = norepeat
+    adv_form.addRow(tr("Block repeats"), norepeat)
     form.addRow(adv)
 
     return page

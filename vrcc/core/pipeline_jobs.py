@@ -168,10 +168,23 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
         # original. Only _mt_lock held here (no lock-order cycle).
         with p._mt_lock:
             engine = p._mt
-            targets = [languages.get(name) for name in p._config.translate.targets]
-            translations = (
-                None if engine is None else engine.translate(job.text, job.src, targets)
-            )
+            # A target matching the source would only echo the transcription,
+            # so the engine is never asked for it. Reachable when
+            # source_language is "auto" (the GUI excludes an explicit source
+            # from the target combos); "auto" resolves whisper "zh" to Chinese
+            # Simplified, so a Chinese Traditional target keeps translating
+            # (script conversion).
+            all_targets = [languages.get(name) for name in p._config.translate.targets]
+            targets = [lang for lang in all_targets if lang != job.src]
+            if engine is None:
+                translations = None
+            elif not targets:
+                # Nothing left to translate: the empty result flows through the
+                # normal publish path so the caption row resolves and the
+                # original still reaches the chatbox.
+                translations = []
+            else:
+                translations = engine.translate(job.text, job.src, targets)
     except Exception as exc:  # noqa: BLE001 -- translation must not drop the caption
         if stop.is_set():
             return  # abandoned mid-call: discard, publish nothing
@@ -203,7 +216,18 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
             translations=tuple(translations),
         )
     )
-    safe_submit(p, job.text, translations, job.utterance_id)
+    submitted = translations
+    if len(targets) < len(all_targets) and not p._config.osc.include_original:
+        # Hiding the original presumes every configured target carries a
+        # translation. A skipped source-matching target is served by the
+        # original text itself, so that text re-enters the message in the
+        # target's slot; without it, readers of the source language get
+        # nothing at all.
+        submitted = list(translations)
+        for i, lang in enumerate(all_targets):
+            if lang == job.src:
+                submitted.insert(i, (lang.display, job.text))
+    safe_submit(p, job.text, submitted, job.utterance_id)
     if job.manage_typing:
         p._resolve_typing(job.utterance_id)
 
