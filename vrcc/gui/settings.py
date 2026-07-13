@@ -95,6 +95,8 @@ class SettingsDialog(QDialog):
         self._stt_beam_spin: QSpinBox | None = None
         self._stt_temp_spin: QDoubleSpinBox | None = None
         self._mt_beam_spin: QSpinBox | None = None
+        self._mt_rep_spin: QDoubleSpinBox | None = None
+        self._mt_norepeat_spin: QSpinBox | None = None
         self._model_combo: QComboBox | None = None
         # (combo index, spec) for voice models that can't transcribe every
         # language (distil English-only, Parakeet's European set).

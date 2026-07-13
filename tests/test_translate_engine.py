@@ -266,6 +266,27 @@ def test_translate_batch_kwargs_merge_extra_overrides_beam_size(model_dir: Path)
     assert kwargs["no_repeat_ngram_size"] == 3
 
 
+def test_default_repetition_guards_passed_to_translate_batch(model_dir: Path):
+    factory = _RecordingFactory()
+    eng = TranslateEngine(_spec("nllb"), model_dir, _cfg(), EventBus(), translator_factory=factory)
+    eng.load()
+    eng.translate("hello world", get("English"), [get("Japanese")])
+    kwargs = factory.built[0].batch_calls[0].kwargs
+    assert kwargs["repetition_penalty"] == 1.1
+    assert kwargs["no_repeat_ngram_size"] == 3
+
+
+def test_repetition_guards_omitted_when_disabled(model_dir: Path):
+    factory = _RecordingFactory()
+    cfg = _cfg(repetition_penalty=1.0, no_repeat_ngram_size=0)
+    eng = TranslateEngine(_spec("nllb"), model_dir, cfg, EventBus(), translator_factory=factory)
+    eng.load()
+    eng.translate("hello world", get("English"), [get("Japanese")])
+    kwargs = factory.built[0].batch_calls[0].kwargs
+    assert "repetition_penalty" not in kwargs
+    assert "no_repeat_ngram_size" not in kwargs
+
+
 # --------------------------------------------------------------------------
 # CUDA-unusable fallback (VRAM OOM or missing runtime library)
 # --------------------------------------------------------------------------

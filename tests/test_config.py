@@ -44,6 +44,12 @@ def test_app_config_defaults_match_spec():
     assert cfg.translate.extra_translate_kwargs == {}
 
 
+def test_translate_repetition_guards_default_on():
+    cfg = TranslateConfig()
+    assert cfg.repetition_penalty == 1.1
+    assert cfg.no_repeat_ngram_size == 3
+
+
 def test_defaults_round_trip_through_save_and_load(tmp_path):
     path = tmp_path / "config.json"
     store = ConfigStore(path)

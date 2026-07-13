@@ -205,6 +205,10 @@ def _resync_all_widgets(dlg: "SettingsDialog") -> None:
         dlg._stt_temp_spin.setValue(cfg.stt.temperature)
     if dlg._mt_beam_spin is not None:
         dlg._mt_beam_spin.setValue(cfg.translate.beam_size)
+    if dlg._mt_rep_spin is not None:
+        dlg._mt_rep_spin.setValue(cfg.translate.repetition_penalty)
+    if dlg._mt_norepeat_spin is not None:
+        dlg._mt_norepeat_spin.setValue(cfg.translate.no_repeat_ngram_size)
     if dlg._mode is not None:
         dlg._mode.set_value("Quality" if cfg.gui.profile == "quality" else "Speed")
     dlg._update_mode_for_model()
