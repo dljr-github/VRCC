@@ -137,6 +137,7 @@ class FakeChatbox:
 
     def __init__(self, fail_submits: bool = False) -> None:
         self.submits: list = []
+        self.messages: list = []
         self.typing: list = []
         self.log: list = []
         self.fail_submits = fail_submits
@@ -150,9 +151,11 @@ class FakeChatbox:
             self.submits.append((text, utterance_id))
 
     def submit_message(self, original, translations, utterance_id) -> None:
-        # Recorded as the default-config joined text so assertions read the
-        # same display string the chatbox would show (the pipeline tests all
-        # run with a default OscConfig).
+        # Raw arguments kept in `messages` for tests that pin what the
+        # pipeline hands over; `submits` keeps the default-config joined text
+        # so most assertions read a stable display string.
+        with self._lock:
+            self.messages.append((original, list(translations), utterance_id))
         text = format_message(original, list(translations), OscConfig())
         self.submit(text, utterance_id)
 

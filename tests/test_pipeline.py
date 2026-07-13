@@ -15,9 +15,8 @@ from vrcc.audio.segmenter import (
     SegSpeculative,
     SegSpeechStart,
 )
-from vrcc.core.config import AppConfig, OscConfig, SttConfig
+from vrcc.core.config import AppConfig, OscConfig
 from vrcc.core.events import AppError, MicLevel, PhraseRecognized, PhraseTranslated, SpeechStarted
-from vrcc.core.languages import get as get_lang
 
 from .conftest import FakeChatbox, FakeMt, FakeMute, FakeStt, collect, make_pipeline, make_result, running, sample
 
@@ -183,14 +182,8 @@ def test_translation_disabled_sends_original_directly():
     assert env.chatbox.submits[0] == ("hello world", 1)
 
 
-def test_auto_source_language_resolves_from_detected_whisper_code():
-    cfg = AppConfig(stt=SttConfig(source_language="auto"))
-    env = make_pipeline(config=cfg, stt=FakeStt(result=make_result(language="ja")))
-    with running(env.pipeline):
-        env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: len(env.mt.calls) == 1)
-    _text, src, _targets = env.mt.calls[0]
-    assert src == get_lang("Japanese")  # ja -> Japanese
+# Source resolution and MT target selection (skipping a target equal to the
+# resolved source, hidden-original delivery) live in test_pipeline_targets.
 
 
 # -- behavior 6: mute + master-toggle gating --------------------------------
