@@ -9,9 +9,14 @@ onnx-asr) / ``download_model`` (faster-whisper) and reporting
 
 from __future__ import annotations
 
+import contextlib
+import logging
+import os
 import shutil
 from pathlib import Path
+from typing import Callable, TypeVar
 
+import huggingface_hub
 from faster_whisper import download_model
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import tqdm as _HfTqdm
@@ -23,6 +28,52 @@ from vrcc.translate.registry import MtModelSpec
 
 _MODEL_BIN = "model.bin"
 _KINDS = ("mt", "whisper")
+_HF_MIRROR = "https://hf-mirror.com"
+
+_log = logging.getLogger(__name__)
+_T = TypeVar("_T")
+
+
+@contextlib.contextmanager
+def _hf_endpoint(url: str):
+    """Point every huggingface_hub download route at ``url`` for the
+    duration of the block, then restore the prior state exactly.
+
+    ``download_model`` calls ``snapshot_download`` internally with no
+    ``endpoint`` argument, so it reads ``huggingface_hub.constants.ENDPOINT``
+    at call time; overriding that constant (plus the env var some code paths
+    re-read) redirects both callers with one mechanism.
+    """
+    prior_env = os.environ.get("HF_ENDPOINT")
+    prior_const = huggingface_hub.constants.ENDPOINT
+    os.environ["HF_ENDPOINT"] = url
+    huggingface_hub.constants.ENDPOINT = url
+    try:
+        yield
+    finally:
+        if prior_env is None:
+            os.environ.pop("HF_ENDPOINT", None)
+        else:
+            os.environ["HF_ENDPOINT"] = prior_env
+        huggingface_hub.constants.ENDPOINT = prior_const
+
+
+def _with_mirror_fallback(primary: Callable[[], _T]) -> _T:
+    """Run ``primary``; on failure retry once against the hf-mirror.com
+    endpoint (skipped if that mirror is already active, so a mirror failure
+    doesn't retry itself). A retry failure chains from the original error so
+    the caller's dialog still shows a real cause."""
+    try:
+        return primary()
+    except Exception as primary_err:
+        if huggingface_hub.constants.ENDPOINT == _HF_MIRROR:
+            raise
+        _log.info("Primary download failed, retrying via hf-mirror.com: %s", primary_err)
+        try:
+            with _hf_endpoint(_HF_MIRROR):
+                return primary()
+        except Exception as mirror_err:
+            raise mirror_err from primary_err
 
 
 def _onnx_asr_files(spec: WhisperSpec) -> list[str]:
@@ -84,10 +135,12 @@ class DownloadManager:
 
         # Full-repo download (no allow_patterns): CT2 repos vary in filenames,
         # so an over-narrow pattern is riskier than a few extra kB.
-        snapshot_download(
-            repo_id=spec.repo,
-            local_dir=str(target),
-            tqdm_class=self._progress_tqdm(spec.id),
+        _with_mirror_fallback(
+            lambda: snapshot_download(
+                repo_id=spec.repo,
+                local_dir=str(target),
+                tqdm_class=self._progress_tqdm(spec.id),
+            )
         )
         self._publish_done(spec.id)
         return target
@@ -108,14 +161,16 @@ class DownloadManager:
 
         spec = WHISPER_MODELS.get(model_id)
         if spec is not None and spec.backend == "onnx_asr":
-            snapshot_download(
-                repo_id=spec.repo,
-                local_dir=str(target),
-                allow_patterns=_onnx_asr_files(spec),
-                tqdm_class=self._progress_tqdm(model_id),
+            _with_mirror_fallback(
+                lambda: snapshot_download(
+                    repo_id=spec.repo,
+                    local_dir=str(target),
+                    allow_patterns=_onnx_asr_files(spec),
+                    tqdm_class=self._progress_tqdm(model_id),
+                )
             )
         else:
-            download_model(model_id, output_dir=str(target))
+            _with_mirror_fallback(lambda: download_model(model_id, output_dir=str(target)))
         self._publish_done(model_id)
         return target
 
