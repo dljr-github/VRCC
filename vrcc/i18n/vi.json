@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "Đang tải xuống {model_id}: {pct}%",
   "Downloading…": "Đang tải xuống…",
   "Drop captions the model isn't confident about.": "Bỏ những phụ đề mà mô hình không chắc chắn.",
+  "Drop repeats": "Bỏ lặp lại",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "Bỏ phụ đề chỉ là cùng một cụm từ ngắn lặp đi lặp lại, điều có thể xảy ra khi âm thanh bị nghe nhầm. Giá trị cao hơn cho phép lặp nhiều hơn trước khi bỏ.",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "Hãy bật OSC trong VRChat: Action Menu > Options > OSC > Enabled. VRChat phải đang chạy trên máy tính này.",
   "Engines are still loading. Try again in a moment.": "Các engine vẫn đang tải. Hãy thử lại sau giây lát.",
   "English only": "Chỉ tiếng Anh",

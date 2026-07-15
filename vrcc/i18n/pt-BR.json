@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "Baixando {model_id}: {pct}%",
   "Downloading…": "Baixando…",
   "Drop captions the model isn't confident about.": "Descarta legendas em que o modelo não tem confiança.",
+  "Drop repeats": "Descartar repetições",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "Descarta uma legenda que é só a mesma frase curta repetida, o que pode acontecer quando o áudio é mal interpretado. Mais alto permite mais repetição antes de descartar.",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "Ative o OSC no VRChat: Action Menu > Options > OSC > Enabled. O VRChat precisa estar aberto neste PC.",
   "Engines are still loading. Try again in a moment.": "Os mecanismos ainda estão carregando. Tente de novo em instantes.",
   "English only": "Somente inglês",

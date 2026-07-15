@@ -94,6 +94,8 @@ class SettingsDialog(QDialog):
         self._vad_spins: dict[str, QSpinBox | QDoubleSpinBox] = {}
         self._stt_beam_spin: QSpinBox | None = None
         self._stt_temp_spin: QDoubleSpinBox | None = None
+        self._stt_norepeat_spin: QSpinBox | None = None
+        self._stt_compression_spin: QDoubleSpinBox | None = None
         self._mt_beam_spin: QSpinBox | None = None
         self._mt_rep_spin: QDoubleSpinBox | None = None
         self._mt_norepeat_spin: QSpinBox | None = None

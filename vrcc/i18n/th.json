@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "กำลังดาวน์โหลด {model_id}: {pct}%",
   "Downloading…": "กำลังดาวน์โหลด…",
   "Drop captions the model isn't confident about.": "ตัดคำบรรยายที่โมเดลไม่มั่นใจทิ้งไป",
+  "Drop repeats": "ตัดการพูดซ้ำทิ้ง",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "ตัดคำบรรยายที่เป็นเพียงวลีสั้น ๆ เดิมพูดซ้ำ ๆ ทิ้งไป ซึ่งอาจเกิดขึ้นเมื่อได้ยินเสียงผิด ตั้งค่าให้สูงขึ้นเพื่อให้พูดซ้ำได้มากขึ้นก่อนจะตัดทิ้ง",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "เปิดใช้ OSC ใน VRChat: Action Menu > Options > OSC > Enabled และ VRChat ต้องเปิดอยู่บนพีซีเครื่องนี้",
   "Engines are still loading. Try again in a moment.": "เอนจินยังโหลดอยู่ โปรดลองอีกครั้งในอีกสักครู่",
   "English only": "ภาษาอังกฤษเท่านั้น",

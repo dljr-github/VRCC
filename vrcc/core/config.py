@@ -53,7 +53,11 @@ class SttConfig(BaseModel):
     avg_logprob_gate: float = -0.8
     no_speech_gate: float = 0.6
     initial_prompt: str = ""
-    no_repeat_ngram_size: int = 0
+    no_repeat_ngram_size: int = 3
+    # Drop a transcription whose worst segment compresses past this. A runaway
+    # whisper repetition loop lands far above real speech; whisper's own
+    # degeneracy line is 2.4, so 2.5 only catches clear loops.
+    compression_ratio_gate: float = 2.5
     extra_transcribe_kwargs: dict = Field(default_factory=dict)
 
 

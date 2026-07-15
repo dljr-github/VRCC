@@ -50,6 +50,12 @@ def test_translate_repetition_guards_default_on():
     assert cfg.no_repeat_ngram_size == 3
 
 
+def test_stt_repetition_guards_default_on():
+    cfg = SttConfig()
+    assert cfg.no_repeat_ngram_size == 3
+    assert cfg.compression_ratio_gate == 2.5
+
+
 def test_defaults_round_trip_through_save_and_load(tmp_path):
     path = tmp_path / "config.json"
     store = ConfigStore(path)
