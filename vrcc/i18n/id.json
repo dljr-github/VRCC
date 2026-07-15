@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "Mengunduh {model_id}: {pct}%",
   "Downloading…": "Mengunduh…",
   "Drop captions the model isn't confident about.": "Buang takarir yang tidak diyakini model.",
+  "Drop repeats": "Buang pengulangan",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "Buang takarir yang hanya berupa frasa pendek sama yang diulang-ulang, yang bisa terjadi saat audio salah didengar. Makin tinggi memberi lebih banyak pengulangan sebelum dibuang.",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "Aktifkan OSC di VRChat: Action Menu > Options > OSC > Enabled. VRChat harus berjalan di PC ini.",
   "Engines are still loading. Try again in a moment.": "Mesin masih dimuat. Coba beberapa saat lagi.",
   "English only": "Hanya bahasa Inggris",

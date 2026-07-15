@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "正在下載 {model_id}：{pct}%",
   "Downloading…": "下載中…",
   "Drop captions the model isn't confident about.": "捨棄模型沒有把握的字幕。",
+  "Drop repeats": "捨棄重複",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "捨棄只是同一個短句不斷重複的字幕，這可能在聲音聽錯時出現。數值越高，捨棄前允許的重複越多。",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "請在 VRChat 中啟用 OSC：Action Menu > Options > OSC > Enabled。VRChat 必須在這台電腦上執行。",
   "Engines are still loading. Try again in a moment.": "引擎仍在載入中，請稍後再試。",
   "English only": "僅限英文",

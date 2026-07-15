@@ -203,6 +203,10 @@ def _resync_all_widgets(dlg: "SettingsDialog") -> None:
         dlg._stt_beam_spin.setValue(cfg.stt.beam_size)
     if dlg._stt_temp_spin is not None:
         dlg._stt_temp_spin.setValue(cfg.stt.temperature)
+    if dlg._stt_norepeat_spin is not None:
+        dlg._stt_norepeat_spin.setValue(cfg.stt.no_repeat_ngram_size)
+    if dlg._stt_compression_spin is not None:
+        dlg._stt_compression_spin.setValue(cfg.stt.compression_ratio_gate)
     if dlg._mt_beam_spin is not None:
         dlg._mt_beam_spin.setValue(cfg.translate.beam_size)
     if dlg._mt_rep_spin is not None:

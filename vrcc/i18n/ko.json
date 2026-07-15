@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "{model_id} 다운로드 중: {pct}%",
   "Downloading…": "다운로드 중…",
   "Drop captions the model isn't confident about.": "모델의 신뢰도가 낮은 자막은 버립니다.",
+  "Drop repeats": "반복 버리기",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "같은 짧은 구절만 반복된 자막을 버립니다. 오디오를 잘못 들었을 때 생길 수 있습니다. 값이 높을수록 버리기 전에 더 많은 반복을 허용합니다.",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "VRChat에서 OSC를 켜세요: Action Menu > Options > OSC > Enabled. VRChat이 이 PC에서 실행 중이어야 합니다.",
   "Engines are still loading. Try again in a moment.": "엔진을 아직 불러오는 중입니다. 잠시 후 다시 시도해 주세요.",
   "English only": "영어 전용",

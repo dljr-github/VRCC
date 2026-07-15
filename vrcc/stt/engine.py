@@ -131,8 +131,10 @@ class SttEngine:
         """Transcribe ``samples`` (mono float32) into an :class:`SttResult`.
 
         Returns ``None`` when it fails the quality gates (no text, length-weighted
-        ``avg_logprob`` below ``cfg.avg_logprob_gate``, or ``no_speech_prob`` above
-        ``cfg.no_speech_gate``). Raises ``RuntimeError`` if called before :meth:`load`.
+        ``avg_logprob`` below ``cfg.avg_logprob_gate``, ``no_speech_prob`` above
+        ``cfg.no_speech_gate``, or a segment compression ratio above
+        ``cfg.compression_ratio_gate`` (a runaway repetition loop)). Raises
+        ``RuntimeError`` if called before :meth:`load`.
         """
         if self._model is None:
             raise RuntimeError(
@@ -223,7 +225,9 @@ class SttEngine:
             return segments, info
 
     def _build_result(self, segments: list, info) -> SttResult | None:
-        """Join segment texts and apply the length-weighted quality gates."""
+        """Join segment texts and apply the length-weighted quality gates (avg
+        logprob, no-speech, and a compression-ratio drop for runaway repetition
+        loops)."""
         text = " ".join(seg.text for seg in segments).strip()
         if not text:
             return None
@@ -231,16 +235,20 @@ class SttEngine:
         total_weight = 0.0
         weighted_sum = 0.0
         max_no_speech_prob = 0.0
+        max_compression_ratio = 0.0
         for seg in segments:
             weight = max(seg.end - seg.start, 1e-6)
             weighted_sum += seg.avg_logprob * weight
             total_weight += weight
             max_no_speech_prob = max(max_no_speech_prob, seg.no_speech_prob)
+            max_compression_ratio = max(max_compression_ratio, seg.compression_ratio)
 
         avg_logprob = weighted_sum / total_weight if total_weight > 0 else None
         if avg_logprob is None or avg_logprob < self._cfg.avg_logprob_gate:
             return None
         if max_no_speech_prob > self._cfg.no_speech_gate:
+            return None
+        if max_compression_ratio > self._cfg.compression_ratio_gate:
             return None
 
         return SttResult(

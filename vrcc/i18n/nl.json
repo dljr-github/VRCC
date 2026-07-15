@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "Downloaden van {model_id}: {pct}%",
   "Downloading…": "Downloaden…",
   "Drop captions the model isn't confident about.": "Laat ondertitels weg waar het model niet zeker van is.",
+  "Drop repeats": "Herhalingen weglaten",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "Laat een ondertitel weg die alleen maar dezelfde korte zin herhaalt, wat kan gebeuren als het geluid verkeerd wordt verstaan. Hoger staat meer herhaling toe voordat er wordt weggelaten.",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "Zet OSC aan in VRChat: Action Menu > Options > OSC > Enabled. VRChat moet op deze pc draaien.",
   "Engines are still loading. Try again in a moment.": "De engines worden nog geladen. Probeer het zo opnieuw.",
   "English only": "Alleen Engels",

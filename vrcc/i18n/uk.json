@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "Завантаження {model_id}: {pct}%",
   "Downloading…": "Завантаження…",
   "Drop captions the model isn't confident about.": "Відкидати субтитри, у яких модель не впевнена.",
+  "Drop repeats": "Відкидати повтори",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "Відкидає субтитр, який лише повторює ту саму коротку фразу, що буває, коли звук почуто неправильно. Більше значення дозволяє більше повторів до відкидання.",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "Увімкніть OSC у VRChat: Action Menu > Options > OSC > Enabled. VRChat має бути запущений на цьому ПК.",
   "Engines are still loading. Try again in a moment.": "Рушії ще завантажуються. Спробуйте ще раз за мить.",
   "English only": "Лише англійська",

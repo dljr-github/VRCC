@@ -275,7 +275,7 @@ def test_render_rows_html_accepts_theme_colors():
 def test_empty_state_html_contains_message():
     from vrcc.gui.caption_log import empty_state_html
 
-    html = empty_state_html("Say something — your captions will appear here")
+    html = empty_state_html("Say something, your captions will appear here")
     assert "Say something" in html
 
 

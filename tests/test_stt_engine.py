@@ -5,116 +5,20 @@ text/logprob aggregation, quality gates, and the CUDA-unusable CPU fallback.
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 
 from vrcc.core.bus import EventBus
-from vrcc.core.config import SttConfig
-from vrcc.core.events import EngineStateChanged
 from vrcc.stt.engine import SttEngine, SttResult
 
-_OOM_TEXT = "CUDA failed with error out of memory (CUBLAS_STATUS_ALLOC_FAILED)"
-# Verbatim CTranslate2 dynamic-loader error from a CPU-only install driving a
-# visible GPU: cudart is statically linked, so the device enumerates, and the
-# load dies at model build or the first CUDA op instead.
-_MISSING_LIBRARY_TEXT = "Library cublas64_12.dll is not found or cannot be loaded"
-
-# Both shapes of CUDA-unusable RuntimeError must take the one-shot CPU fallback.
-_CUDA_UNUSABLE_TEXTS = [_OOM_TEXT, _MISSING_LIBRARY_TEXT]
-
-
-def _seg(text: str, start: float, end: float, avg_logprob: float, no_speech_prob: float):
-    return SimpleNamespace(
-        text=text, start=start, end=end, avg_logprob=avg_logprob, no_speech_prob=no_speech_prob
-    )
-
-
-class _FakeModel:
-    """Records transcribe() calls; returns a canned (segments, info) pair."""
-
-    def __init__(
-        self, segments=None, language="en", fail_on_transcribe: bool = False,
-        error_text: str = _OOM_TEXT,
-    ) -> None:
-        self.segments = segments if segments is not None else []
-        self.language = language
-        self.fail_on_transcribe = fail_on_transcribe
-        self.error_text = error_text
-        self.calls: list[SimpleNamespace] = []
-
-    def transcribe(self, samples, **kwargs):
-        self.calls.append(SimpleNamespace(samples=samples, kwargs=kwargs))
-        if self.fail_on_transcribe:
-            raise RuntimeError(self.error_text)
-        return iter(self.segments), SimpleNamespace(language=self.language)
-
-
-class _RecordingFactory:
-    """Fake ``faster_whisper.WhisperModel`` factory recording every ctor call."""
-
-    def __init__(
-        self, ctor_fail_at=(), transcribe_fail_at=(), segments=None, language="en",
-        error_text=_OOM_TEXT,
-    ) -> None:
-        self.calls: list[SimpleNamespace] = []
-        self.built: list[_FakeModel] = []
-        self._ctor_fail_at = set(ctor_fail_at)
-        self._transcribe_fail_at = set(transcribe_fail_at)
-        self._segments = segments if segments is not None else []
-        self._language = language
-        self._error_text = error_text
-
-    def __call__(
-        self,
-        model_path,
-        *,
-        device,
-        device_index,
-        compute_type,
-        cpu_threads,
-        num_workers,
-        local_files_only,
-    ):
-        idx = len(self.calls)
-        self.calls.append(
-            SimpleNamespace(
-                model_path=model_path,
-                device=device,
-                device_index=device_index,
-                compute_type=compute_type,
-                cpu_threads=cpu_threads,
-                num_workers=num_workers,
-                local_files_only=local_files_only,
-            )
-        )
-        if idx in self._ctor_fail_at:
-            raise RuntimeError(self._error_text)
-        m = _FakeModel(
-            segments=list(self._segments),
-            language=self._language,
-            fail_on_transcribe=idx in self._transcribe_fail_at,
-            error_text=self._error_text,
-        )
-        self.built.append(m)
-        return m
-
-
-def _cfg(**over) -> SttConfig:
-    base = dict(device="cpu", device_index=0, compute_type="int8")
-    base.update(over)
-    return SttConfig(**base)
-
-
-def _collect(bus: EventBus) -> list[EngineStateChanged]:
-    events: list[EngineStateChanged] = []
-    bus.subscribe(EngineStateChanged, events.append)
-    return events
-
-
-MODEL_DIR = Path("C:/fake/model/dir")
+from .stt_fakes import (
+    _CUDA_UNUSABLE_TEXTS,
+    MODEL_DIR,
+    _cfg,
+    _collect,
+    _RecordingFactory,
+    _seg,
+)
 
 
 # --------------------------------------------------------------------------
@@ -200,6 +104,14 @@ def test_transcribe_includes_no_repeat_ngram_size_when_positive():
 
     eng.transcribe(np.zeros(1600, dtype=np.float32))
 
+    assert factory.built[0].calls[0].kwargs["no_repeat_ngram_size"] == 3
+
+
+def test_transcribe_default_includes_no_repeat_ngram_size_three():
+    factory = _RecordingFactory(segments=[_seg("hello", 0.0, 1.0, -0.1, 0.05)])
+    eng = SttEngine(_cfg(), MODEL_DIR, EventBus(), model_factory=factory)
+    eng.load()
+    eng.transcribe(np.zeros(1600, dtype=np.float32))
     assert factory.built[0].calls[0].kwargs["no_repeat_ngram_size"] == 3
 
 
@@ -309,6 +221,42 @@ def test_gate_drops_high_no_speech_prob():
     eng.load()
 
     assert eng.transcribe(np.zeros(1600, dtype=np.float32)) is None
+
+
+def test_gate_drops_high_compression_ratio():
+    factory = _RecordingFactory(
+        segments=[_seg("ha ha ha ha", 0.0, 1.0, -0.1, 0.05, compression_ratio=37.3)]
+    )
+    eng = SttEngine(
+        _cfg(compression_ratio_gate=2.5), MODEL_DIR, EventBus(), model_factory=factory
+    )
+    eng.load()
+    assert eng.transcribe(np.zeros(1600, dtype=np.float32)) is None
+
+
+def test_gate_uses_max_compression_ratio_across_segments():
+    factory = _RecordingFactory(
+        segments=[
+            _seg("hello", 0.0, 1.0, -0.1, 0.05, compression_ratio=1.2),
+            _seg("na na na", 1.0, 2.0, -0.1, 0.05, compression_ratio=9.0),
+        ]
+    )
+    eng = SttEngine(
+        _cfg(compression_ratio_gate=2.5), MODEL_DIR, EventBus(), model_factory=factory
+    )
+    eng.load()
+    assert eng.transcribe(np.zeros(1600, dtype=np.float32)) is None
+
+
+def test_normal_compression_ratio_passes_the_gate():
+    factory = _RecordingFactory(
+        segments=[_seg("hello world", 0.0, 1.0, -0.1, 0.05, compression_ratio=1.5)]
+    )
+    eng = SttEngine(
+        _cfg(compression_ratio_gate=2.5), MODEL_DIR, EventBus(), model_factory=factory
+    )
+    eng.load()
+    assert eng.transcribe(np.zeros(1600, dtype=np.float32)) is not None
 
 
 # --------------------------------------------------------------------------

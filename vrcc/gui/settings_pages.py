@@ -368,6 +368,26 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     dlg._bind_float(ns_gate, dlg._cfg.stt, "no_speech_gate")
     adv_form.addRow(tr("Silence sensitivity"), ns_gate)
 
+    norepeat = dlg._spin(0, 6, dlg._cfg.stt.no_repeat_ngram_size)
+    norepeat.setToolTip(
+        tr("Stops the model looping on the same short phrase. 0 turns it off.")
+    )
+    dlg._bind_int(norepeat, dlg._cfg.stt, "no_repeat_ngram_size")
+    dlg._stt_norepeat_spin = norepeat
+    adv_form.addRow(tr("Block repeats"), norepeat)
+
+    comp = dlg._dspin(1.5, 10.0, dlg._cfg.stt.compression_ratio_gate, 1, 0.5)
+    comp.setToolTip(
+        tr(
+            "Drops a caption that is just the same short phrase repeated, "
+            "which can happen when the audio is misheard. Higher allows more "
+            "repetition before dropping."
+        )
+    )
+    dlg._bind_float(comp, dlg._cfg.stt, "compression_ratio_gate")
+    dlg._stt_compression_spin = comp
+    adv_form.addRow(tr("Drop repeats"), comp)
+
     prompt = QLineEdit(dlg._cfg.stt.initial_prompt)
     prompt.setToolTip(
         tr("Optional words to help the model spell names or jargon correctly.")

@@ -66,6 +66,8 @@
   "Downloading {model_id}: {pct}%": "{model_id} indiriliyor: %{pct}",
   "Downloading…": "İndiriliyor…",
   "Drop captions the model isn't confident about.": "Modelin emin olmadığı altyazıları at.",
+  "Drop repeats": "Tekrarları at",
+  "Drops a caption that is just the same short phrase repeated, which can happen when the audio is misheard. Higher allows more repetition before dropping.": "Yalnızca aynı kısa ifadenin tekrarından oluşan bir altyazıyı atar, ki bu ses yanlış duyulduğunda olabilir. Daha yüksek değer, atmadan önce daha fazla tekrara izin verir.",
   "Enable OSC in VRChat: Action Menu > Options > OSC > Enabled. VRChat must be running on this PC.": "VRChat'te OSC'yi etkinleştir: Action Menu > Options > OSC > Enabled. VRChat bu bilgisayarda çalışıyor olmalı.",
   "Engines are still loading. Try again in a moment.": "Motorlar hâlâ yükleniyor. Birazdan tekrar dene.",
   "English only": "Yalnızca İngilizce",
