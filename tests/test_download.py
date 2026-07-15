@@ -284,3 +284,68 @@ def test_ensure_whisper_no_retry_when_endpoint_already_mirror(
         manager.ensure_whisper("medium")
 
     assert len(calls) == 1
+
+
+# --------------------------------------------------------------------------
+# ensure_whisper (onnx-asr / snapshot_download branch): mirror fallback
+# --------------------------------------------------------------------------
+
+_PARAKEET_ID = "parakeet-tdt-0.6b-v3"
+
+
+def test_ensure_parakeet_falls_back_to_mirror_on_primary_failure(
+    manager: DownloadManager, monkeypatch: pytest.MonkeyPatch
+):
+    prior_env = os.environ.get("HF_ENDPOINT")
+    prior_const = huggingface_hub.constants.ENDPOINT
+
+    calls: list[str] = []
+    seen_endpoint_on_success: dict[str, str] = {}
+
+    def fake_snapshot_download(repo_id, local_dir=None, allow_patterns=None, tqdm_class=None):
+        calls.append(repo_id)
+        if len(calls) == 1:
+            raise RuntimeError("primary host unreachable")
+        seen_endpoint_on_success["endpoint"] = huggingface_hub.constants.ENDPOINT
+        for name in allow_patterns:
+            _touch(Path(local_dir) / name)
+        return local_dir
+
+    def boom(*args, **kwargs):
+        raise AssertionError("faster-whisper download_model must not run for parakeet")
+
+    monkeypatch.setattr(
+        "vrcc.download.manager.snapshot_download", fake_snapshot_download
+    )
+    monkeypatch.setattr("vrcc.download.manager.download_model", boom)
+
+    result = manager.ensure_whisper(_PARAKEET_ID)
+
+    assert result == manager.whisper_model_dir(_PARAKEET_ID)
+    assert len(calls) == 2
+    assert seen_endpoint_on_success["endpoint"] == _HF_MIRROR
+    assert manager.is_whisper_downloaded(_PARAKEET_ID) is True
+
+    assert huggingface_hub.constants.ENDPOINT == prior_const
+    assert os.environ.get("HF_ENDPOINT") == prior_env
+
+
+def test_ensure_parakeet_no_retry_when_endpoint_already_mirror(
+    manager: DownloadManager, monkeypatch: pytest.MonkeyPatch
+):
+    huggingface_hub.constants.ENDPOINT = _HF_MIRROR
+
+    calls: list[str] = []
+
+    def fake_snapshot_download(repo_id, local_dir=None, allow_patterns=None, tqdm_class=None):
+        calls.append(repo_id)
+        raise RuntimeError("mirror already active, still fails")
+
+    monkeypatch.setattr(
+        "vrcc.download.manager.snapshot_download", fake_snapshot_download
+    )
+
+    with pytest.raises(RuntimeError, match="mirror already active"):
+        manager.ensure_whisper(_PARAKEET_ID)
+
+    assert len(calls) == 1
