@@ -98,7 +98,7 @@ def test_button_present_with_expected_text(qapp, tmp_path, monkeypatch):
     dlg, _ = _dialog(tmp_path, monkeypatch)
     try:
         buttons = [b.text() for b in dlg.findChildren(QPushButton)]
-        assert "Reset to recommended settings" in buttons
+        assert "Recommended setup for this PC" in buttons
     finally:
         dlg.close()
         dlg.deleteLater()

@@ -23,9 +23,9 @@ _AUTO = "auto"
 _AUTO_GPU_TEXT = tr_noop("Auto: using your graphics card")
 _AUTO_CPU_TEXT = tr_noop("Auto: using your processor")
 
-_RESET_BTN = tr_noop("Reset to recommended settings")
+_RESET_BTN = tr_noop("Recommended setup for this PC")
 _RESET_TIP = tr_noop("Pick the models and settings that suit this machine.")
-_RESET_TITLE = tr_noop("Reset to recommended settings?")
+_RESET_TITLE = tr_noop("Use the recommended setup?")
 _RESET_BODY = tr_noop(
     "This picks the voice and translation models for your hardware and spoken "
     "language, returns the device and thread settings to automatic, and sets "
@@ -34,12 +34,12 @@ _RESET_BODY = tr_noop(
 )
 _RESET_MODELS = tr_noop("Voice model: {voice}. Translation model: {translate}.")
 
-_RESET_DEFAULTS_BTN = tr_noop("Reset to default settings")
+_RESET_DEFAULTS_BTN = tr_noop("Reset tuning to defaults")
 _RESET_DEFAULTS_TIP = tr_noop(
     "Put the tuning back to normal. Keeps your microphone, languages, "
     "models, chatbox address and appearance."
 )
-_RESET_DEFAULTS_TITLE = tr_noop("Reset to default settings?")
+_RESET_DEFAULTS_TITLE = tr_noop("Reset tuning to defaults?")
 _RESET_DEFAULTS_BODY = tr_noop(
     "This puts sensitivity, microphone boost, timing and other tuning back "
     "to their normal values. Your microphone, languages, models, chatbox "
