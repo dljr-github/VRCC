@@ -104,6 +104,11 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
             # (which prunes the caches for it), so mark the emitted-early guard
             # AFTER, where it survives to dedupe a natural final racing the
             # commit; a later utterance's finalize is what eventually clears it.
+            # A second inject for this id cannot form: a resume racing this
+            # speculative would have gone through SegDiscard -> drop_discarded
+            # and made store_result return False above; since it did not, the
+            # next process() frame consumes this request_commit and starts a
+            # fresh id before another speculative for this one can form.
             forward_final(p, job.utterance_id, result)
             p._spec.mark_emitted_early(job.utterance_id)
             p.segmenter.request_commit(job.utterance_id)

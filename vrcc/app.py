@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
 from vrcc import __version__
 from vrcc.audio.source import MicSource
 from vrcc.core import hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, default_paths
-from vrcc.core.engine_stack import EngineStack, build_engine_stack
+from vrcc.core.engine_stack import build_engine_stack
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
 from vrcc.core.logs import setup_logging
