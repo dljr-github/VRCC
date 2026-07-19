@@ -372,6 +372,16 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     dlg._vad_spins["max_utterance_s"] = max_utt
     form.addRow(tr("Longest caption (s)"), max_utt)
 
+    inject = QCheckBox(tr("Send each sentence as soon as you finish it"))
+    inject.setChecked(dlg._cfg.vad.sentence_inject)
+    inject.setToolTip(
+        tr("Show a sentence in the chatbox at a natural pause instead of "
+           "waiting for you to stop talking.")
+    )
+    dlg._bind_checkbox(inject, dlg._cfg.vad, "sentence_inject")
+    dlg._sentence_inject_check = inject
+    form.addRow(inject)
+
     # Raw CTranslate2 kwargs tables (power users only).
     kw1 = QLabel(tr("Extra transcribe options (CTranslate2)"))
     outer.addWidget(kw1)
