@@ -290,6 +290,9 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
     store.config.audio.gain_db = 12.0
     store.config.vad.sentence_inject = False
     store.config.gui.update_check_enabled = False
+    store.config.stt.avg_logprob_gate = -2.5
+    store.config.stt.no_speech_gate = 0.9
+    store.config.stt.condition_on_previous_text = True
 
     dlg = SettingsDialog(store)
     monkeypatch.setattr(QMessageBox, "question",
@@ -307,6 +310,14 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         assert store.config.stt.source_language == "Japanese"
         assert store.config.translate.targets == ["English"]
         assert store.config.osc.ip == "10.0.0.5"
+        # Widgets themselves reflect the reset, not just the config: an open
+        # Advanced group must not show stale values after a reset.
+        assert dlg._stt_avg_gate_spin.value() == d.stt.avg_logprob_gate
+        assert dlg._stt_ns_gate_spin.value() == d.stt.no_speech_gate
+        assert dlg._stt_cond_check.isChecked() == d.stt.condition_on_previous_text
+        assert dlg._sensitivity.value() == 90 - round(d.vad.threshold * 100)
+        assert dlg._sentence_inject_check.isChecked() == d.vad.sentence_inject
+        assert dlg._update_check.isChecked() == d.gui.update_check_enabled
     finally:
         dlg.close()
         dlg.deleteLater()

@@ -350,6 +350,15 @@ def _resync_reset_widgets(dlg: "SettingsDialog") -> None:
     stt_compression = getattr(dlg, "_stt_compression_spin", None)
     if stt_compression is not None:
         stt_compression.setValue(cfg.stt.compression_ratio_gate)
+    avg_gate = getattr(dlg, "_stt_avg_gate_spin", None)
+    if avg_gate is not None:
+        avg_gate.setValue(cfg.stt.avg_logprob_gate)
+    ns_gate = getattr(dlg, "_stt_ns_gate_spin", None)
+    if ns_gate is not None:
+        ns_gate.setValue(cfg.stt.no_speech_gate)
+    cond = getattr(dlg, "_stt_cond_check", None)
+    if cond is not None:
+        cond.setChecked(cfg.stt.condition_on_previous_text)
 
     mt_beam = getattr(dlg, "_mt_beam_spin", None)
     if mt_beam is not None:

@@ -346,6 +346,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     avg_gate = dlg._dspin(-5.0, 0.0, dlg._cfg.stt.avg_logprob_gate, 2, 0.1)
     avg_gate.setToolTip(tr("Drop captions the model isn't confident about."))
     dlg._bind_float(avg_gate, dlg._cfg.stt, "avg_logprob_gate")
+    dlg._stt_avg_gate_spin = avg_gate
     adv_form.addRow(tr("Confidence cutoff"), avg_gate)
 
     ns_gate = dlg._dspin(0.0, 1.0, dlg._cfg.stt.no_speech_gate, 2, 0.05)
@@ -353,6 +354,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         tr("How sure the model must be that you actually spoke before captioning.")
     )
     dlg._bind_float(ns_gate, dlg._cfg.stt, "no_speech_gate")
+    dlg._stt_ns_gate_spin = ns_gate
     adv_form.addRow(tr("Silence sensitivity"), ns_gate)
 
     norepeat = dlg._spin(0, 6, dlg._cfg.stt.no_repeat_ngram_size)
@@ -388,6 +390,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         tr("Feed previous captions back in for consistency (can drift after a mistake).")
     )
     dlg._bind_checkbox(cond, dlg._cfg.stt, "condition_on_previous_text")
+    dlg._stt_cond_check = cond
     adv_form.addRow(cond)
 
     form.addRow(adv)
