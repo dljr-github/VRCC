@@ -134,15 +134,17 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
 
     dlg._sensitivity = QSlider(Qt.Orientation.Horizontal)
     dlg._sensitivity.setRange(30, 60)
-    dlg._sensitivity.setValue(int(round(dlg._cfg.vad.threshold * 100)))
+    # Higher = more sensitive = lower VAD speech threshold, so the slider reads
+    # the way its label promises. threshold 0.60..0.30 maps to slider 30..60.
+    dlg._sensitivity.setValue(90 - int(round(dlg._cfg.vad.threshold * 100)))
     dlg._sensitivity.setToolTip(
-        tr("How loud you need to speak before captioning starts.")
+        tr("Higher lets VRCC pick up quieter or softer speech. Lower ignores more.")
     )
 
     def on_sensitivity(v):
         if dlg._loading:
             return
-        dlg._cfg.vad.threshold = v / 100.0
+        dlg._cfg.vad.threshold = (90 - v) / 100.0
         dlg._changed()
     dlg._sensitivity.valueChanged.connect(on_sensitivity)
     sens_row, dlg._sensitivity_low, dlg._sensitivity_high = dlg._anchored_slider(dlg._sensitivity)
