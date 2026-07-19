@@ -398,6 +398,33 @@ class TestSilenceDecouple:
         assert not _by_type(events, SegFinal)
 
 
+class TestCommit:
+    def test_commit_starts_a_fresh_utterance_without_finalizing(self):
+        cfg = VadConfig()
+        vad = ScriptedVad([0.9, 0.9, 0.9])
+        seg = Segmenter(cfg, vad)
+        seg.process(_frame())  # speech start, utterance 1
+        assert seg.active
+        seg.request_commit(1)
+        events = seg.process(_frame())  # commit consumed here
+        assert not _by_type(events, SegFinal)  # STT side already sent it
+        assert not seg.active  # reset to idle
+        # A later frame begins utterance 2.
+        e = seg.process(_frame())
+        starts = _by_type(e, SegSpeechStart)
+        assert starts and starts[0].utterance_id == 2
+
+    def test_stale_commit_is_ignored(self):
+        cfg = VadConfig()
+        vad = ScriptedVad([0.9, 0.9])
+        seg = Segmenter(cfg, vad)
+        seg.process(_frame())  # utterance 1 active
+        seg.request_commit(99)  # not the active id
+        events = seg.process(_frame())
+        assert seg.active  # unchanged
+        assert not _by_type(events, SegFinal)
+
+
 class TestAbort:
     def test_abort_with_pending_speculative_returns_discard(self):
         # Speech, then 11 silence frames -> speculative in flight. Abort must

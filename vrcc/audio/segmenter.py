@@ -8,6 +8,7 @@ stdlib + numpy, zero Qt. Frame-math / hysteresis / reuse-identity noted inline.
 from __future__ import annotations
 
 import math
+import threading
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable
@@ -83,6 +84,8 @@ class Segmenter:
         self._frames_since_start = 0
         self._silence_run = 0
         self._pending_spec_samples: np.ndarray | None = None
+        self._commit_lock = threading.Lock()
+        self._commit_requested: int | None = None
 
     def _apply_config(self, cfg: VadConfig) -> None:
         """Precompute the frame-count thresholds from ``cfg`` + the frame
@@ -147,6 +150,14 @@ class Segmenter:
         it only blocks utterance *starts*, never frames already in flight."""
         return self._active
 
+    def request_commit(self, utterance_id: int) -> None:
+        """Ask the segmenter to end the current utterance and start a fresh one
+        on the next frame (the STT worker detected a finished sentence and has
+        already sent it). Thread-safe: called from the STT worker while the
+        audio thread runs process(); a plain flag store under a short lock."""
+        with self._commit_lock:
+            self._commit_requested = utterance_id
+
     def process(self, frame: np.ndarray) -> list[object]:
         events: list[object] = []
 
@@ -154,6 +165,20 @@ class Segmenter:
         vad_prob = float(self._vad_fn(frame))
         rms = float(np.sqrt(np.mean(frame**2)))
         events.append(SegLevel(rms=rms, vad_prob=vad_prob))
+
+        with self._commit_lock:
+            commit_id = self._commit_requested
+            self._commit_requested = None
+        if commit_id is not None and self._active and commit_id == self._utterance_id:
+            # STT already emitted this sentence; drop the buffer and start a
+            # fresh utterance. Keep the pre-roll ring so the next sentence's
+            # onset is not clipped. No SegFinal (would double-send). Return
+            # now instead of falling into the idle branch below: this exact
+            # frame is not fed into the state machine, so it cannot both
+            # close the old utterance and open the new one in one call --
+            # the next process() call starts the next utterance cleanly.
+            self._reset_to_idle()
+            return events
 
         is_speech = vad_prob >= self.cfg.threshold
         silence_bar = min(self.cfg.silence_threshold, self.cfg.threshold - MIN_GAP)
