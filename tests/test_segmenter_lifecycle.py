@@ -339,24 +339,49 @@ class TestConfigFrameCounts:
         assert seg._partial_frames == 10
 
 
+class TestPrerollBound:
+    def test_preroll_longer_than_speculative_is_clamped(self):
+        # pre_roll 400ms (13 frames) > speculative_silence 250ms (8 frames):
+        # an early commit can leave end-of-sentence speech sitting in the
+        # ring, which would then prepend onto the next utterance. The ring
+        # must never hold more than the speculative-silence window.
+        cfg = VadConfig(pre_roll_ms=400, speculative_silence_ms=250)
+        seg = Segmenter(cfg, ScriptedVad([]))
+        assert seg._speculative_frames == 8
+        assert seg._preroll_frames == 8
+        assert seg._preroll.maxlen == 8
+
+    def test_preroll_shorter_than_speculative_is_unaffected(self):
+        cfg = VadConfig(pre_roll_ms=150, speculative_silence_ms=250)
+        seg = Segmenter(cfg, ScriptedVad([]))
+        assert seg._preroll_frames == 5
+
+    def test_reconfigure_also_clamps_preroll(self):
+        seg = Segmenter(VadConfig(), ScriptedVad([]))
+        seg.reconfigure(VadConfig(pre_roll_ms=400, speculative_silence_ms=250))
+        assert seg._preroll_frames == 8
+        assert seg._preroll.maxlen == 8
+
+
 class TestReconfigure:
     # frame_ms = 32 at 16 kHz/512; these ms values round to distinct frame
-    # counts so a stale threshold would be caught.
+    # counts so a stale threshold would be caught. pre_roll is kept <=
+    # speculative_silence so the clamp in _apply_config is a no-op here.
     _NEW = dict(
-        speculative_silence_ms=64,   # 2 frames
-        finalize_silence_ms=128,     # 4 frames
+        speculative_silence_ms=96,   # 3 frames
+        finalize_silence_ms=160,     # 5 frames
         min_utterance_ms=96,         # 3 frames
-        pre_roll_ms=96,              # 3 frames
+        pre_roll_ms=64,              # 2 frames
         max_utterance_s=1.6,         # 50 frames
     )
 
     def test_reconfigure_recomputes_every_frame_count(self):
         seg = Segmenter(VadConfig(), ScriptedVad([]))
         seg.reconfigure(VadConfig(**self._NEW))
-        assert seg._speculative_frames == 2
-        assert seg._finalize_frames == 4
+        assert seg._speculative_frames == 3
+        assert seg._finalize_frames == 5
         assert seg._min_utterance_frames == 3
-        assert seg._preroll_frames == 3
+        assert seg._preroll_frames == 2
         assert seg._max_utterance_frames == 50
 
     def test_reconfigure_updates_cfg_so_threshold_applies(self):

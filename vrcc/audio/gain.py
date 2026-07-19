@@ -9,6 +9,8 @@ lock-free rationale as Segmenter.reconfigure).
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 # Auto-level target and floor in linear RMS (roughly -20 dBFS target, -46 dBFS
@@ -31,21 +33,26 @@ def _soft_clip(x: np.ndarray) -> np.ndarray:
 class GainProcessor:
     def __init__(self) -> None:
         self._gain_db = 0.0
-        self._auto = False
-        self._fixed_linear = 1.0
+        # (auto, fixed_linear) published as one tuple so a GUI-thread
+        # configure() can never be observed half-applied by the audio thread
+        # (single reference swap is GIL-atomic; no lock needed).
+        self._params: tuple[bool, float] = (False, 1.0)
         self._auto_gain = 1.0
 
     def configure(self, gain_db: float, auto: bool) -> None:
         self._gain_db = float(gain_db)
-        self._auto = bool(auto)
-        self._fixed_linear = 10.0 ** (self._gain_db / 20.0)
+        fixed_linear = 10.0 ** (self._gain_db / 20.0)
+        self._params = (bool(auto), fixed_linear)
 
     def reset(self) -> None:
         self._auto_gain = 1.0
 
     def process(self, frame: np.ndarray) -> np.ndarray:
         frame = np.asarray(frame, dtype=np.float32)
-        gain = self._next_auto_gain(frame) if self._auto else self._fixed_linear
+        if frame.size == 0:
+            return frame
+        auto, fixed_linear = self._params
+        gain = self._next_auto_gain(frame) if auto else fixed_linear
         if gain == 1.0:
             return frame
         scaled = frame * gain
@@ -55,10 +62,15 @@ class GainProcessor:
 
     def _next_auto_gain(self, frame: np.ndarray) -> float:
         rms = float(np.sqrt(np.mean(frame ** 2)))
+        if not math.isfinite(rms):
+            return self._auto_gain  # never let a bad frame poison the gain
         if rms < _NOISE_FLOOR_RMS:
             return self._auto_gain  # hold; don't amplify the noise floor
         desired = _TARGET_RMS / max(rms, 1e-9)
         desired = float(np.clip(desired, _MIN_GAIN, _MAX_GAIN))
         coeff = _ATTACK if desired > self._auto_gain else _RELEASE
-        self._auto_gain += coeff * (desired - self._auto_gain)
+        next_gain = self._auto_gain + coeff * (desired - self._auto_gain)
+        if not math.isfinite(next_gain):
+            return self._auto_gain
+        self._auto_gain = next_gain
         return self._auto_gain

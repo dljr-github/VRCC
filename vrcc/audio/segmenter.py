@@ -119,7 +119,12 @@ class Segmenter:
         self._speculative_frames = speculative
         self._finalize_frames = finalize
         self._min_utterance_frames = min_utterance
-        self._preroll_frames = preroll
+        # Invariant: pre-roll can never exceed the speculative-silence
+        # window. The commit path (_reset_to_idle) keeps the pre-roll ring
+        # across an early commit; if pre-roll held more audio than the
+        # speculative window, it could still contain end-of-sentence speech
+        # at commit time and prepend a stale word onto the next utterance.
+        self._preroll_frames = min(preroll, speculative)
         self._max_utterance_frames = max_utterance
         self._partial_frames = partial
 

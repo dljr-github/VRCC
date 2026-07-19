@@ -206,7 +206,7 @@ class MicSource:
         try:
             if status:
                 self._note_status(status)
-            mono = self._apply_gain(_to_mono(indata))
+            mono = _to_mono(indata)
             for frame in self._rechunker.push(mono):
                 self._emit(frame)
         except Exception:
@@ -226,7 +226,7 @@ class MicSource:
                 self._note_status(status)
             mono = _to_mono(indata)
             resampled = soxr.resample(mono, self._resample_in_rate, SAMPLE_RATE)
-            resampled = self._apply_gain(np.asarray(resampled, dtype=np.float32))
+            resampled = np.asarray(resampled, dtype=np.float32)
             for frame in self._rechunker.push(resampled):
                 self._emit(frame)
         except Exception:
@@ -238,8 +238,12 @@ class MicSource:
                 )
 
     def _emit(self, frame: np.ndarray) -> None:
+        # Gain is applied here, per exact 512-sample frame, rather than in
+        # the callback: the resample-fallback callback delivers host-sized
+        # chunks (~85 ms), which would pace auto-gain far slower than the
+        # direct path's 32 ms frames.
         try:
-            self._on_frame(frame)
+            self._on_frame(self._apply_gain(frame))
         except Exception:
             self._on_frame_errors += 1
             if self._on_frame_errors == 1:
