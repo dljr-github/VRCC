@@ -107,7 +107,12 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     # the way its label promises. threshold 0.60..0.30 maps to slider 30..60.
     dlg._sensitivity.setValue(90 - int(round(dlg._cfg.vad.threshold * 100)))
     dlg._sensitivity.setToolTip(
-        tr("Higher lets VRCC pick up quieter or softer speech. Lower ignores more.")
+        tr(
+            "How easily VRCC picks up your speech. Higher catches quieter or "
+            "softer talking; lower ignores more. This changes detection, not "
+            "loudness (use Microphone boost on the Voice tab to make a quiet "
+            "mic louder)."
+        )
     )
 
     def on_sensitivity(v):
