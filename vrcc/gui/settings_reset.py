@@ -34,6 +34,35 @@ _RESET_BODY = tr_noop(
 )
 _RESET_MODELS = tr_noop("Voice model: {voice}. Translation model: {translate}.")
 
+_RESET_DEFAULTS_BTN = tr_noop("Reset to default settings")
+_RESET_DEFAULTS_TIP = tr_noop(
+    "Put the tuning back to normal. Keeps your microphone, languages, "
+    "models, chatbox address and appearance."
+)
+_RESET_DEFAULTS_TITLE = tr_noop("Reset to default settings?")
+_RESET_DEFAULTS_BODY = tr_noop(
+    "This puts sensitivity, microphone boost, timing and other tuning back "
+    "to their normal values. Your microphone, languages, models, chatbox "
+    "address and appearance stay as they are."
+)
+
+# Tuning fields reset to AppConfig() defaults; everything else is preserved.
+_RESET_FIELDS = {
+    "vad": (
+        "threshold", "silence_threshold", "speculative_silence_ms",
+        "finalize_silence_ms", "min_utterance_ms", "pre_roll_ms",
+        "max_utterance_s", "sentence_inject", "sentence_min_words",
+    ),
+    "audio": ("gain_db", "auto_gain", "energy_gate_enabled", "energy_threshold"),
+    "stt": (
+        "beam_size", "temperature", "avg_logprob_gate", "no_speech_gate",
+        "no_repeat_ngram_size", "compression_ratio_gate",
+        "condition_on_previous_text",
+    ),
+    "translate": ("beam_size", "repetition_penalty", "no_repeat_ngram_size"),
+    "gui": ("profile", "update_check_enabled"),
+}
+
 # (dialog attr, config section, field) for the automatic-reset thread spins,
 # re-synced from config after a recommended reset.
 _THREAD_SPINS = (
@@ -54,6 +83,14 @@ def reset_button_text() -> str:
 
 def reset_button_tooltip() -> str:
     return tr(_RESET_TIP)
+
+
+def reset_defaults_button_text() -> str:
+    return tr(_RESET_DEFAULTS_BTN)
+
+
+def reset_defaults_button_tooltip() -> str:
+    return tr(_RESET_DEFAULTS_TIP)
 
 
 def _auto_device_text(resolved: str) -> str:
@@ -223,3 +260,111 @@ def _resync_all_widgets(dlg: "SettingsDialog") -> None:
         model_prompts.grey_unsupported_languages(
             source, cfg.stt.model, translating=cfg.translate.enabled
         )
+
+
+# -- Reset to default settings -----------------------------------------------
+
+
+def confirm_and_reset_defaults(dlg: "SettingsDialog") -> None:
+    """Confirm, then put the tuning knobs back to ``AppConfig()`` defaults.
+    Personal choices (mic, languages, models, OSC, appearance) are untouched.
+    No changes on No; works headless (``apply`` None)."""
+    from PySide6.QtWidgets import QMessageBox
+
+    answer = QMessageBox.question(
+        dlg,
+        tr(_RESET_DEFAULTS_TITLE),
+        tr(_RESET_DEFAULTS_BODY),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    if answer == QMessageBox.StandardButton.Yes:
+        _apply_reset_defaults(dlg)
+
+
+def _apply_reset_defaults(dlg: "SettingsDialog") -> None:
+    from vrcc.core.config import AppConfig
+
+    defaults = AppConfig()
+    for section, fields in _RESET_FIELDS.items():
+        target = getattr(dlg._cfg, section)
+        source = getattr(defaults, section)
+        for field in fields:
+            setattr(target, field, getattr(source, field))
+
+    dlg._loading = True
+    try:
+        _resync_reset_widgets(dlg)
+    finally:
+        dlg._loading = False
+
+    dlg._store.save_soon()
+    if dlg._apply is not None:
+        dlg._apply.apply_vad(dlg._cfg.vad)
+        dlg._apply.apply_audio_gain(dlg._cfg.audio)
+    dlg._applied = settings_live.snapshot(dlg._specs())
+
+
+def _resync_reset_widgets(dlg: "SettingsDialog") -> None:
+    """Re-read every reset field into its widget (under the ``_loading``
+    guard), so an open dialog reflects the reset immediately."""
+    cfg = dlg._cfg
+    sens = getattr(dlg, "_sensitivity", None)
+    if sens is not None:
+        sens.setValue(90 - int(round(cfg.vad.threshold * 100)))
+    for field, spin in dlg._vad_spins.items():
+        spin.setValue(getattr(cfg.vad, field))
+    inject = getattr(dlg, "_sentence_inject_check", None)
+    if inject is not None:
+        inject.setChecked(cfg.vad.sentence_inject)
+
+    gain = getattr(dlg, "_gain_slider", None)
+    if gain is not None:
+        gain.setValue(int(round(cfg.audio.gain_db)))
+    auto = getattr(dlg, "_auto_gain_check", None)
+    if auto is not None:
+        auto.setChecked(cfg.audio.auto_gain)
+    if gain is not None:
+        # The resync runs under _loading, so auto-gain's toggled handler
+        # (which normally flips this) never fires: set it by hand.
+        gain.setEnabled(not cfg.audio.auto_gain)
+    gate = getattr(dlg, "_gate_check", None)
+    if gate is not None:
+        gate.setChecked(cfg.audio.energy_gate_enabled)
+    noise = getattr(dlg, "_noise_slider", None)
+    if noise is not None:
+        noise.setValue(cfg.audio.energy_threshold)
+    noise_label = getattr(dlg, "_noise_value_label", None)
+    if noise_label is not None:
+        noise_label.setText(str(cfg.audio.energy_threshold))
+
+    stt_beam = getattr(dlg, "_stt_beam_spin", None)
+    if stt_beam is not None:
+        stt_beam.setValue(cfg.stt.beam_size)
+    stt_temp = getattr(dlg, "_stt_temp_spin", None)
+    if stt_temp is not None:
+        stt_temp.setValue(cfg.stt.temperature)
+    stt_norepeat = getattr(dlg, "_stt_norepeat_spin", None)
+    if stt_norepeat is not None:
+        stt_norepeat.setValue(cfg.stt.no_repeat_ngram_size)
+    stt_compression = getattr(dlg, "_stt_compression_spin", None)
+    if stt_compression is not None:
+        stt_compression.setValue(cfg.stt.compression_ratio_gate)
+
+    mt_beam = getattr(dlg, "_mt_beam_spin", None)
+    if mt_beam is not None:
+        mt_beam.setValue(cfg.translate.beam_size)
+    mt_rep = getattr(dlg, "_mt_rep_spin", None)
+    if mt_rep is not None:
+        mt_rep.setValue(cfg.translate.repetition_penalty)
+    mt_norepeat = getattr(dlg, "_mt_norepeat_spin", None)
+    if mt_norepeat is not None:
+        mt_norepeat.setValue(cfg.translate.no_repeat_ngram_size)
+
+    update_check = getattr(dlg, "_update_check", None)
+    if update_check is not None:
+        update_check.setChecked(cfg.gui.update_check_enabled)
+
+    mode = getattr(dlg, "_mode", None)
+    if mode is not None:
+        mode.set_value("Quality" if cfg.gui.profile == "quality" else "Speed")

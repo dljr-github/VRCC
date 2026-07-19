@@ -223,6 +223,13 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     reset.clicked.connect(lambda: settings_reset.confirm_and_reset(dlg))
     form.addRow("", reset)
 
+    # A separate reset for the tuning knobs (VAD/gain/STT/MT quality gates):
+    # it never touches the personal choices the recommended reset also spares.
+    reset_defaults = QPushButton(settings_reset.reset_defaults_button_text())
+    reset_defaults.setToolTip(settings_reset.reset_defaults_button_tooltip())
+    reset_defaults.clicked.connect(lambda: settings_reset.confirm_and_reset_defaults(dlg))
+    form.addRow("", reset_defaults)
+
     return page
 
 
@@ -293,6 +300,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         tr("Skip very quiet sounds so background noise doesn't trigger captions.")
     )
     dlg._bind_checkbox(gate, dlg._cfg.audio, "energy_gate_enabled")
+    dlg._gate_check = gate
     form.addRow(gate)
 
     slider = QSlider(Qt.Orientation.Horizontal)
@@ -312,6 +320,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         dlg._changed()
     slider.valueChanged.connect(on_gate)
     gate_row, dlg._noise_low, dlg._noise_high = dlg._anchored_slider(slider, dlg._noise_value_label)
+    dlg._noise_slider = slider
     form.addRow(tr("Background noise level"), gate_row)
 
     settings_audio.build_gain_controls(dlg, form)

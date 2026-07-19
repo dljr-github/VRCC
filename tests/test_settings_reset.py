@@ -267,3 +267,46 @@ def test_headless_construction_and_reset_do_not_raise(qapp, tmp_path, monkeypatc
     finally:
         dlg.close()
         dlg.deleteLater()
+
+
+def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from vrcc.core.config import AppConfig, ConfigStore
+    from vrcc.gui import settings_reset
+    from vrcc.gui.settings import SettingsDialog
+
+    QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.load()
+    # Personal choices to preserve.
+    store.config.audio.device = "My USB Mic"
+    store.config.stt.source_language = "Japanese"
+    store.config.translate.targets = ["English"]
+    store.config.osc.ip = "10.0.0.5"
+    # Tuning to be reset away from defaults.
+    store.config.vad.threshold = 0.60
+    store.config.audio.gain_db = 12.0
+    store.config.vad.sentence_inject = False
+    store.config.gui.update_check_enabled = False
+
+    dlg = SettingsDialog(store)
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.StandardButton.Yes)
+    try:
+        settings_reset.confirm_and_reset_defaults(dlg)
+        d = AppConfig()
+        # Tuning reset.
+        assert store.config.vad.threshold == d.vad.threshold
+        assert store.config.audio.gain_db == d.audio.gain_db
+        assert store.config.vad.sentence_inject == d.vad.sentence_inject
+        assert store.config.gui.update_check_enabled == d.gui.update_check_enabled
+        # Personal preserved.
+        assert store.config.audio.device == "My USB Mic"
+        assert store.config.stt.source_language == "Japanese"
+        assert store.config.translate.targets == ["English"]
+        assert store.config.osc.ip == "10.0.0.5"
+    finally:
+        dlg.close()
+        dlg.deleteLater()
