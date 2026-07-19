@@ -187,7 +187,11 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     # queued before request_commit cut the utterance; the common commit path
     # emits no final at all.
     if p._spec.pop_emitted_early(job.utterance_id):
-        p._resolve_typing(job.utterance_id)
+        # The early send's forward_final may have handed typing-off to a
+        # still-running MT job (own_by_mt): resolving it here as well would
+        # turn the indicator off while that job is still translating.
+        if not p._typing.is_owned_by_mt(job.utterance_id):
+            p._resolve_typing(job.utterance_id)
         _mark_finalized(p, job.utterance_id)
         return
 

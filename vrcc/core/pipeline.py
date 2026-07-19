@@ -488,12 +488,10 @@ class Pipeline:
             logger.warning("chatbox.set_typing raised; ignoring", exc_info=True)
 
     def _begin_typing(self, utterance_id: int) -> None:
-        self._typing.begin(utterance_id)
-        self._set_typing(True)
+        self._typing.begin(utterance_id, self._set_typing)  # see TypingTracker
 
     def _resolve_typing(self, utterance_id: int) -> None:
-        if self._typing.resolve(utterance_id):
-            self._set_typing(False)
+        self._typing.resolve(utterance_id, self._set_typing)
 
     # _mark_finalized (SpecCache/TypingTracker bookkeeping) and _enqueue
     # (backpressured queue put) live in pipeline_jobs alongside the job code

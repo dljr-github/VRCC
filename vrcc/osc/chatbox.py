@@ -269,7 +269,9 @@ class ChatboxSender:
                 )
                 return
             self._last_typing = typing
-        self._bus.publish(TypingStateChanged(typing))
+            # Publish INSIDE the lock, mirroring the send above: two threads'
+            # publish order must match their actual send order, never invert.
+            self._bus.publish(TypingStateChanged(typing))
 
     def reconfigure(self, ip: str, port: int) -> None:
         """Atomically swap the OSC client for one pointed at `ip`/`port`.

@@ -8,7 +8,7 @@ calls where one lock block did two things.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from vrcc.stt.engine import SttResult
@@ -105,7 +105,16 @@ class SpecCache:
 
 class TypingTracker:
     """Typing-indicator bookkeeping: in-flight = typing on (speculative)
-    until resolved (submit / gated-None / discard). Guarded by one lock."""
+    until resolved (submit / gated-None / discard). Guarded by one lock.
+
+    ``begin``/``resolve`` take an optional ``on_change`` callback invoked
+    UNDER the same lock as the state update, so two threads' on/off calls
+    land in the same order as the state changes they follow from -- a
+    concurrent begin() can never land between a resolve()'s "nothing in
+    flight" check and its own callback. The callback is expected to be a
+    fast, fire-and-forget OSC send (see pipeline._set_typing); it must never
+    call back into this tracker (no lock re-entry, `_lock` is a plain Lock).
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -119,22 +128,40 @@ class TypingTracker:
             self._in_flight.clear()
             self._owned_by_mt.clear()
 
-    def begin(self, utterance_id: int) -> None:
+    def begin(
+        self, utterance_id: int, on_change: "Callable[[bool], None] | None" = None
+    ) -> None:
         with self._lock:
             self._in_flight.add(utterance_id)
+            if on_change is not None:
+                on_change(True)
 
-    def resolve(self, utterance_id: int) -> bool:
+    def resolve(
+        self, utterance_id: int, on_change: "Callable[[bool], None] | None" = None
+    ) -> bool:
         """Drop the utterance from both sets; True when nothing is left in
-        flight (the caller turns the typing indicator off)."""
+        flight. When given, ``on_change(False)`` fires in that case, still
+        under the lock (see class docstring)."""
         with self._lock:
             self._in_flight.discard(utterance_id)
             self._owned_by_mt.discard(utterance_id)
-            return not self._in_flight
+            empty = not self._in_flight
+            if empty and on_change is not None:
+                on_change(False)
+            return empty
 
     def own_by_mt(self, utterance_id: int) -> None:
         """Register MT ownership of typing-off (exempt from orphan pruning)."""
         with self._lock:
             self._owned_by_mt.add(utterance_id)
+
+    def is_owned_by_mt(self, utterance_id: int) -> bool:
+        """Whether a pending MT job currently owns this utterance's
+        typing-off (see own_by_mt): a caller about to resolve typing for a
+        different reason must skip it while true, so it doesn't turn the
+        indicator off out from under the MT job that still owns it."""
+        with self._lock:
+            return utterance_id in self._owned_by_mt
 
     def prune_orphans(self, cutoff: int) -> tuple[set[int], bool]:
         """Defense in depth: the segmenter invariant resolves every in-flight
