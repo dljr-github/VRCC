@@ -1,0 +1,64 @@
+"""Capture-stage microphone gain: a fixed dB boost or a smoothed auto-level.
+
+Applied to the mono 16 kHz signal before rechunking, so the level meter, the
+VAD and Whisper all see the boosted audio. Pure numpy, zero Qt. configure()
+runs on the GUI thread while process() runs on the audio callback thread; the
+parameters are plain attribute stores (GIL-atomic), so no lock is taken (same
+lock-free rationale as Segmenter.reconfigure).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+# Auto-level target and floor in linear RMS (roughly -20 dBFS target, -46 dBFS
+# floor). Below the floor a frame is treated as silence and gain is held.
+_TARGET_RMS = 0.1
+_NOISE_FLOOR_RMS = 0.005
+_MAX_GAIN = 10.0 ** (30.0 / 20.0)  # +30 dB ceiling
+_MIN_GAIN = 1.0
+# Per-frame smoothing (32 ms frames): fast attack, slow release.
+_ATTACK = 0.2
+_RELEASE = 0.02
+
+
+def _soft_clip(x: np.ndarray) -> np.ndarray:
+    """Bound to [-1, 1] with a tanh knee so a large boost saturates instead of
+    hard-clipping into audible crackle."""
+    return np.tanh(x).astype(np.float32)
+
+
+class GainProcessor:
+    def __init__(self) -> None:
+        self._gain_db = 0.0
+        self._auto = False
+        self._fixed_linear = 1.0
+        self._auto_gain = 1.0
+
+    def configure(self, gain_db: float, auto: bool) -> None:
+        self._gain_db = float(gain_db)
+        self._auto = bool(auto)
+        self._fixed_linear = 10.0 ** (self._gain_db / 20.0)
+
+    def reset(self) -> None:
+        self._auto_gain = 1.0
+
+    def process(self, frame: np.ndarray) -> np.ndarray:
+        frame = np.asarray(frame, dtype=np.float32)
+        gain = self._next_auto_gain(frame) if self._auto else self._fixed_linear
+        if gain == 1.0:
+            return frame
+        scaled = frame * gain
+        if np.max(np.abs(scaled)) > 1.0:
+            return _soft_clip(scaled)
+        return scaled.astype(np.float32)
+
+    def _next_auto_gain(self, frame: np.ndarray) -> float:
+        rms = float(np.sqrt(np.mean(frame ** 2)))
+        if rms < _NOISE_FLOOR_RMS:
+            return self._auto_gain  # hold; don't amplify the noise floor
+        desired = _TARGET_RMS / max(rms, 1e-9)
+        desired = float(np.clip(desired, _MIN_GAIN, _MAX_GAIN))
+        coeff = _ATTACK if desired > self._auto_gain else _RELEASE
+        self._auto_gain += coeff * (desired - self._auto_gain)
+        return self._auto_gain
