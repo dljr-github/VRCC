@@ -378,6 +378,11 @@ def test_a_newer_submit_replaces_the_whole_remaining_split_chunk_group():
     assert all(e.utterance_id == 2 for e in received)
 
 
+# submit_partial (the live-caption send path that never publishes
+# ChatboxSent) is covered separately in test_chatbox_partial.py, to keep
+# this file under the line cap.
+
+
 def test_set_typing_sends_immediately_and_dedupes_repeats():
     cfg = make_cfg()
     bus = EventBus()

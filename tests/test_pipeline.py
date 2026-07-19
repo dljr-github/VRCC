@@ -334,6 +334,10 @@ def test_send_to_vrchat_false_skips_chatbox_but_publishes_events():
     assert env.chatbox.typing == []  # typing also skipped
 
 
+# Live-partial dispatch, coalescing, and the partial chatbox send live in
+# test_pipeline_partial.py (kept separate to stay under the line cap).
+
+
 # -- behavior 9: worker exceptions ------------------------------------------
 
 

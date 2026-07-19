@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from vrcc.audio.segmenter import (
-    SegDiscard, SegFinal, SegLevel, SegSpeculative, SegSpeechStart,
+    SegDiscard, SegFinal, SegLevel, SegPartial, SegSpeculative, SegSpeechStart,
 )
 from vrcc.core import pipeline_frames, pipeline_jobs
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
@@ -101,6 +101,13 @@ class Pipeline:
         # Speculative-reuse and typing bookkeeping (each guards its own lock).
         self._spec = SpecCache()
         self._typing = TypingTracker()
+
+        # Caps in-flight partial-transcription jobs at one: set in
+        # handle_partial (segmenter thread), cleared in process_stt_job (STT
+        # worker thread), both under this lock, so a burst of SegPartial
+        # events can never flood the shared STT queue and starve final jobs.
+        self._partial_lock = threading.Lock()
+        self._partial_pending = False
 
         self._dropped_frames = 0
 
@@ -379,6 +386,8 @@ class Pipeline:
             pipeline_jobs.handle_final(self, event)
         elif isinstance(event, SegDiscard):
             pipeline_jobs.handle_discard(self, event)
+        elif isinstance(event, SegPartial):
+            pipeline_jobs.handle_partial(self, event)
         # Unknown event types are ignored.
 
     def _should_caption(self) -> bool:

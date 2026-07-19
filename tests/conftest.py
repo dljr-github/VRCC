@@ -138,6 +138,7 @@ class FakeChatbox:
     def __init__(self, fail_submits: bool = False) -> None:
         self.submits: list = []
         self.messages: list = []
+        self.partials: list = []
         self.typing: list = []
         self.log: list = []
         self.fail_submits = fail_submits
@@ -158,6 +159,13 @@ class FakeChatbox:
             self.messages.append((original, list(translations), utterance_id))
         text = format_message(original, list(translations), OscConfig())
         self.submit(text, utterance_id)
+
+    def submit_partial(self, text) -> None:
+        with self._lock:
+            self.log.append(("partial", text))
+            if self.fail_submits:
+                raise RuntimeError("chatbox down")
+            self.partials.append(text)
 
     def set_typing(self, value) -> None:
         with self._lock:

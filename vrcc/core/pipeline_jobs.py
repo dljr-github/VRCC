@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vrcc.core import languages
-from vrcc.core.events import AppError, PhraseRecognized, PhraseTranslated
+from vrcc.core.events import AppError, PhrasePartial, PhraseRecognized, PhraseTranslated
 from vrcc.core.pipeline_state import _MISSING
 from vrcc.core.sentences import ends_sentence
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     import numpy as np
 
-    from vrcc.audio.segmenter import SegDiscard, SegFinal, SegSpeculative
+    from vrcc.audio.segmenter import SegDiscard, SegFinal, SegPartial, SegSpeculative
     from vrcc.core.languages import Language
     from vrcc.core.pipeline import Pipeline
     from vrcc.stt.engine import SttResult
@@ -40,6 +40,9 @@ class _SttJob:
     samples: "np.ndarray"
     speculative: bool
     samples_id: int
+    # A live partial: transcribe-and-publish only, never stored/forwarded/
+    # finalized (see the top-of-function branch in process_stt_job).
+    partial: bool = False
 
 
 @dataclass
@@ -83,10 +86,38 @@ def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._resolve_typing(event.utterance_id)
 
 
+def handle_partial(p: "Pipeline", event: "SegPartial") -> None:
+    """Queue at most one in-flight partial transcription. Additive to the
+    speculative/final flow: never touches SpecCache or typing, never begins
+    typing (the speculative pass already owns that indicator)."""
+    if not p._config.vad.live_partials:
+        return
+    if not p._should_caption():
+        return
+    with p._partial_lock:
+        if p._partial_pending:
+            return  # one already in flight: this snapshot is coalesced away
+        p._partial_pending = True
+    p._enqueue(
+        p._stt_queue,
+        _SttJob(
+            event.utterance_id,
+            event.samples,
+            speculative=False,
+            samples_id=id(event.samples),
+            partial=True,
+        ),
+    )
+
+
 # -- STT job processing ------------------------------------------------------
 
 
 def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
+    if job.partial:
+        _process_partial_job(p, job, stop)
+        return
+
     key = (job.utterance_id, job.samples_id)
 
     if job.speculative:
@@ -134,6 +165,23 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     if stop.is_set():
         return  # abandoned mid-call: discard, publish nothing
     forward_final(p, job.utterance_id, result)
+
+
+def _process_partial_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
+    """Transcribe-and-publish only: never touches SpecCache, forward_final,
+    mark_finalized, or typing. The pending flag is cleared right after
+    transcribe, on every path (stop/no-engine/gated-None included), so a
+    coalesced partial is always free to fire again."""
+    result = p._transcribe(job.samples)
+    with p._partial_lock:
+        p._partial_pending = False
+    if stop.is_set():
+        return  # abandoned mid-call: discard, publish nothing
+    if result is _NO_ENGINE or result is None:
+        return  # engine swapped out, or quality-gated: nothing to show
+    p._bus.publish(PhrasePartial(job.utterance_id, result.text))
+    if p._config.osc.send_to_vrchat:
+        safe_submit_partial(p, result.text)
 
 
 def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
@@ -289,6 +337,17 @@ def safe_submit(
         submit_to_chatbox(p, original, translations, utterance_id)
     except Exception as exc:  # noqa: BLE001 -- a send failure is not fatal
         logger.exception("chatbox submit failed")
+        p._bus.publish(AppError("CHATBOX_SEND_FAILED", str(exc)))
+
+
+def safe_submit_partial(p: "Pipeline", text: str) -> None:
+    """`ChatboxSender.submit_partial` guarded the same way `safe_submit`
+    guards `submit_to_chatbox`: a send failure publishes ``AppError`` instead
+    of taking down the STT worker."""
+    try:
+        p._chatbox.submit_partial(text)
+    except Exception as exc:  # noqa: BLE001 -- a send failure is not fatal
+        logger.exception("chatbox partial submit failed")
         p._bus.publish(AppError("CHATBOX_SEND_FAILED", str(exc)))
 
 
