@@ -244,6 +244,32 @@ def test_translate_gate_reads_live_config_not_ctor_snapshot(qapp, tmp_path):
         w.close(); w.deleteLater(); bridge.detach()
 
 
+def test_phrase_partial_renders_a_listening_row(qapp, tmp_path):
+    w, bridge = _window(tmp_path)
+    try:
+        w._on_partial(SimpleNamespace(utterance_id=1, text="hel"))
+        assert "hel" in w._log.toPlainText()
+        assert "listening" in w._log.toPlainText().lower()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_phrase_partial_then_recognized_firms_the_same_row(qapp, tmp_path):
+    # No duplicate row: the listening line updates in place once the
+    # sentence firms up, it doesn't stack a second entry underneath.
+    w, bridge = _window(tmp_path)
+    try:
+        w._on_partial(SimpleNamespace(utterance_id=1, text="hel"))
+        w._on_phrase_recognized(SimpleNamespace(utterance_id=1, text="hello there"))
+        assert len(w._caption_model.rows()) == 1
+        assert w._caption_model.rows()[0].original == "hello there"
+        text = w._log.toPlainText()
+        assert "hello there" in text
+        assert "listening" not in text.lower()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
 def test_translate_gate_requires_a_live_mt_engine(qapp, tmp_path):
     # Regression: config.translate.enabled alone marked a row TRANSLATING
     # even when no MT engine had ever loaded (or was swapped out). With

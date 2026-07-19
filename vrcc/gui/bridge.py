@@ -22,6 +22,7 @@ from vrcc.core.events import (
     EngineStateChanged,
     MicLevel,
     MuteChanged,
+    PhrasePartial,
     PhraseRecognized,
     PhraseTranslated,
     UpdateCheckResult,
@@ -44,6 +45,7 @@ class BusBridge(QObject):
 
     mic_level = Signal(float, float)  # rms, vad_prob
     phrase_recognized = Signal(object)  # PhraseRecognized
+    phrase_partial = Signal(object)  # PhrasePartial
     phrase_translated = Signal(object)  # PhraseTranslated
     chatbox_sent = Signal(object)  # ChatboxSent
     mute_changed = Signal(object)  # MuteChanged
@@ -64,6 +66,7 @@ class BusBridge(QObject):
         self._unsubs: list[Callable[[], None]] = [
             bus.subscribe(MicLevel, self._on_mic_level),
             bus.subscribe(PhraseRecognized, self.phrase_recognized.emit),
+            bus.subscribe(PhrasePartial, self.phrase_partial.emit),
             bus.subscribe(PhraseTranslated, self.phrase_translated.emit),
             bus.subscribe(ChatboxSent, self.chatbox_sent.emit),
             bus.subscribe(MuteChanged, self.mute_changed.emit),
