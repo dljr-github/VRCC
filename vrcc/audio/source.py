@@ -81,7 +81,7 @@ class MicSource:
         self,
         device: int | None = None,
         stream_factory: Callable[..., object] | None = None,
-        gain: "GainProcessor | None" = None,
+        gain: GainProcessor | None = None,
     ) -> None:
         self._device = device
         self._stream_factory = stream_factory if stream_factory is not None else sd.InputStream

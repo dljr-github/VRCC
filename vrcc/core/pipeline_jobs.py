@@ -254,3 +254,40 @@ def safe_submit(
     except Exception as exc:  # noqa: BLE001 -- a send failure is not fatal
         logger.exception("chatbox submit failed")
         p._bus.publish(AppError("CHATBOX_SEND_FAILED", str(exc)))
+
+
+# -- typed text ---------------------------------------------------------------
+
+
+def submit_typed(p: "Pipeline", text: str) -> bool:
+    """Send typed text straight through translation to the chatbox, bypassing
+    STT and mute/captioning gating (utterance id 0). Returns False
+    (PIPELINE_NOT_RUNNING) when not started, keeping the text uncaptured."""
+    if not text or not text.strip():
+        return False
+    if not p._started:
+        p._bus.publish(
+            AppError(
+                "PIPELINE_NOT_RUNNING",
+                "Engines are still loading. Try again in a moment",
+            )
+        )
+        return False
+    src_cfg = p._config.stt.source_language
+    src = languages.get("English") if src_cfg == "auto" else languages.get(src_cfg)
+    p._bus.publish(
+        PhraseRecognized(
+            utterance_id=0,
+            text=text,
+            language=src.whisper,
+            avg_logprob=0.0,
+            no_speech_prob=0.0,
+        )
+    )
+    if p._mt is not None and p._config.translate.enabled:
+        p._enqueue(p._mt_queue, _MtJob(0, text, src, manage_typing=False))
+    else:
+        # Runs on the caller's (GUI) thread: never propagate a chatbox
+        # failure back into it.
+        safe_submit(p, text, [], 0)
+    return True

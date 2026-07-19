@@ -19,9 +19,9 @@ import numpy as np
 from vrcc.audio.segmenter import (
     SegDiscard, SegFinal, SegLevel, SegSpeculative, SegSpeechStart,
 )
-from vrcc.core import languages, pipeline_frames, pipeline_jobs
-from vrcc.core.events import AppError, MicLevel, PhraseRecognized, SpeechStarted
-from vrcc.core.pipeline_jobs import _NO_ENGINE, _MtJob
+from vrcc.core import pipeline_frames, pipeline_jobs
+from vrcc.core.events import AppError, MicLevel, SpeechStarted
+from vrcc.core.pipeline_jobs import _NO_ENGINE
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
 
 if TYPE_CHECKING:
@@ -421,35 +421,7 @@ class Pipeline:
         """Send typed text straight through translation to the chatbox,
         bypassing STT and mute/captioning gating (utterance id 0). Returns False
         (``PIPELINE_NOT_RUNNING``) when not started, keeping the text uncaptured."""
-        if not text or not text.strip():
-            return False
-        if not self._started:
-            self._bus.publish(
-                AppError(
-                    "PIPELINE_NOT_RUNNING",
-                    "Engines are still loading. Try again in a moment",
-                )
-            )
-            return False
-        src_cfg = self._config.stt.source_language
-        src = languages.get("English") if src_cfg == "auto" else languages.get(src_cfg)
-
-        self._bus.publish(
-            PhraseRecognized(
-                utterance_id=0,
-                text=text,
-                language=src.whisper,
-                avg_logprob=0.0,
-                no_speech_prob=0.0,
-            )
-        )
-        if self._mt is not None and self._config.translate.enabled:
-            self._enqueue(self._mt_queue, _MtJob(0, text, src, manage_typing=False))
-        else:
-            # Runs on the caller's (GUI) thread: never propagate a chatbox
-            # failure back into it.
-            pipeline_jobs.safe_submit(self, text, [], 0)
-        return True
+        return pipeline_jobs.submit_typed(self, text)
 
     # -- typing helpers ------------------------------------------------------
 
