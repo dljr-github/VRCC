@@ -476,3 +476,15 @@ def test_profiles_reference_only_real_config_fields():
             section = getattr(cfg, section_name)
             for field_name in fields:
                 assert hasattr(section, field_name)
+
+
+def test_new_feature_defaults():
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    assert cfg.audio.gain_db == 0.0
+    assert cfg.audio.auto_gain is False
+    assert cfg.vad.silence_threshold == 0.35
+    assert cfg.vad.sentence_inject is True
+    assert cfg.vad.sentence_min_words == 2
+    assert cfg.gui.update_check_enabled is True

@@ -27,15 +27,27 @@ class AudioConfig(BaseModel):
     device: str = "auto"
     energy_gate_enabled: bool = False
     energy_threshold: int = 300
+    # Capture gain applied before VAD/STT (dB). auto_gain overrides the fixed
+    # value with a smoothed auto-level toward a target loudness.
+    gain_db: float = 0.0
+    auto_gain: bool = False
 
 
 class VadConfig(BaseModel):
     threshold: float = 0.5
+    # Silence bar, decoupled from the speech threshold so raising sensitivity
+    # (lowering the speech threshold) never raises the silence bar and chops
+    # words mid-utterance. Clamped below the speech threshold at use.
+    silence_threshold: float = 0.35
     speculative_silence_ms: int = 350
     finalize_silence_ms: int = 600
     min_utterance_ms: int = 500
     pre_roll_ms: int = 150
     max_utterance_s: float = 28.0
+    # Emit a sentence to the chatbox as soon as a speculative transcription
+    # ends in terminal punctuation, instead of waiting for the full stop.
+    sentence_inject: bool = True
+    sentence_min_words: int = 2
 
 
 class SttConfig(BaseModel):
@@ -109,6 +121,8 @@ class GuiConfig(BaseModel):
     # schema change; unknown values resolve to English at startup.
     ui_language: str = "auto"
     window_geometry: str = ""
+    # Check GitHub releases on launch and offer a notice. Opt out here.
+    update_check_enabled: bool = True
 
 
 class AppConfig(BaseModel):
