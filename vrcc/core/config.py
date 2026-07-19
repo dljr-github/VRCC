@@ -30,7 +30,7 @@ class AudioConfig(BaseModel):
     # Capture gain applied before VAD/STT (dB). auto_gain overrides the fixed
     # value with a smoothed auto-level toward a target loudness.
     gain_db: float = 0.0
-    auto_gain: bool = False
+    auto_gain: bool = True
 
 
 class VadConfig(BaseModel):

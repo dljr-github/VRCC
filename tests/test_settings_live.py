@@ -127,10 +127,10 @@ def test_gain_edit_runs_audio_gain_hook_once_without_source_restart():
     cfg, apply, theme, applied = _env()
     cfg.audio.gain_db = 6.0
     _flush(cfg, apply, theme, applied)
-    assert apply.calls == [("audio_gain", 6.0, False)]
+    assert apply.calls == [("audio_gain", 6.0, True)]
     # A second flush with no further change must not re-fire the hook.
     _flush(cfg, apply, theme, applied)
-    assert apply.calls == [("audio_gain", 6.0, False)]
+    assert apply.calls == [("audio_gain", 6.0, True)]
 
 
 def test_ui_language_is_not_a_live_group():

@@ -41,6 +41,10 @@ def test_gain_controls_bind(qapp, tmp_path):
     store = _store(tmp_path)
     dlg = SettingsDialog(store)
     try:
+        # Start from a known state (auto off), since auto is on by default.
+        dlg._auto_gain_check.setChecked(False)
+        assert store.config.audio.auto_gain is False
+        assert dlg._gain_slider.isEnabled()
         dlg._gain_slider.setValue(12)
         assert store.config.audio.gain_db == 12.0
         dlg._auto_gain_check.setChecked(True)
