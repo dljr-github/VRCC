@@ -4,6 +4,7 @@ live engine hot-swap primitives (``set_stt``/``set_mt``/``set_swapping``).
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
 
@@ -11,6 +12,23 @@ from vrcc.audio.segmenter import SegFinal
 from vrcc.core.events import AppError, PhraseRecognized, PhraseTranslated
 
 from .conftest import FakeChatbox, FakeMt, FakeMute, FakeStt, collect, make_pipeline, make_result, running, sample
+
+
+class _FullQueue:
+    """A ``queue.Queue`` stand-in whose ``put_nowait`` always raises
+    ``Full``. ``put`` (the blocking backpressure call) records that it was
+    reached and raises too, so a test can prove ``submit_typed`` never falls
+    back to the blocking path on the GUI thread."""
+
+    def __init__(self) -> None:
+        self.put_calls = 0
+
+    def put_nowait(self, item) -> None:
+        raise queue.Full()
+
+    def put(self, item, timeout=None) -> None:
+        self.put_calls += 1
+        raise AssertionError("submit_typed must not use the blocking enqueue")
 
 
 def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
@@ -120,6 +138,44 @@ def test_submit_typed_works_after_start():
         assert env.pipeline.submit_typed("after start") is True
         assert _wait_until(lambda: len(env.chatbox.submits) == 1)
     assert not any(e.code == "PIPELINE_NOT_RUNNING" for e in errors)
+
+
+def test_submit_typed_full_mt_queue_refuses_without_blocking():
+    # Regression: submit_typed used to route through the blocking backpressure
+    # helper (_enqueue), which is fine on a worker thread but freezes the GUI
+    # thread (input/repaints/Stop) when a slow model leaves the MT queue full.
+    # The Send button must refuse instantly instead of waiting for a slot.
+    env = make_pipeline(mt=FakeMt())
+    errors = collect(env.bus, AppError)
+    recognized = collect(env.bus, PhraseRecognized)
+    fake = _FullQueue()
+    with running(env.pipeline):
+        real_queue = env.pipeline._mt_queue  # the object the MT worker thread
+        # actually reads (passed by reference as a start() thread arg);
+        # reassigning the attribute only affects what a NEW submit_typed call
+        # sees, so it must be swapped back before stop() tears the worker down
+        # even if the assertion below fails.
+        env.pipeline._mt_queue = fake
+        try:
+            accepted = env.pipeline.submit_typed("busy text")
+        finally:
+            env.pipeline._mt_queue = real_queue
+    assert accepted is False  # caller keeps the user's text on refusal
+    assert [e.code for e in errors] == ["PIPELINE_BUSY"]
+    assert recognized == []  # no phantom caption-log entry
+    assert env.chatbox.submits == []
+    assert fake.put_calls == 0  # never fell back to the blocking put()
+
+
+def test_submit_typed_enqueues_normally_when_queue_has_room():
+    # Regression companion: the non-blocking put_nowait path must still
+    # accept a normal submission and report success.
+    env = make_pipeline(mt=FakeMt())
+    errors = collect(env.bus, AppError)
+    with running(env.pipeline):
+        assert env.pipeline.submit_typed("room to spare") is True
+        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+    assert not any(e.code == "PIPELINE_BUSY" for e in errors)
 
 
 # -- hotswap primitives (Task 2): live engine swap + swapping gate ----------
