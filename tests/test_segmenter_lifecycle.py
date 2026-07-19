@@ -9,7 +9,7 @@ import pytest
 
 from vrcc.audio.segmenter import (
     FRAME,
-    HYSTERESIS_GAP,
+    MIN_GAP,
     SegDiscard,
     SegFinal,
     SegLevel,
@@ -311,11 +311,12 @@ class TestHysteresisDeadBand:
         assert len(_by_type(events, SegSpeechStart)) == 1
 
     def test_vad_exactly_at_lower_bound_is_dead_band(self):
-        # Boundary: silence is STRICTLY below `threshold - 0.15`. Feed the
-        # exact same float expression the implementation computes, so the
-        # comparison is x < x == False regardless of float representation.
+        # Boundary: silence is STRICTLY below the decoupled silence bar
+        # min(silence_threshold, threshold - MIN_GAP). Feed the exact same
+        # float expression the implementation computes, so the comparison
+        # is x < x == False regardless of float representation.
         cfg = VadConfig()
-        boundary = cfg.threshold - HYSTERESIS_GAP
+        boundary = min(cfg.silence_threshold, cfg.threshold - MIN_GAP)
         vad = ScriptedVad([0.9, boundary, boundary, boundary - 1e-6])
         seg = Segmenter(cfg, vad)
         seg.process(_frame())  # speech start

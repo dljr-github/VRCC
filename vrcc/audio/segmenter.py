@@ -17,7 +17,6 @@ import numpy as np
 from vrcc.core.config import VadConfig
 
 FRAME = 512
-HYSTERESIS_GAP = 0.15
 # Minimum gap kept between the speech and silence thresholds so a dead band
 # always exists and the silence bar can never invert past the speech bar.
 MIN_GAP = 0.05
