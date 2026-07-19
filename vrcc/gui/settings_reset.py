@@ -52,6 +52,7 @@ _RESET_FIELDS = {
         "threshold", "silence_threshold", "speculative_silence_ms",
         "finalize_silence_ms", "min_utterance_ms", "pre_roll_ms",
         "max_utterance_s", "sentence_inject", "sentence_min_words",
+        "live_partials", "partial_interval_ms",
     ),
     "audio": ("gain_db", "auto_gain", "energy_gate_enabled", "energy_threshold"),
     "stt": (
@@ -317,6 +318,9 @@ def _resync_reset_widgets(dlg: "SettingsDialog") -> None:
     inject = getattr(dlg, "_sentence_inject_check", None)
     if inject is not None:
         inject.setChecked(cfg.vad.sentence_inject)
+    live_partials = getattr(dlg, "_live_partials_check", None)
+    if live_partials is not None:
+        live_partials.setChecked(cfg.vad.live_partials)
 
     gain = getattr(dlg, "_gain_slider", None)
     if gain is not None:
