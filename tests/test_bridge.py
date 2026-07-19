@@ -24,6 +24,7 @@ from vrcc.core.events import (
     MicLevel,
     MuteChanged,
     PhrasePartial,
+    PhrasePartialCleared,
     PhraseRecognized,
     PhraseTranslated,
     UpdateCheckResult,
@@ -50,6 +51,7 @@ class _Collector(QObject):
         self.mic: list[tuple[float, float]] = []
         self.recognized: list[object] = []
         self.partial: list[object] = []
+        self.partial_cleared: list[object] = []
         self.translated: list[object] = []
         self.chatbox: list[object] = []
         self.mute: list[object] = []
@@ -60,6 +62,7 @@ class _Collector(QObject):
         bridge.mic_level.connect(self._on_mic)
         bridge.phrase_recognized.connect(self.recognized.append)
         bridge.phrase_partial.connect(self.partial.append)
+        bridge.phrase_partial_cleared.connect(self.partial_cleared.append)
         bridge.phrase_translated.connect(self.translated.append)
         bridge.chatbox_sent.connect(self.chatbox.append)
         bridge.mute_changed.connect(self.mute.append)
@@ -141,6 +144,17 @@ def test_phrase_partial_delivered(qapp):
     _publish_all(bus, [event])
 
     assert _pump_until(lambda: c.partial == [event])
+
+
+def test_phrase_partial_cleared_delivered(qapp):
+    bus = EventBus()
+    bridge = BusBridge(bus)
+    c = _Collector(bridge)
+    event = PhrasePartialCleared(utterance_id=1)
+
+    _publish_all(bus, [event])
+
+    assert _pump_until(lambda: c.partial_cleared == [event])
 
 
 def test_phrase_translated_delivered(qapp):

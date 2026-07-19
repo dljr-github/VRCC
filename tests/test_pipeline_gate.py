@@ -7,8 +7,9 @@ Split out of `test_pipeline.py` to keep both files under the line cap.
 
 from __future__ import annotations
 
+from vrcc.audio.segmenter import SegDiscard
 from vrcc.core import pipeline_jobs
-from vrcc.core.events import PhraseRecognized
+from vrcc.core.events import PhrasePartialCleared, PhraseRecognized
 
 from .conftest import FakeMute, collect, make_pipeline, make_result
 
@@ -23,6 +24,26 @@ def test_forward_final_regated_by_captioning_off_does_not_send():
     assert env.chatbox.submits == []
     assert env.chatbox.typing[-1] is False  # typing indicator still resolves
     assert env.pipeline._spec._last_finalized >= 1  # still bounds the caches
+
+
+def test_forward_final_regated_by_captioning_off_clears_partial():
+    # A live partial for this utterance may still be showing in the log with
+    # no recognized/sent event coming to firm or remove it once gated here.
+    env = make_pipeline(mt=None)
+    cleared = collect(env.bus, PhrasePartialCleared)
+    env.pipeline._begin_typing(1)
+    env.pipeline.set_captioning(False)
+    pipeline_jobs.forward_final(env.pipeline, 1, make_result())
+    assert [e.utterance_id for e in cleared] == [1]
+
+
+def test_handle_discard_publishes_partial_cleared():
+    # A discarded utterance may have shown a live partial with no recognized/
+    # sent event ever coming to firm or remove it; discard must clear it.
+    env = make_pipeline()
+    cleared = collect(env.bus, PhrasePartialCleared)
+    pipeline_jobs.handle_discard(env.pipeline, SegDiscard(utterance_id=1))
+    assert [e.utterance_id for e in cleared] == [1]
 
 
 def test_forward_final_regated_by_mute_does_not_send():

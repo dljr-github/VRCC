@@ -206,6 +206,7 @@ class MainWindow(QMainWindow):
             (b.mic_level, self._on_mic_level),
             (b.phrase_recognized, self._on_phrase_recognized),
             (b.phrase_partial, self._on_partial),
+            (b.phrase_partial_cleared, self._on_partial_cleared),
             (b.phrase_translated, self._on_phrase_translated),
             (b.chatbox_sent, self._on_chatbox_sent),
             (b.mute_changed, self._on_mute_changed),
@@ -258,6 +259,12 @@ class MainWindow(QMainWindow):
         # A stale partial for an already-finalized utterance is a no-op: the
         # model ignores it (row is terminal) instead of reopening the row.
         self._caption_model.partial(event.utterance_id, event.text)
+        self._render_log()
+
+    def _on_partial_cleared(self, event) -> None:
+        # The utterance was discarded or gated mid-partial: no recognized/
+        # sent will ever firm or remove its LISTENING row, so clear it here.
+        self._caption_model.clear_partial(event.utterance_id)
         self._render_log()
 
     def _on_phrase_translated(self, event) -> None:

@@ -40,6 +40,15 @@ class PhrasePartial:
 
 
 @dataclass(frozen=True)
+class PhrasePartialCleared:
+    """An utterance whose live partial was abandoned with no recognized/sent
+    event ever coming to firm or remove it (discarded, or gated at send
+    time). Tells the log to drop that utterance's LISTENING row, if any."""
+
+    utterance_id: int
+
+
+@dataclass(frozen=True)
 class PhraseTranslated:
     utterance_id: int
     original: str

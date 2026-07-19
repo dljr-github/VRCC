@@ -13,7 +13,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vrcc.core import languages
-from vrcc.core.events import AppError, PhrasePartial, PhraseRecognized, PhraseTranslated
+from vrcc.core.events import (
+    AppError,
+    PhrasePartial,
+    PhrasePartialCleared,
+    PhraseRecognized,
+    PhraseTranslated,
+)
 from vrcc.core.pipeline_state import _MISSING
 from vrcc.core.sentences import ends_sentence
 
@@ -120,6 +126,9 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
 def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._spec.drop_discarded(event.utterance_id)
     p._resolve_typing(event.utterance_id)
+    # Speech resumed / abort on mute: no recognized/sent will ever firm this
+    # utterance's live partial, so the log must clear it itself.
+    p._bus.publish(PhrasePartialCleared(event.utterance_id))
 
 
 def handle_partial(p: "Pipeline", event: "SegPartial") -> None:
@@ -245,9 +254,12 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         # The gate is checked again HERE, at send time: enqueue-time gating
         # (handle_final) can't see a mute/captioning-off that lands while the
         # STT job is already in flight. Still resolve typing and bound the
-        # caches, exactly like the other early-return branches below.
+        # caches, exactly like the other early-return branches below. A live
+        # partial for this utterance may still be on the log with nothing
+        # else left to firm or remove it, so clear it here too.
         p._resolve_typing(utterance_id)
         _mark_finalized(p, utterance_id)
+        p._bus.publish(PhrasePartialCleared(utterance_id))
         return
 
     if result is None:

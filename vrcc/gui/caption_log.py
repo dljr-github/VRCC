@@ -112,6 +112,21 @@ class CaptionModel:
         self._recv[key] = self._clock()
         self._trim()
 
+    def clear_partial(self, utterance_id: int) -> None:
+        """Drop the current row for this utterance if it never firmed past a
+        live partial (status still LISTENING) -- the abandon path for an
+        utterance discarded or gated mid-partial, with no recognized/sent
+        event left to firm or remove the row itself. A no-op for a missing
+        utterance, or one whose row already moved past LISTENING (firmed or
+        terminal): a normal recognized/translated/sent row is never removed
+        here."""
+        row = self._current_row(utterance_id)
+        if row is None or row.status != LISTENING:
+            return
+        del self._rows[row.key]
+        self._by_utt.pop(utterance_id, None)
+        self._recv.pop(row.key, None)
+
     def translated(
         self, utterance_id: int, translations, *, send_enabled: bool
     ) -> None:

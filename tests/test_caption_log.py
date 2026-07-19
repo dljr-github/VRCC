@@ -129,6 +129,43 @@ def test_partial_then_recognized_firms_the_same_row():
     assert m.rows()[0].status == QUEUED
 
 
+def test_clear_partial_removes_listening_row():
+    m = _model()
+    m.partial(1, "hel")
+    assert len(m.rows()) == 1
+    m.clear_partial(1)
+    assert m.rows() == []
+
+
+def test_clear_partial_on_unknown_utterance_is_a_noop():
+    m = _model()
+    m.clear_partial(999)
+    assert m.rows() == []
+
+
+def test_clear_partial_does_not_remove_terminal_row():
+    m = _model()
+    m.recognized(1, "hello", translate_enabled=False, send_enabled=True)
+    m.sent(1, truncated=False)
+    m.clear_partial(1)
+    rows = m.rows()
+    assert len(rows) == 1
+    assert rows[0].status == SENT
+
+
+def test_clear_partial_does_not_remove_non_listening_live_row():
+    # A row that's live but already firmed past LISTENING (translating,
+    # queued, ...) must not be dropped either -- only a bare, never-firmed
+    # partial is an abandon-time no-op target.
+    m = _model()
+    m.recognized(1, "hello", translate_enabled=True, send_enabled=True)
+    assert m.rows()[0].status == TRANSLATING
+    m.clear_partial(1)
+    rows = m.rows()
+    assert len(rows) == 1
+    assert rows[0].status == TRANSLATING
+
+
 def test_partial_after_terminal_row_does_not_resurrect_it():
     m = _model()
     m.recognized(1, "hello", translate_enabled=False, send_enabled=True)
