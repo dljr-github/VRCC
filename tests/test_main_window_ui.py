@@ -378,6 +378,60 @@ def test_empty_state_render_leaves_following_on(qapp, tmp_path):
         w.close(); w.deleteLater(); bridge.detach()
 
 
+def test_check_for_updates_menu_action_present(qapp, tmp_path):
+    w, bridge = _window(tmp_path)
+    try:
+        actions = [a.text() for a in w._overflow_btn.menu().actions()]
+        assert "Check for updates…" in actions
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_check_for_updates_flashes_and_invokes_callback(qapp, tmp_path):
+    from vrcc.gui.bridge import BusBridge
+    from vrcc.gui.main_window import MainWindow
+
+    calls = []
+    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    bridge = BusBridge(EventBus())
+
+    class _P:
+        captioning_enabled = False
+        def submit_typed(self, t): return True
+        def set_captioning(self, e): self.captioning_enabled = e
+
+    w = MainWindow(
+        bridge, store, _P(), on_open_settings=lambda: None,
+        on_open_models=lambda: None, on_check_updates=lambda: calls.append(1),
+    )
+    try:
+        w._check_for_updates()
+        assert calls == [1]
+        assert w.statusBar().currentMessage() == "Checking for updates…"
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_update_result_up_to_date_flashes_status(qapp, tmp_path):
+    w, bridge = _window(tmp_path)
+    try:
+        w._on_update_result(SimpleNamespace(available=False, latest="", url="", error=""))
+        assert w.statusBar().currentMessage() == "VRCC is up to date."
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_update_result_error_flashes_status(qapp, tmp_path):
+    w, bridge = _window(tmp_path)
+    try:
+        w._on_update_result(
+            SimpleNamespace(available=False, latest="", url="", error="offline")
+        )
+        assert w.statusBar().currentMessage() == "Could not check for updates."
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
 def test_about_credits_github_account(qapp, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 

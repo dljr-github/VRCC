@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         mt_available: bool = True,
         download_manager=None,
         on_model_change=None,
+        on_check_updates=None,
     ) -> None:
         super().__init__()
         self._bridge = bridge
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         self._scale = max(0.5, min(2.0, config_store.config.gui.font_scale))
         self._on_open_settings = on_open_settings
         self._on_open_models = on_open_models
+        self._on_check_updates = on_check_updates
         # Kept for caller compat but no longer read: engines hot-swap mid-session,
         # so a launch-time "was MT built?" snapshot would wrongly suppress the
         # "translating…" row. Live config is the only correct source of truth.
@@ -210,6 +212,7 @@ class MainWindow(QMainWindow):
             (b.download_progress, self._on_download_progress),
             (b.app_error, self._on_app_error),
             (b.vrchat_detected, self._on_vrchat_detected),
+            (b.update_result, self._on_update_result),
         )
 
     def _connect_bridge(self) -> None:
@@ -312,6 +315,10 @@ class MainWindow(QMainWindow):
             self._flash_status(tr(friendly))
         else:
             self._flash_status(f"{event.code}: {event.message}")
+
+    def _on_update_result(self, event) -> None:
+        from vrcc.gui import updates_ui
+        updates_ui.handle_result(self, event)
 
     # -- caption log helpers -----------------------------------------------
 
@@ -429,6 +436,11 @@ class MainWindow(QMainWindow):
             self._text_input.clear()
 
     # -- menu actions ------------------------------------------------------
+
+    def _check_for_updates(self) -> None:
+        if self._on_check_updates is not None:
+            self._flash_status(tr("Checking for updates…"))
+            self._on_check_updates()
 
     def _show_about(self) -> None:
         blurb = tr("Live voice captioning and translation for the VRChat chatbox.")

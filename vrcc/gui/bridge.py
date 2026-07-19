@@ -24,6 +24,7 @@ from vrcc.core.events import (
     MuteChanged,
     PhraseRecognized,
     PhraseTranslated,
+    UpdateCheckResult,
     VrchatDetected,
 )
 
@@ -50,6 +51,7 @@ class BusBridge(QObject):
     engine_state = Signal(object)  # EngineStateChanged
     app_error = Signal(object)  # AppError
     vrchat_detected = Signal(object)  # VrchatDetected
+    update_result = Signal(object)  # UpdateCheckResult
 
     def __init__(self, bus: EventBus, clock: Callable[[], float] = time.monotonic) -> None:
         super().__init__()
@@ -69,6 +71,7 @@ class BusBridge(QObject):
             bus.subscribe(EngineStateChanged, self.engine_state.emit),
             bus.subscribe(AppError, self.app_error.emit),
             bus.subscribe(VrchatDetected, self.vrchat_detected.emit),
+            bus.subscribe(UpdateCheckResult, self.update_result.emit),
         ]
 
     def _on_mic_level(self, event: MicLevel) -> None:

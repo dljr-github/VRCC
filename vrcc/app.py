@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 
+from vrcc import __version__
 from vrcc.audio.source import MicSource
 from vrcc.core import hardware
 from vrcc.core.bus import EventBus
@@ -26,6 +27,7 @@ from vrcc.core.startup import (
     models_ready as _models_ready,
     resolve_audio_device as _resolve_audio_device,
 )
+from vrcc.core.updates import UpdateChecker
 from vrcc.download.manager import DownloadManager
 from vrcc.i18n import tr
 from vrcc.osc.mutesync import MuteSync
@@ -127,6 +129,10 @@ def run(portable: bool = False, verbose: bool = False) -> int:
 
     bus = EventBus()
     bridge = BusBridge(bus)
+    # One-shot daemon-thread checker; no teardown. Built before make_window
+    # so the manual "Check for updates" callback it closes over is ready by
+    # the time window = make_window() runs, below.
+    updater = UpdateChecker(bus, __version__)
     dm = DownloadManager(paths.models_dir, bus)
 
     if not _models_ready(store.config, dm):
@@ -346,6 +352,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             mt_available=stack.mt is not None,
             download_manager=dm,
             on_model_change=on_model_change,
+            on_check_updates=lambda: updater.check(announce_no_update=True),
         )
 
     # Qt-free façade for live Settings changes: the dialog pushes audio/VAD/OSC/
@@ -385,6 +392,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     # whether the chatbox is actually reachable (OSC has no delivery ack).
     detector = VrchatDetector(bus)
     detector.start()
+
+    if store.config.gui.update_check_enabled:
+        updater.check(announce_no_update=False)
 
     exit_code = 1
     try:

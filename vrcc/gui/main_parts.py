@@ -161,6 +161,7 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     w._overflow_btn.setStyleSheet("QPushButton::menu-indicator { width: 0; }")
     menu = QMenu(w)
     menu.addAction(tr("Models…")).triggered.connect(lambda: w._on_open_models())
+    menu.addAction(tr("Check for updates…")).triggered.connect(w._check_for_updates)
     menu.addAction(tr("About")).triggered.connect(w._show_about)
     menu.addSeparator()
     menu.addAction(tr("Exit")).triggered.connect(w.close)
