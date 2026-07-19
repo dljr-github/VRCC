@@ -170,11 +170,13 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
 def _process_partial_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
     """Transcribe-and-publish only: never touches SpecCache, forward_final,
     mark_finalized, or typing. The pending flag is cleared right after
-    transcribe, on every path (stop/no-engine/gated-None included), so a
-    coalesced partial is always free to fire again."""
-    result = p._transcribe(job.samples)
-    with p._partial_lock:
-        p._partial_pending = False
+    transcribe, on every path (stop/no-engine/gated-None/exception included),
+    so a coalesced partial is always free to fire again."""
+    try:
+        result = p._transcribe(job.samples)
+    finally:
+        with p._partial_lock:
+            p._partial_pending = False
     if stop.is_set():
         return  # abandoned mid-call: discard, publish nothing
     if result is _NO_ENGINE or result is None:

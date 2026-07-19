@@ -147,6 +147,7 @@ class Pipeline:
             self._segmenter.reset()
             self._frame_gated = False
             self._dropped_frames = 0
+            self._partial_pending = False
 
             # Each worker is bound to THIS run's queue + stop event via thread
             # args (never re-read from self), so a worker abandoned by a
