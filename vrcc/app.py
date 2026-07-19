@@ -9,15 +9,13 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
-from vrcc.audio.segmenter import Segmenter
-from vrcc.audio.source import AudioSource, MicSource
-from vrcc.audio.vad import StreamingVad
+from vrcc.audio.source import MicSource
 from vrcc.core import hardware
 from vrcc.core.bus import EventBus
-from vrcc.core.config import ConfigStore, Paths, default_paths
+from vrcc.core.config import ConfigStore, default_paths
+from vrcc.core.engine_stack import EngineStack, build_engine_stack
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
 from vrcc.core.logs import setup_logging
@@ -30,105 +28,13 @@ from vrcc.core.startup import (
 )
 from vrcc.download.manager import DownloadManager
 from vrcc.i18n import tr
-from vrcc.osc.chatbox import ChatboxSender
 from vrcc.osc.mutesync import MuteSync
 from vrcc.osc.vrchat_detect import VrchatDetector
 from vrcc.stt import create_stt_engine
-from vrcc.stt.engine import SttEngine
 from vrcc.translate.engine import TranslateEngine
 from vrcc.translate.registry import MT_MODELS
 
 logger = logging.getLogger("vrcc.app")
-
-# Sentinel: "argument not supplied" vs an explicit None (mt/mute are
-# legitimately None when translation / mute sync is disabled).
-_UNSET = object()
-
-
-@dataclass
-class EngineStack:
-    """Everything :func:`run` needs to operate the app, built by
-    :func:`build_engine_stack`. A plain data holder -- it starts nothing."""
-
-    pipeline: Pipeline
-    source: AudioSource
-    segmenter: Segmenter
-    vad: StreamingVad | None
-    stt: SttEngine
-    mt: TranslateEngine | None
-    chatbox: ChatboxSender
-    mute: MuteSync | None
-
-
-def build_engine_stack(
-    config_store: ConfigStore,
-    bus: EventBus,
-    paths: Paths,
-    *,
-    stt_engine=None,
-    mt_engine=_UNSET,
-    chatbox=None,
-    mute=_UNSET,
-    source=None,
-) -> EngineStack:
-    """Assemble the full engine stack from config, or from injected fakes.
-
-    Every component is built for real unless overridden. ``mt`` is ``None``
-    when ``translate.enabled`` is False; ``mute`` is ``None`` when
-    ``mute_sync.enabled`` is False. Imports no Qt and starts no threads/servers.
-    """
-    cfg = config_store.config
-
-    vad: StreamingVad | None = None
-    if source is None:
-        source = MicSource(_resolve_audio_device(cfg.audio.device))
-
-    vad = StreamingVad(threshold=cfg.vad.threshold)
-    segmenter = Segmenter(cfg.vad, vad.prob)
-
-    if stt_engine is None:
-        stt_engine = create_stt_engine(
-            cfg.stt, paths.models_dir / "whisper" / cfg.stt.model, bus
-        )
-
-    if mt_engine is _UNSET:
-        spec = MT_MODELS.get(cfg.translate.model) if cfg.translate.enabled else None
-        if cfg.translate.enabled and spec is None:
-            logger.warning(
-                "translate.model %r is not a known MT model; disabling "
-                "translation for this session",
-                cfg.translate.model,
-            )
-        if spec is not None:
-            mt_engine = TranslateEngine(
-                spec, paths.models_dir / "mt" / spec.id, cfg.translate, bus
-            )
-        else:
-            mt_engine = None
-
-    if chatbox is None:
-        chatbox = ChatboxSender(cfg.osc, bus)
-
-    if mute is _UNSET:
-        if cfg.mute_sync.enabled:
-            mute = MuteSync(cfg.mute_sync, cfg.osc.ip, bus)
-        else:
-            mute = None
-
-    pipeline = Pipeline(
-        cfg, bus, source, segmenter, stt_engine, mt_engine, chatbox, mute
-    )
-
-    return EngineStack(
-        pipeline=pipeline,
-        source=source,
-        segmenter=segmenter,
-        vad=vad,
-        stt=stt_engine,
-        mt=mt_engine,
-        chatbox=chatbox,
-        mute=mute,
-    )
 
 
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
