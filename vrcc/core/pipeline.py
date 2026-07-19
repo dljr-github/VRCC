@@ -202,6 +202,12 @@ class Pipeline:
     def captioning_enabled(self) -> bool:
         return self._captioning
 
+    @property
+    def segmenter(self) -> "Segmenter":
+        """The run's segmenter. Exposed so pipeline_jobs can request a commit
+        (early sentence injection) without reaching for the private attribute."""
+        return self._segmenter
+
     def set_captioning(self, enabled: bool) -> None:
         """Master captioning toggle; when off, the segmenter worker drops
         frames (nothing is buffered) and STT jobs aren't created."""

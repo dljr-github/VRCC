@@ -4,6 +4,7 @@ indicator, send-to-vrchat, and worker-exception behavior.
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -15,8 +16,10 @@ from vrcc.audio.segmenter import (
     SegSpeculative,
     SegSpeechStart,
 )
+from vrcc.core import pipeline_jobs
 from vrcc.core.config import AppConfig, OscConfig
 from vrcc.core.events import AppError, MicLevel, PhraseRecognized, PhraseTranslated, SpeechStarted
+from vrcc.core.pipeline_jobs import _SttJob
 
 from .conftest import FakeChatbox, FakeMt, FakeMute, FakeStt, collect, make_pipeline, make_result, running, sample
 
@@ -332,6 +335,86 @@ def test_send_to_vrchat_false_skips_chatbox_but_publishes_events():
 
 
 # -- behavior 9: worker exceptions ------------------------------------------
+
+
+# -- behavior 10: early sentence injection at the speculative pass ----------
+
+
+class _CommitRecorder:
+    """Stand-in segmenter recording request_commit calls. The early-injection
+    tests drive process_stt_job synchronously and never run the segmenter's
+    frame loop, so request_commit is all that is exercised."""
+
+    def __init__(self) -> None:
+        self.commits: list = []
+
+    def request_commit(self, utterance_id: int) -> None:
+        self.commits.append(utterance_id)
+
+
+def _spec_job(uid: int, s) -> _SttJob:
+    return _SttJob(utterance_id=uid, samples=s, speculative=True, samples_id=id(s))
+
+
+def _final_job(uid: int, s) -> _SttJob:
+    return _SttJob(utterance_id=uid, samples=s, speculative=False, samples_id=id(s))
+
+
+def _run_speculative(env, uid: int, s) -> None:
+    # Mirror handle_speculative's bookkeeping (typing on, pending noted), then
+    # process the job in-thread so the assertions never chase a worker.
+    env.pipeline._begin_typing(uid)
+    env.pipeline._spec.note_speculative(uid, id(s))
+    pipeline_jobs.process_stt_job(env.pipeline, _spec_job(uid, s), threading.Event())
+
+
+def test_speculative_sentence_is_sent_early_and_commits():
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    seg = _CommitRecorder()
+    env.pipeline._segmenter = seg
+    s = sample()
+    _run_speculative(env, 1, s)
+    assert env.chatbox.submits == [("Hello there.", 1)]  # sent once, now
+    assert seg.commits == [1]  # and the segmenter was told to commit
+
+
+def test_final_after_early_send_does_not_duplicate():
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    seg = _CommitRecorder()
+    env.pipeline._segmenter = seg
+    s = sample()
+    _run_speculative(env, 1, s)
+    sent_after_spec = len(env.chatbox.submits)
+    assert sent_after_spec == 1
+    # The race the dedupe guards: the natural 600 ms final for this utterance
+    # was already queued before request_commit could cut it off.
+    pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, s), threading.Event())
+    assert len(env.chatbox.submits) == sent_after_spec  # no second send
+    assert env.stt.calls == 1  # the final neither re-sent nor re-transcribed
+
+
+def test_speculative_without_terminal_punctuation_is_not_sent_early():
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="hello world")))
+    seg = _CommitRecorder()
+    env.pipeline._segmenter = seg
+    s = sample()
+    _run_speculative(env, 1, s)
+    assert env.chatbox.submits == []
+    assert seg.commits == []
+    # Cached as before, so the eventual final still reuses the transcription.
+    assert (1, id(s)) in env.pipeline._spec._cache
+
+
+def test_one_word_sentence_is_blocked_by_the_min_word_guard():
+    # "Hi." is a terminal mark but a single word; sentence_min_words is 2, so
+    # an early send here would be a false positive on an abbreviation-like word.
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hi.")))
+    seg = _CommitRecorder()
+    env.pipeline._segmenter = seg
+    s = sample()
+    _run_speculative(env, 1, s)
+    assert env.chatbox.submits == []
+    assert seg.commits == []
 
 
 def test_stt_worker_exception_publishes_apperror_and_continues():

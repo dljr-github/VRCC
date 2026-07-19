@@ -27,6 +27,7 @@ class SpecCache:
         self._cache: dict[tuple[int, int], "SttResult | None"] = {}
         self._stale: set[tuple[int, int]] = set()
         self._pending: dict[int, int] = {}
+        self._emitted_early: set[int] = set()
         self._last_finalized = 0
 
     def reset(self) -> None:
@@ -35,6 +36,7 @@ class SpecCache:
             self._cache.clear()
             self._stale.clear()
             self._pending.clear()
+            self._emitted_early.clear()
             self._last_finalized = 0
 
     def note_speculative(self, utterance_id: int, samples_id: int) -> None:
@@ -64,6 +66,20 @@ class SpecCache:
             self._cache[key] = result
             return True
 
+    def mark_emitted_early(self, utterance_id: int) -> None:
+        """Record that this utterance's sentence was already sent from the
+        speculative pass, so its final must not send again."""
+        with self._lock:
+            self._emitted_early.add(utterance_id)
+
+    def pop_emitted_early(self, utterance_id: int) -> bool:
+        """True (and forget it) if the utterance was already sent early."""
+        with self._lock:
+            if utterance_id in self._emitted_early:
+                self._emitted_early.discard(utterance_id)
+                return True
+            return False
+
     def pop_result(self, key: tuple[int, int]) -> "SttResult | None | object":
         """Pop the cached result for a final, or ``_MISSING`` on a miss.
         Safe without extra locking: the single STT worker drains its queue
@@ -83,6 +99,7 @@ class SpecCache:
             self._cache = {k: v for k, v in self._cache.items() if k[0] > cutoff}
             self._stale = {k for k in self._stale if k[0] > cutoff}
             self._pending = {u: s for u, s in self._pending.items() if u > cutoff}
+            self._emitted_early = {u for u in self._emitted_early if u > cutoff}
             return cutoff
 
 

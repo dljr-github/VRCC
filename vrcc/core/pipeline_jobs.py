@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from vrcc.core import languages
 from vrcc.core.events import AppError, PhraseRecognized, PhraseTranslated
 from vrcc.core.pipeline_state import _MISSING
+from vrcc.core.sentences import ends_sentence
 
 if TYPE_CHECKING:
     import threading
@@ -96,12 +97,30 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
             # Stopped (maybe restarted) mid-transcribe: this result belongs
             # to an abandoned run, must not touch a new run's shared state.
             return
-        p._spec.store_result(key, result)
+        stored = p._spec.store_result(key, result)
+        if stored and _should_inject_sentence(p, result):
+            # A finished sentence: send it now and cut the utterance so the
+            # next words become a fresh one. forward_final finalizes this id
+            # (which prunes the caches for it), so mark the emitted-early guard
+            # AFTER, where it survives to dedupe a natural final racing the
+            # commit; a later utterance's finalize is what eventually clears it.
+            forward_final(p, job.utterance_id, result)
+            p._spec.mark_emitted_early(job.utterance_id)
+            p.segmenter.request_commit(job.utterance_id)
         return
 
-    # Final: reuse the speculative's cached result on identical samples,
-    # else transcribe fresh. The spec lock is released before _transcribe
-    # (never nested inside _stt_lock), preserving lock ordering.
+    # Final: a sentence already emitted early from the speculative pass must
+    # not send twice. This only fires in the race where the natural final was
+    # queued before request_commit cut the utterance; the common commit path
+    # emits no final at all.
+    if p._spec.pop_emitted_early(job.utterance_id):
+        p._resolve_typing(job.utterance_id)
+        p._mark_finalized(job.utterance_id)
+        return
+
+    # Reuse the speculative's cached result on identical samples, else
+    # transcribe fresh. The spec lock is released before _transcribe (never
+    # nested inside _stt_lock), preserving lock ordering.
     result = p._spec.pop_result(key)
     if result is _MISSING:
         result = p._transcribe(job.samples)
@@ -110,6 +129,18 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     if stop.is_set():
         return  # abandoned mid-call: discard, publish nothing
     forward_final(p, job.utterance_id, result)
+
+
+def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
+    """Whether a speculative result is a complete sentence worth sending now
+    (feature enabled, non-empty result, terminal punctuation past the
+    minimum word count)."""
+    cfg = p._config.vad
+    return (
+        cfg.sentence_inject
+        and result is not None
+        and ends_sentence(result.text, cfg.sentence_min_words)
+    )
 
 
 def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") -> None:
