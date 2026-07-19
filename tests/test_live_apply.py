@@ -21,6 +21,7 @@ class _FakePipeline:
         self.restarted_with = None
         self.mute = None
         self.gain_calls = []
+        self.reinit_calls = []
 
     def restart_source(self, new_source):
         self.restarted_with = new_source
@@ -33,6 +34,12 @@ class _FakePipeline:
 
     def set_source_gain(self, gain_db, auto):
         self.gain_calls.append((gain_db, auto))
+
+    def reinit_audio_and_resume(self, reinit, make_source):
+        self.reinit_calls.append((reinit, make_source))
+        reinit()
+        source = make_source()
+        return self._running
 
 
 class _FakeSegmenter:
@@ -186,3 +193,27 @@ def test_apply_audio_gain_delegates_to_pipeline_set_source_gain():
     cfg = AudioConfig(gain_db=4.5, auto_gain=True)
     env.live.apply_audio_gain(cfg)
     assert pipe.gain_calls == [(4.5, True)]
+
+
+def test_refresh_input_devices_reinits_and_returns_fresh_list(monkeypatch):
+    # Must go through pipeline.reinit_audio_and_resume (not touch sounddevice
+    # directly), and return whatever list_input_devices() reports afterward.
+    pipe = _FakePipeline(running=True)
+    env = _make(pipeline=pipe)
+
+    reinit_calls = []
+    monkeypatch.setattr(
+        "vrcc.audio.devices.reinitialize_audio",
+        lambda: reinit_calls.append("reinit"),
+    )
+    monkeypatch.setattr(
+        "vrcc.audio.devices.list_input_devices",
+        lambda: [(0, "Mic A"), (1, "Mic B")],
+    )
+
+    result = env.live.refresh_input_devices("Some Mic")
+
+    assert result == [(0, "Mic A"), (1, "Mic B")]
+    assert reinit_calls == ["reinit"]
+    assert len(env.pipeline.reinit_calls) == 1
+    assert env.built == ["Some Mic"]  # make_source called with device_cfg

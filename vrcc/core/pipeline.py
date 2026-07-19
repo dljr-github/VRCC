@@ -260,6 +260,22 @@ class Pipeline:
             self._resume_pending = False
         return self._started
 
+    def reinit_audio_and_resume(self, reinit, make_source) -> bool:
+        """Stop capture, run ``reinit`` while no source stream is open, then
+        resume on a freshly built source (built AFTER reinit so it resolves
+        against the refreshed device list). Mirrors restart_source's
+        stop()/start() intent-preservation. Returns whether capture runs after."""
+        want_running = self._started or self._resume_pending
+        if self._started:
+            self.stop()
+        reinit()
+        self._source = make_source()
+        if want_running:
+            self._resume_pending = True
+            self.start()
+            self._resume_pending = False
+        return self._started
+
     def set_source_gain(self, gain_db: float, auto: bool) -> None:
         """Push a live gain change to the current source (no restart). No-op if
         the source has no gain processor."""

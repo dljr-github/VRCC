@@ -63,6 +63,21 @@ def list_input_devices() -> list[tuple[int, str]]:
         return []
 
 
+def reinitialize_audio() -> None:
+    """Cycle PortAudio so a device hotplugged after launch is visible.
+
+    PortAudio snapshots the device list at initialization; a plain
+    query_devices() will not see a mic plugged in later. Terminating and
+    re-initializing rebuilds the list. Call ONLY when no stream is open (an
+    open stream's handle is invalidated by _terminate). Fail-open: a failure
+    logs and leaves the existing host in place."""
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception:
+        logger.debug("PortAudio re-initialization failed", exc_info=True)
+
+
 def default_input_device() -> int | None:
     """The system default input device index, or `None` if there isn't one.
 

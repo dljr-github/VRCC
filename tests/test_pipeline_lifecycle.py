@@ -240,3 +240,58 @@ def test_restart_source_failed_open_reraises_and_leaves_pipeline_consistent():
     assert p._seg_thread is None
     assert p._stt_thread is None
     p.stop()  # safe no-op
+
+
+# -- PortAudio host re-init --------------------------------------------------
+
+
+def test_reinit_audio_and_resume_cycles_capture_through_reinit():
+    # A hotplugged mic is invisible to PortAudio until the host is cycled with
+    # NO stream open. reinit_audio_and_resume must stop capture first, run the
+    # reinit callback while the old source is stopped, THEN build and start
+    # the new source (so it resolves against the refreshed device list).
+    env = make_pipeline()
+    p = env.pipeline
+    p.start()
+    order: list[str] = []
+    old_source = env.source
+    old_stop = old_source.stop
+
+    def tracking_stop() -> None:
+        order.append("stop")
+        old_stop()
+
+    old_source.stop = tracking_stop
+
+    def reinit() -> None:
+        assert order == ["stop"]  # runs only while no stream is open
+        order.append("reinit")
+
+    new_source = FakeSource()
+    try:
+        running_after = p.reinit_audio_and_resume(reinit, lambda: new_source)
+        assert order == ["stop", "reinit"]
+        assert running_after is True
+        assert p._source is new_source
+        assert new_source.started is True
+        assert new_source.on_frame is not None
+    finally:
+        p.stop()
+
+
+def test_reinit_audio_and_resume_while_stopped_installs_without_capturing():
+    env = make_pipeline()
+    p = env.pipeline
+    calls: list[str] = []
+
+    def reinit() -> None:
+        calls.append("reinit")
+
+    new_source = FakeSource()
+    assert p.reinit_audio_and_resume(reinit, lambda: new_source) is False
+    assert calls == ["reinit"]
+    assert new_source.started is False
+    assert p._source is new_source
+    p.start()  # a later start() uses the newly installed source
+    assert new_source.started is True
+    p.stop()

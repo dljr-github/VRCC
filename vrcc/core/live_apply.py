@@ -79,6 +79,16 @@ class LiveApply:
             )
             return False
 
+    def refresh_input_devices(self, device_cfg: str) -> list:
+        """Re-enumerate input devices after a PortAudio host cycle, resuming
+        capture on ``device_cfg`` if it was running. Returns the fresh list."""
+        from vrcc.audio.devices import list_input_devices, reinitialize_audio
+
+        self._pipeline.reinit_audio_and_resume(
+            reinitialize_audio, lambda: self._make_source(device_cfg)
+        )
+        return list_input_devices()
+
     def apply_audio_gain(self, cfg: "AudioConfig") -> None:
         """Apply mic gain live (no restart)."""
         self._pipeline.set_source_gain(cfg.gain_db, cfg.auto_gain)
