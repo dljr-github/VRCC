@@ -3,6 +3,8 @@ translations), ``fit_chatbox`` (fitting text to the 144-char limit) and
 ``fit_message`` (per-language balanced splitting).
 """
 
+import unicodedata
+
 import pytest
 
 from vrcc.core.bus import EventBus
@@ -14,6 +16,7 @@ from vrcc.osc.chatbox import (
     fit_message,
     format_message,
 )
+from vrcc.osc.chatbox_format import _balanced_slices
 
 
 def make_cfg(**overrides) -> OscConfig:
@@ -222,12 +225,81 @@ def test_fit_message_split_never_chops_short_caption_words():
 
 
 def test_fit_message_truncate_and_send_defer_to_fit_chatbox():
-    translations = [("JP", "x" * 120)]
+    # include_original=False: the translation-aware budgeting in fit_message
+    # only kicks in when an included original is what's overflowing the
+    # limit, so with no original in the mix this stays a plain "defers to
+    # fit_chatbox on the format_message join" wiring check.
+    translations = [("JP", "x" * 150)]
     for mode in ("truncate", "send"):
-        cfg = make_cfg(overflow=mode)
+        cfg = make_cfg(overflow=mode, include_original=False)
         joined = format_message("y" * 100, translations, cfg)
         assert len(joined) > CHATBOX_LIMIT  # sanity: fixture actually overflows
         assert fit_message("y" * 100, translations, cfg) == fit_chatbox(joined, mode)
+
+
+def test_fit_message_truncate_keeps_translation_when_original_is_long():
+    # Bug: a long original used to eat the whole 144-char budget in
+    # "truncate" mode, dropping the newline and the entire translation --
+    # the one line a non-speaker actually needs. The original must be the
+    # line that gets shortened, not the translation.
+    cfg = make_cfg(overflow="truncate")
+    original = "x" * 145  # an ordinary long spoken sentence
+    translation = "テスト"
+    assert len(original) + 1 + len(translation) > CHATBOX_LIMIT  # sanity: overflows
+
+    parts = fit_message(original, [("JP", translation)], cfg)
+
+    assert len(parts) == 1
+    assert len(parts[0]) <= CHATBOX_LIMIT
+    assert parts[0].endswith(translation)  # translation intact, unshortened
+    assert original not in parts[0]  # original is the line that was cut
+    assert "…" in parts[0]  # signals the ORIGINAL was shortened
+
+
+def test_fit_message_split_keeps_short_cjk_translation_in_last_part():
+    # Bug: a short spaceless CJK translation was treated as one
+    # un-splittable "word" that greedily filled slice 0 and left "" for
+    # every later part, so the translation vanished after the first ~2s.
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(60))  # long: forces >1 part
+    translation = "これはテストです"
+
+    parts = fit_message(original, [("JP", translation)], cfg)
+
+    assert len(parts) >= 2
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+    assert translation in parts[-1]  # the LAST, persisting part has it
+
+
+def test_fit_message_split_degenerate_fallback_keeps_languages_separate():
+    # Bug: the degenerate fallback split on ALL whitespace (including the
+    # "\n" separator), rejoining original and translation onto one line and
+    # losing the separator entirely.
+    cfg = make_cfg(overflow="split")
+    original = "a" * 3000  # single unsplittable token: no n <= 16 balances it
+    translation = "テスト"
+
+    parts = fit_message(original, [("JP", translation)], cfg)
+
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+    assert all("\n" not in part for part in parts)  # never merged mid-chunk
+    assert parts[-1] == translation  # translation survives whole, on its own
+    assert "".join(parts[:-1]) == original  # original reconstructs exactly
+
+
+def test_balanced_slices_char_based_never_cuts_before_a_combining_mark():
+    # Bug: character-index slicing could cut immediately before a combining
+    # mark (Thai vowel/tone marks), severing it from its base character.
+    pair = "ก่"  # base consonant + MAI EK tone mark (combining class 107)
+    # 160 chars: longer than the limit as one spaceless "word", so this
+    # forces the character-based ceil-division path, not the word path.
+    text = pair * 80
+
+    slices = _balanced_slices(text, 6, CHATBOX_LIMIT)
+
+    assert "".join(slices) == text  # nudging boundaries must not lose text
+    for s in slices[1:]:
+        assert s == "" or unicodedata.combining(s[0]) == 0
 
 
 # -- ChatboxSender.submit_message() ------------------------------------------
@@ -261,8 +333,10 @@ def test_submit_message_truncate_flags_over_limit_as_truncated():
 
     items = list(sender._queue)
     assert len(items) == 1
-    joined = format_message("y" * 100, translations, cfg)
-    assert items[0][0] == fit_chatbox(joined, "truncate")[0]
+    # submit_message shapes its text via fit_message (translation-aware),
+    # not a raw fit_chatbox(format_message(...)) -- see fit_message's
+    # budgeting for the over-limit include_original case.
+    assert items[0][0] == fit_message("y" * 100, translations, cfg)[0]
     assert items[0][2] is True
 
 
