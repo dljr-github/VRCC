@@ -260,6 +260,13 @@ class Pipeline:
             self._resume_pending = False
         return self._started
 
+    def set_source_gain(self, gain_db: float, auto: bool) -> None:
+        """Push a live gain change to the current source (no restart). No-op if
+        the source has no gain processor."""
+        setter = getattr(self._source, "set_gain", None)
+        if setter is not None:
+            setter(gain_db, auto)
+
     @staticmethod
     def _spawn(target, name: str, *args) -> threading.Thread:
         thread = threading.Thread(target=target, args=args, name=name, daemon=True)

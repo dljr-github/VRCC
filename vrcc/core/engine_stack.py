@@ -67,7 +67,11 @@ def build_engine_stack(
 
     vad: StreamingVad | None = None
     if source is None:
-        source = MicSource(_resolve_audio_device(cfg.audio.device))
+        from vrcc.audio.gain import GainProcessor
+
+        gain = GainProcessor()
+        gain.configure(cfg.audio.gain_db, cfg.audio.auto_gain)
+        source = MicSource(_resolve_audio_device(cfg.audio.device), gain=gain)
 
     vad = StreamingVad(threshold=cfg.vad.threshold)
     segmenter = Segmenter(cfg.vad, vad.prob)

@@ -9,7 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from vrcc.core.bus import EventBus
-from vrcc.core.config import OscConfig, VadConfig
+from vrcc.core.config import AudioConfig, OscConfig, VadConfig
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
 
@@ -20,6 +20,7 @@ class _FakePipeline:
         self._boom = boom
         self.restarted_with = None
         self.mute = None
+        self.gain_calls = []
 
     def restart_source(self, new_source):
         self.restarted_with = new_source
@@ -29,6 +30,9 @@ class _FakePipeline:
 
     def set_mute(self, mute):
         self.mute = mute
+
+    def set_source_gain(self, gain_db, auto):
+        self.gain_calls.append((gain_db, auto))
 
 
 class _FakeSegmenter:
@@ -174,3 +178,11 @@ def test_reload_engine_delegates_to_injected_closure():
     env.live.reload_engine("stt")
     env.live.reload_engine("mt")
     assert env.reloads == ["stt", "mt"]
+
+
+def test_apply_audio_gain_delegates_to_pipeline_set_source_gain():
+    pipe = _FakePipeline()
+    env = _make(pipeline=pipe)
+    cfg = AudioConfig(gain_db=4.5, auto_gain=True)
+    env.live.apply_audio_gain(cfg)
+    assert pipe.gain_calls == [(4.5, True)]

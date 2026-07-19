@@ -324,6 +324,34 @@ class TestMicSourceResampleFallback:
             factory.streams[0].deliver(indata)  # must not raise
 
 
+def test_mic_source_applies_gain_to_frames():
+    from vrcc.audio.gain import GainProcessor
+
+    frames = []
+    gain = GainProcessor()
+    gain.configure(6.0206, auto=False)  # ~2x
+
+    captured = {}
+
+    class FakeStream:
+        def __init__(self, **kw):
+            captured["callback"] = kw["callback"]
+        def start(self):
+            pass
+        def stop(self):
+            pass
+        def close(self):
+            pass
+
+    src = MicSource(device=None, stream_factory=FakeStream, gain=gain)
+    src.start(frames.append)
+    cb = captured["callback"]
+    block = np.full((512, 1), 0.1, dtype=np.float32)
+    cb(block, 512, None, None)
+    assert frames, "no frame emitted"
+    assert float(np.sqrt(np.mean(frames[0] ** 2))) > 0.19
+
+
 class TestMicSourceHardware:
     @pytest.mark.integration
     def test_real_capture_produces_frames(self):

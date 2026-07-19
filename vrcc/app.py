@@ -37,6 +37,14 @@ from vrcc.translate.registry import MT_MODELS
 logger = logging.getLogger("vrcc.app")
 
 
+def _make_source_with_gain(config, device_cfg: str) -> MicSource:
+    from vrcc.audio.gain import GainProcessor
+
+    gain = GainProcessor()
+    gain.configure(config.audio.gain_db, config.audio.auto_gain)
+    return MicSource(_resolve_audio_device(device_cfg), gain=gain)
+
+
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
     """Start the capture pipeline, turning a failure (usually the mic refusing
     to open) into an ``AppError("MIC_OPEN_FAILED")`` instead of an unhandled
@@ -348,7 +356,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         chatbox=stack.chatbox,
         bus=bus,
         reload_engine=reload_engine,
-        make_source=lambda device_cfg: MicSource(_resolve_audio_device(device_cfg)),
+        make_source=lambda device_cfg: _make_source_with_gain(store.config, device_cfg),
         make_mute=lambda: MuteSync(
             store.config.mute_sync, store.config.osc.ip, bus
         ),

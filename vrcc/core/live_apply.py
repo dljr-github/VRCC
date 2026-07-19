@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from vrcc.audio.segmenter import Segmenter
     from vrcc.audio.source import AudioSource
     from vrcc.core.bus import EventBus
-    from vrcc.core.config import OscConfig, VadConfig
+    from vrcc.core.config import AudioConfig, OscConfig, VadConfig
     from vrcc.core.pipeline import Pipeline
     from vrcc.osc.chatbox import ChatboxSender
     from vrcc.osc.mutesync import MuteSync
@@ -78,6 +78,10 @@ class LiveApply:
                 )
             )
             return False
+
+    def apply_audio_gain(self, cfg: "AudioConfig") -> None:
+        """Apply mic gain live (no restart)."""
+        self._pipeline.set_source_gain(cfg.gain_db, cfg.auto_gain)
 
     def apply_vad(self, cfg: "VadConfig") -> None:
         """Apply new VAD timings/threshold; the next utterance adopts them."""

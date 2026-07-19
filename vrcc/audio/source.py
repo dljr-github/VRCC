@@ -15,6 +15,8 @@ import numpy as np
 import sounddevice as sd
 import soxr
 
+from vrcc.audio.gain import GainProcessor
+
 logger = logging.getLogger("vrcc.audio")
 
 FRAME_LEN = 512
@@ -79,9 +81,11 @@ class MicSource:
         self,
         device: int | None = None,
         stream_factory: Callable[..., object] | None = None,
+        gain: "GainProcessor | None" = None,
     ) -> None:
         self._device = device
         self._stream_factory = stream_factory if stream_factory is not None else sd.InputStream
+        self._gain = gain
         self._stream = None
         self._on_frame: Callable[[np.ndarray], None] | None = None
         self._rechunker = _Rechunker(FRAME_LEN)
@@ -156,6 +160,11 @@ class MicSource:
         stream.start()
         return stream
 
+    def set_gain(self, gain_db: float, auto: bool) -> None:
+        """Update the live gain; no stream restart. No-op if no processor."""
+        if self._gain is not None:
+            self._gain.configure(gain_db, auto)
+
     def stop(self) -> None:
         if self._stream is None:
             return
@@ -187,6 +196,9 @@ class MicSource:
                 status,
             )
 
+    def _apply_gain(self, mono: np.ndarray) -> np.ndarray:
+        return self._gain.process(mono) if self._gain is not None else mono
+
     def _direct_callback(self, indata, frames, time, status) -> None:
         # indata is PortAudio-owned/reused; _to_mono's 2-D branch allocates
         # fresh via np.mean and _Rechunker.push copies again, so no separate
@@ -194,7 +206,7 @@ class MicSource:
         try:
             if status:
                 self._note_status(status)
-            mono = _to_mono(indata)
+            mono = self._apply_gain(_to_mono(indata))
             for frame in self._rechunker.push(mono):
                 self._emit(frame)
         except Exception:
@@ -214,7 +226,7 @@ class MicSource:
                 self._note_status(status)
             mono = _to_mono(indata)
             resampled = soxr.resample(mono, self._resample_in_rate, SAMPLE_RATE)
-            resampled = np.asarray(resampled, dtype=np.float32)
+            resampled = self._apply_gain(np.asarray(resampled, dtype=np.float32))
             for frame in self._rechunker.push(resampled):
                 self._emit(frame)
         except Exception:
