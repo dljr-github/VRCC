@@ -1,7 +1,11 @@
 """Input-device enumeration and default-device lookup via `sounddevice`.
 
-Windows exposes the same mic once per host API; `list_input_devices` dedupes by
-name, preferring the WASAPI index. Both functions are fail-open: a `sounddevice`
+Windows exposes the same mic once per host API; `list_input_devices` restricts
+the result to WASAPI, falling back to MME for a mic that has no WASAPI entry,
+and drops a mic that is visible only under DirectSound or WDM-KS. If that
+filter would leave the list empty while input-capable devices do exist, it
+falls back to the pre-existing WASAPI-preferred-else-first selection so the
+picker never shows zero mics. Both functions are fail-open: a `sounddevice`
 failure logs at debug and returns empty/`None` rather than raising. Zero Qt.
 """
 
@@ -17,9 +21,13 @@ logger = logging.getLogger("vrcc.audio")
 def list_input_devices() -> list[tuple[int, str]]:
     """Input-capable devices as `(index, name)`, deduped by name.
 
-    Only `max_input_channels > 0`; for duplicate names (same mic via several
-    host APIs) the WASAPI entry wins, else the first reported. Order follows
-    first appearance. Never raises (failure -> empty list).
+    Only `max_input_channels > 0`. For duplicate names (same mic via several
+    host APIs) the WASAPI entry wins; a mic with no WASAPI entry falls back
+    to its MME entry; a mic visible only via DirectSound or WDM-KS is
+    dropped. If that leaves the list empty while input-capable devices are
+    present, falls back to the WASAPI-preferred-else-first selection so the
+    picker never shows zero mics. Order follows first appearance. Never
+    raises (failure -> empty list).
     """
     try:
         raw_devices = list(sd.query_devices())
@@ -50,17 +58,41 @@ def list_input_devices() -> list[tuple[int, str]]:
 
         result: list[tuple[int, str]] = []
         for name in names_in_order:
-            candidates = candidates_by_name[name]
-            chosen_index = candidates[0][0]
-            for index, hostapi_name in candidates:
-                if "WASAPI" in hostapi_name:
-                    chosen_index = index
-                    break
-            result.append((chosen_index, name))
+            chosen_index = _preferred_index(candidates_by_name[name])
+            if chosen_index is not None:
+                result.append((chosen_index, name))
+
+        if not result and names_in_order:
+            logger.debug(
+                "no WASAPI/MME microphone found; safety net falling back to "
+                "the WASAPI-preferred-else-first device list"
+            )
+            for name in names_in_order:
+                result.append((_first_or_wasapi_index(candidates_by_name[name]), name))
+
         return result
     except Exception:
         logger.debug("failed to process audio input device list", exc_info=True)
         return []
+
+
+def _preferred_index(candidates: list[tuple[int, str]]) -> int | None:
+    """WASAPI index if one exists, else MME, else `None` (caller drops it)."""
+    mme_index = None
+    for index, hostapi_name in candidates:
+        if "WASAPI" in hostapi_name.upper():
+            return index
+        if mme_index is None and "MME" in hostapi_name.upper():
+            mme_index = index
+    return mme_index
+
+
+def _first_or_wasapi_index(candidates: list[tuple[int, str]]) -> int:
+    """Pre-existing selection: the WASAPI index if any, else the first seen."""
+    for index, hostapi_name in candidates:
+        if "WASAPI" in hostapi_name.upper():
+            return index
+    return candidates[0][0]
 
 
 def reinitialize_audio() -> None:
