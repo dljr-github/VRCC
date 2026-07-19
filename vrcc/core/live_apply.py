@@ -122,7 +122,12 @@ class LiveApply:
         client resolves the host, so a partial address raises. That must not
         escape into the Qt timer slot and abort the rest of the flush: log,
         keep the old client, and let the next edit try again. Returns whether
-        the retarget took."""
+        the retarget took.
+
+        Also keeps an existing mute-sync coordinator's localhost gate current:
+        without this, ``MuteSync`` caches the IP it was built with, so toggling
+        mute sync off/on after an ``osc.ip`` change would re-check a stale
+        address instead of the one now configured."""
         try:
             self._chatbox.reconfigure(cfg.ip, cfg.port)
         except OSError:
@@ -132,6 +137,8 @@ class LiveApply:
             )
             return False
         self._chatbox.reconfigure_rate(cfg.burst, cfg.min_interval_s)
+        if self._mute is not None:
+            self._mute.set_ip(cfg.ip)
         return True
 
     def apply_mute_sync(self, enabled: bool) -> None:

@@ -299,6 +299,7 @@
   "Which microphone to listen to.": "Який мікрофон слухати.",
   "You speak": "Ви говорите",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "Ваш драйвер NVIDIA надто старий для режиму GPU; працюємо на CPU. Оновіть драйвер до версії 570 або новішої.",
+  "Your spoken language could not be matched, sending your words without translation.": "Не вдалося визначити мову, якою ви говорите, ваші слова надсилаються без перекладу.",
   "a model failed to load": "не вдалося завантажити модель",
   "about {gb:.1f} GB": "близько {gb:.1f} ГБ",
   "about {mb} MB": "близько {mb} МБ",

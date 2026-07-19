@@ -299,6 +299,7 @@
   "Which microphone to listen to.": "소리를 들을 마이크를 선택합니다.",
   "You speak": "말하는 언어",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "NVIDIA 드라이버가 너무 오래되어 GPU 모드 대신 CPU로 실행합니다. 드라이버를 570 이상으로 업데이트해 주세요.",
+  "Your spoken language could not be matched, sending your words without translation.": "말하는 언어를 인식하지 못해 번역 없이 그대로 전송합니다.",
   "a model failed to load": "모델을 불러오지 못함",
   "about {gb:.1f} GB": "약 {gb:.1f} GB",
   "about {mb} MB": "약 {mb} MB",

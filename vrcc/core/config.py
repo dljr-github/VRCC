@@ -101,8 +101,8 @@ class OscConfig(BaseModel):
     port: int = 9000
     send_to_vrchat: bool = True
     notification_sfx: bool = False
-    min_interval_s: float = 1.3
-    burst: int = 5
+    min_interval_s: float = Field(default=1.3, gt=0)
+    burst: int = Field(default=5, ge=1)
     overflow: Literal["truncate", "split", "send"] = "split"
     split_delay_s: float = 2.0
     include_original: bool = True

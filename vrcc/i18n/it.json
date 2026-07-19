@@ -299,6 +299,7 @@
   "Which microphone to listen to.": "Quale microfono usare.",
   "You speak": "Tu parli",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "Il tuo driver NVIDIA è troppo vecchio per la modalità GPU; esecuzione su CPU. Aggiorna al driver 570+.",
+  "Your spoken language could not be matched, sending your words without translation.": "La lingua parlata non è stata riconosciuta, le tue parole vengono inviate senza traduzione.",
   "a model failed to load": "un modello non si è caricato",
   "about {gb:.1f} GB": "circa {gb:.1f} GB",
   "about {mb} MB": "circa {mb} MB",

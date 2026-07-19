@@ -299,6 +299,7 @@
   "Which microphone to listen to.": "どのマイクから聞き取るかを選びます。",
   "You speak": "話す言語",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "NVIDIA ドライバーが古いため GPU モードを使用できません。CPU で実行します。ドライバー 570 以降に更新してください。",
+  "Your spoken language could not be matched, sending your words without translation.": "話している言語を判定できなかったため、翻訳せずに送信します。",
   "a model failed to load": "モデルの読み込みに失敗しました",
   "about {gb:.1f} GB": "約 {gb:.1f} GB",
   "about {mb} MB": "約 {mb} MB",

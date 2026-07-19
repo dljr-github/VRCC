@@ -82,6 +82,9 @@ FRIENDLY_ERRORS = {
     "MUTE_SYNC_MDNS_FAILED": tr_noop(
         "Mute sync may not work: VRChat could not be notified (network discovery failed)."
     ),
+    "SOURCE_LANG_UNSUPPORTED": tr_noop(
+        "Your spoken language could not be matched, sending your words without translation."
+    ),
     "DRIVER_TOO_OLD": tr_noop(
         "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+."
     ),

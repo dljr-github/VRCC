@@ -299,6 +299,7 @@
   "Which microphone to listen to.": "Chọn micrô để nghe.",
   "You speak": "Bạn nói",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "Driver NVIDIA của bạn quá cũ cho chế độ GPU; đang chạy trên CPU. Hãy cập nhật lên driver 570+.",
+  "Your spoken language could not be matched, sending your words without translation.": "Không thể nhận dạng ngôn ngữ bạn nói, lời nói của bạn được gửi mà không dịch.",
   "a model failed to load": "một mô hình không tải được",
   "about {gb:.1f} GB": "khoảng {gb:.1f} GB",
   "about {mb} MB": "khoảng {mb} MB",

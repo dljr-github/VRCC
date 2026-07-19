@@ -299,6 +299,7 @@
   "Which microphone to listen to.": "用哪个麦克风收音。",
   "You speak": "你说的语言",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "你的 NVIDIA 驱动过旧，无法使用 GPU 模式，目前以 CPU 运行。请将驱动更新到 570 或更高版本。",
+  "Your spoken language could not be matched, sending your words without translation.": "无法识别你所说的语言，你的话将不经翻译直接发送。",
   "a model failed to load": "某个模型加载失败",
   "about {gb:.1f} GB": "约 {gb:.1f} GB",
   "about {mb} MB": "约 {mb} MB",

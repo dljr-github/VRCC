@@ -65,12 +65,16 @@ class _FakeChatbox:
 class _FakeMute:
     def __init__(self) -> None:
         self.events = []
+        self.ips = []
 
     def start(self) -> None:
         self.events.append("start")
 
     def stop(self) -> None:
         self.events.append("stop")
+
+    def set_ip(self, ip) -> None:
+        self.ips.append(ip)
 
 
 def _make(*, pipeline=None, mute=None, sources=None):
@@ -121,6 +125,23 @@ def test_apply_osc_reconfigures_client_and_rate():
     env.live.apply_osc(cfg)
     assert env.chatbox.client == [("10.0.0.9", 9002)]
     assert env.chatbox.rate == [(7, 0.9)]
+
+
+def test_apply_osc_retargets_an_existing_mute_coordinator():
+    # Regression: MuteSync caches the OSC IP it was built with, so after
+    # changing osc.ip a stale address kept gating the localhost check.
+    # apply_osc must push the new IP into an existing coordinator.
+    mute = _FakeMute()
+    env = _make(mute=mute)
+    cfg = OscConfig(ip="10.0.0.9", port=9002)
+    env.live.apply_osc(cfg)
+    assert mute.ips == ["10.0.0.9"]
+
+
+def test_apply_osc_without_a_mute_coordinator_does_not_raise():
+    env = _make(mute=None)
+    cfg = OscConfig(ip="10.0.0.9", port=9002)
+    assert env.live.apply_osc(cfg) is True  # no coordinator built yet: no-op
 
 
 def test_apply_audio_device_restarts_source_and_returns_running():

@@ -27,6 +27,7 @@ def show_update_available(window: "MainWindow", latest: str, url: str) -> None:
     box.setText(tr("VRCC {version} is available.", version=latest))
     open_btn = box.addButton(tr("Open download page"), QMessageBox.ButtonRole.AcceptRole)
     box.addButton(tr("Later"), QMessageBox.ButtonRole.RejectRole)
+    box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
     def on_click(_btn):
         if box.clickedButton() is open_btn and url:

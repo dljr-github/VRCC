@@ -299,6 +299,7 @@
   "Which microphone to listen to.": "Hangi mikrofonun dinleneceği.",
   "You speak": "Konuştuğun dil",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "NVIDIA sürücün GPU modu için çok eski; CPU üzerinde çalışılıyor. Sürücüyü 570+ sürümüne güncelle.",
+  "Your spoken language could not be matched, sending your words without translation.": "Konuştuğun dil eşleştirilemedi, sözlerin çeviri yapılmadan gönderiliyor.",
   "a model failed to load": "bir model yüklenemedi",
   "about {gb:.1f} GB": "yaklaşık {gb:.1f} GB",
   "about {mb} MB": "yaklaşık {mb} MB",

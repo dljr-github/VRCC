@@ -69,6 +69,13 @@ class MuteSync:
 
     # -- lifecycle ---------------------------------------------------------
 
+    def set_ip(self, osc_ip: str) -> None:
+        """Update the OSC IP the localhost gate in :meth:`start` checks
+        against, e.g. after Settings changes ``osc.ip`` live. Takes effect on
+        the next :meth:`start`; an already-active session keeps running
+        against the IP it started with."""
+        self._osc_ip = osc_ip
+
     def start(self) -> None:
         """Start syncing, subject to config + localhost gating. No-op if
         disabled or active. Non-localhost OSC publishes

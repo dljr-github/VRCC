@@ -34,10 +34,15 @@ def _parse(version: str) -> tuple[int, ...] | None:
 
 def is_newer(latest: str, current: str) -> bool:
     """Whether ``latest`` is a strictly higher version than ``current``.
-    Tolerant: an unparseable ``latest`` is treated as not newer."""
+    Tolerant: an unparseable ``latest`` is treated as not newer. Tuples are
+    zero-padded to equal length first, so a trailing ``.0`` (e.g. "1.2.0" vs
+    "1.2") never compares as newer."""
     lo, cur = _parse(latest), _parse(current)
     if lo is None or cur is None:
         return False
+    width = max(len(lo), len(cur))
+    lo = lo + (0,) * (width - len(lo))
+    cur = cur + (0,) * (width - len(cur))
     return lo > cur
 
 

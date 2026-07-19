@@ -15,6 +15,14 @@ def test_is_newer_tolerates_garbage():
     assert not is_newer("", "1.1.8")
 
 
+def test_is_newer_handles_unequal_version_lengths():
+    # Regression: comparing int tuples directly makes (1, 2, 0) > (1, 2), so
+    # "1.2.0" wrongly reported as newer than "1.2". Zero-pad to equal length
+    # first so a trailing .0 never counts as an update.
+    assert not is_newer("1.2.0", "1.2")
+    assert not is_newer("1.2", "1.2.0")
+
+
 def test_checker_publishes_available(monkeypatch):
     from vrcc.core.bus import EventBus
     from vrcc.core.events import UpdateCheckResult
