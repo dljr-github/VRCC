@@ -152,9 +152,8 @@ class ChatboxSender:
         self._bucket = TokenBucket(cfg.burst, cfg.min_interval_s, clock=clock)
 
         # Bounded: on overflow the deque's maxlen drops the oldest chunks
-        # (logged once per sender; see submit()). Last field: partial (a
-        # tentative live-caption chunk, see submit_partial()).
-        self._queue: deque[tuple[str, int, bool, float, bool]] = deque(maxlen=_QUEUE_MAX)
+        # (logged once per sender; see submit()).
+        self._queue: deque[tuple[str, int, bool, float]] = deque(maxlen=_QUEUE_MAX)
         self._overflow_logged = False
         self._queue_lock = threading.Lock()
         self._wake = threading.Event()
@@ -231,33 +230,11 @@ class ChatboxSender:
         truncated = self._cfg.overflow != "split" and len(joined) > CHATBOX_LIMIT
         self._enqueue(chunks, utterance_id, truncated)
 
-    def submit_partial(self, text: str) -> None:
-        """Queue a tentative, in-progress transcription: same fit-to-144 +
-        coalesce-latest-wins + token-bucket path as `submit`, but the queued
-        chunk is tagged so `_send_chunk` sends it over OSC WITHOUT publishing
-        `ChatboxSent` -- a partial never marks the caption log row delivered.
-        A later firmed-up `submit_message`/`submit` for the same utterance
-        coalesces over it exactly like any other queued chunk.
-        """
-        if not text or not text.strip():
-            return
-        chunks = fit_chatbox(text, self._cfg.overflow)
-        if not chunks:
-            return
-        truncated = len(text) > CHATBOX_LIMIT and self._cfg.overflow != "split"
-        self._enqueue(chunks, 0, truncated, partial=True)
-
-    def _enqueue(
-        self,
-        chunks: list[str],
-        utterance_id: int,
-        truncated: bool,
-        partial: bool = False,
-    ) -> None:
+    def _enqueue(self, chunks: list[str], utterance_id: int, truncated: bool) -> None:
         split_delay_s = self._cfg.split_delay_s
         last = len(chunks) - 1
         items = [
-            (chunk, utterance_id, truncated, split_delay_s if i < last else 0.0, partial)
+            (chunk, utterance_id, truncated, split_delay_s if i < last else 0.0)
             for i, chunk in enumerate(chunks)
         ]
         with self._queue_lock:
@@ -313,7 +290,7 @@ class ChatboxSender:
         with self._client_lock:
             return self._client
 
-    def _pop_next(self) -> tuple[str, int, bool, float, bool] | None:
+    def _pop_next(self) -> tuple[str, int, bool, float] | None:
         with self._queue_lock:
             if self._queue:
                 return self._queue.popleft()
@@ -328,8 +305,8 @@ class ChatboxSender:
                 continue
             if not self._wait_for_token():
                 continue  # stop requested while waiting; drop this item
-            text, utterance_id, truncated, delay_after, partial = item
-            self._send_chunk(text, utterance_id, truncated, partial)
+            text, utterance_id, truncated, delay_after = item
+            self._send_chunk(text, utterance_id, truncated)
             # Wait after the send attempt regardless of whether it actually
             # succeeded (VRChat may be offline -- rare, and the pacing goal is
             # about readability, not about the ack we don't get over OSC
@@ -354,9 +331,7 @@ class ChatboxSender:
             )
             self._sleep(slice_s)
 
-    def _send_chunk(
-        self, text: str, utterance_id: int, truncated: bool = False, partial: bool = False
-    ) -> None:
+    def _send_chunk(self, text: str, utterance_id: int, truncated: bool = False) -> None:
         client = self._get_client()
         try:
             client.send_message(
@@ -371,7 +346,4 @@ class ChatboxSender:
                 exc_info=True,
             )
             return
-        if not partial:
-            # A partial is tentative: it must never mark the caption log row
-            # delivered, so it skips this publish entirely.
-            self._bus.publish(ChatboxSent(text, utterance_id, truncated))
+        self._bus.publish(ChatboxSent(text, utterance_id, truncated))

@@ -169,7 +169,8 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
 
 def _process_partial_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
     """Transcribe-and-publish only: never touches SpecCache, forward_final,
-    mark_finalized, or typing. The pending flag is cleared right after
+    mark_finalized, typing, or the chatbox -- a partial streams to the log
+    (PhrasePartial) alone. The pending flag is cleared right after
     transcribe, on every path (stop/no-engine/gated-None/exception included),
     so a coalesced partial is always free to fire again."""
     try:
@@ -181,9 +182,9 @@ def _process_partial_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -
         return  # abandoned mid-call: discard, publish nothing
     if result is _NO_ENGINE or result is None:
         return  # engine swapped out, or quality-gated: nothing to show
+    if stop.is_set() or not p._should_caption():
+        return  # mute/captioning-off raced the transcribe: keep it off the log
     p._bus.publish(PhrasePartial(job.utterance_id, result.text))
-    if p._config.osc.send_to_vrchat:
-        safe_submit_partial(p, result.text)
 
 
 def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
@@ -339,17 +340,6 @@ def safe_submit(
         submit_to_chatbox(p, original, translations, utterance_id)
     except Exception as exc:  # noqa: BLE001 -- a send failure is not fatal
         logger.exception("chatbox submit failed")
-        p._bus.publish(AppError("CHATBOX_SEND_FAILED", str(exc)))
-
-
-def safe_submit_partial(p: "Pipeline", text: str) -> None:
-    """`ChatboxSender.submit_partial` guarded the same way `safe_submit`
-    guards `submit_to_chatbox`: a send failure publishes ``AppError`` instead
-    of taking down the STT worker."""
-    try:
-        p._chatbox.submit_partial(text)
-    except Exception as exc:  # noqa: BLE001 -- a send failure is not fatal
-        logger.exception("chatbox partial submit failed")
         p._bus.publish(AppError("CHATBOX_SEND_FAILED", str(exc)))
 
 

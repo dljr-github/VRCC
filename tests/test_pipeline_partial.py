@@ -1,7 +1,10 @@
 """Tests for :mod:`vrcc.core.pipeline` -- live partial transcription:
 `SegPartial` dispatch, `handle_partial` coalescing (`_partial_pending`
-caps in-flight partials at one), and the partial chatbox send. Split out
-of `test_pipeline.py` to keep both files under the line cap.
+caps in-flight partials at one), and the log-only `PhrasePartial` publish.
+A partial never reaches the chatbox: it streams to the log via the event
+bus only, gated by `_should_caption()` at publish time so an in-flight
+partial can't leak past a mute/captioning-off that lands mid-transcribe.
+Split out of `test_pipeline.py` to keep both files under the line cap.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> boo
     return bool(predicate())
 
 
-def test_partial_publishes_phrasepartial_and_sends_partial_to_chatbox():
+def test_partial_publishes_phrasepartial_and_never_touches_chatbox():
     env = make_pipeline(stt=FakeStt(result=make_result(text="hello")))
     partials = collect(env.bus, PhrasePartial)
     recognized = collect(env.bus, PhraseRecognized)
@@ -34,17 +37,17 @@ def test_partial_publishes_phrasepartial_and_sends_partial_to_chatbox():
         time.sleep(0.02)
     assert [(e.utterance_id, e.text) for e in partials] == [(1, "hello")]
     assert recognized == []  # never treated as a final/speculative result
-    assert env.chatbox.submits == []  # no ChatboxSent-publishing send
-    assert env.chatbox.partials == ["hello"]  # but the partial line WAS sent
+    assert env.chatbox.submits == []  # no chatbox send at all
     # stop()'s best-effort typing-off is the only entry: nothing began typing.
     assert env.chatbox.typing == [False]
 
 
 def test_partial_does_not_forward_final_or_resolve_typing():
     env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="hello there")))
+    partials = collect(env.bus, PhrasePartial)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.chatbox.partials == ["hello there"])
+        assert _wait_until(lambda: len(partials) == 1)
         time.sleep(0.02)
     assert env.chatbox.submits == []
     assert env.pipeline._spec._last_finalized == 0
@@ -101,6 +104,24 @@ def test_live_partials_disabled_produces_no_event_no_send_no_pending_flag():
         env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
         time.sleep(0.02)
     assert partials == []
-    assert env.chatbox.partials == []
+    assert env.chatbox.submits == []
     assert env.stt.calls == 0
     assert env.pipeline._partial_pending is False
+
+
+def test_partial_gated_mid_transcribe_publishes_no_phrasepartial():
+    # Captioning is switched off WHILE the partial's transcribe is in
+    # flight (mute mid-partial would gate the same way, via _should_caption).
+    # The pending flag still must clear so a later, ungated partial can fire.
+    env = make_pipeline(stt=FakeStt(result=make_result(text="hello")))
+    env.stt.gate.clear()  # block inside transcribe so the pending flag stays set
+    partials = collect(env.bus, PhrasePartial)
+    with running(env.pipeline):
+        env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
+        assert env.stt.entered.wait(2.0)  # worker is inside transcribe
+        env.pipeline.set_captioning(False)
+        env.stt.gate.set()
+        assert _wait_until(lambda: env.pipeline._partial_pending is False)
+        time.sleep(0.02)
+    assert partials == []
+    assert env.chatbox.submits == []
