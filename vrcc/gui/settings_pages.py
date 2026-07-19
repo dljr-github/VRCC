@@ -340,6 +340,10 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     gate_row, dlg._noise_low, dlg._noise_high = dlg._anchored_slider(slider, dlg._noise_value_label)
     form.addRow(tr("Background noise level"), gate_row)
 
+    from vrcc.gui.settings_audio import build_gain_controls
+
+    build_gain_controls(dlg, form)
+
     # Advanced fine-tuning (quality gates + prompt).
     adv = QGroupBox(tr("Advanced (fine-tuning)"))
     adv_form = QFormLayout(adv)

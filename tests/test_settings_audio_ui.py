@@ -34,3 +34,18 @@ def test_sensitivity_slider_is_inverted(qapp, tmp_path):
     finally:
         dlg.close()
         dlg.deleteLater()
+
+
+def test_gain_controls_bind(qapp, tmp_path):
+    store = _store(tmp_path)
+    dlg = SettingsDialog(store)
+    try:
+        dlg._gain_slider.setValue(12)
+        assert store.config.audio.gain_db == 12.0
+        dlg._auto_gain_check.setChecked(True)
+        assert store.config.audio.auto_gain is True
+        # Auto on greys the manual slider.
+        assert not dlg._gain_slider.isEnabled()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
