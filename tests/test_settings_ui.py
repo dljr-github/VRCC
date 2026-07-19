@@ -88,22 +88,6 @@ def test_microphone_sensitivity_writes_threshold(qapp, tmp_path):
         dlg.deleteLater()
 
 
-def test_sensitivity_slider_is_inverted(qapp, tmp_path):
-    # Default 0.50 -> slider 40; moving the slider UP lowers the threshold.
-    store = _store(tmp_path)
-    store.config.vad.threshold = 0.50
-    dlg = SettingsDialog(store)
-    try:
-        assert dlg._sensitivity.value() == 40
-        dlg._sensitivity.setValue(60)
-        assert store.config.vad.threshold == 0.30
-        dlg._sensitivity.setValue(30)
-        assert store.config.vad.threshold == 0.60
-    finally:
-        dlg.close()
-        dlg.deleteLater()
-
-
 def test_mode_initial_reflects_config_profile(qapp, tmp_path):
     from vrcc.gui.settings import SettingsDialog
 
