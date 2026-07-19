@@ -39,7 +39,7 @@ class VadConfig(BaseModel):
     # (lowering the speech threshold) never raises the silence bar and chops
     # words mid-utterance. Clamped below the speech threshold at use.
     silence_threshold: float = 0.35
-    speculative_silence_ms: int = 350
+    speculative_silence_ms: int = 250
     finalize_silence_ms: int = 600
     min_utterance_ms: int = 500
     pre_roll_ms: int = 150
@@ -141,7 +141,7 @@ class AppConfig(BaseModel):
 PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     "latency": {
         "vad": {
-            "speculative_silence_ms": 350,
+            "speculative_silence_ms": 250,
             "finalize_silence_ms": 600,
             "min_utterance_ms": 500,
             "pre_roll_ms": 150,
@@ -152,7 +152,7 @@ PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     },
     "quality": {
         "vad": {
-            "speculative_silence_ms": 450,
+            "speculative_silence_ms": 350,
             "finalize_silence_ms": 800,
             "min_utterance_ms": 500,
             "pre_roll_ms": 200,

@@ -430,7 +430,7 @@ def test_apply_profile_quality_applies_bundle_and_records_choice():
     assert cfg.stt.beam_size == 5
     assert cfg.stt.temperature == 0.0
     assert cfg.translate.beam_size == 3
-    assert cfg.vad.speculative_silence_ms == 450
+    assert cfg.vad.speculative_silence_ms == 350
     assert cfg.vad.finalize_silence_ms == 800
     assert cfg.vad.pre_roll_ms == 200
     assert cfg.gui.profile == "quality"
@@ -445,7 +445,7 @@ def test_apply_profile_latency_restores_defaults():
 
     assert cfg.stt.beam_size == 1
     assert cfg.translate.beam_size == 1
-    assert cfg.vad.speculative_silence_ms == 350
+    assert cfg.vad.speculative_silence_ms == 250
     assert cfg.vad.finalize_silence_ms == 600
     assert cfg.vad.pre_roll_ms == 150
     assert cfg.gui.profile == "latency"

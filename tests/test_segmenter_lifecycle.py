@@ -269,7 +269,7 @@ class TestHysteresisDeadBand:
         cfg = VadConfig()
         # speech start, 5 silence frames, 3 dead-band frames (0.4, between
         # 0.35 and 0.5), then 6 more silence frames -> speculative should
-        # fire at the 11th *classified-silence* frame (5 + 6), unaffected
+        # fire at the 8th *classified-silence* frame (5 + 3), unaffected
         # by the 3 dead-band frames in between.
         probs = [0.9] + [0.1] * 5 + [0.4] * 3 + [0.1] * 6
         vad = ScriptedVad(probs)
@@ -290,7 +290,7 @@ class TestHysteresisDeadBand:
             events = seg.process(_frame())
             if _by_type(events, SegSpeculative):
                 spec_at = i
-        assert spec_at == 5  # 6th of these frames (0-based index 5)
+        assert spec_at == 2  # 3rd of these frames (0-based index 2)
 
     def test_dead_band_frames_do_not_trigger_speech_start_while_idle(self):
         cfg = VadConfig()
@@ -330,7 +330,7 @@ class TestHysteresisDeadBand:
 class TestConfigFrameCounts:
     def test_default_config_frame_counts_match_spec(self):
         seg = Segmenter(VadConfig(), ScriptedVad([]))
-        assert seg._speculative_frames == 11
+        assert seg._speculative_frames == 8
         assert seg._finalize_frames == 19
         assert seg._min_utterance_frames == 16
         assert seg._preroll_frames == 5

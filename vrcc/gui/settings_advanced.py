@@ -349,9 +349,10 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
 
     # Timing.
     for label, field, lo, hi, tip in (
-        (tr("Wait before an early caption (ms)"), "speculative_silence_ms",
+        (tr("Pause before sending a finished sentence (ms)"), "speculative_silence_ms",
          0, 5000,
-         tr("Pause length that triggers an early, tentative caption.")),
+         tr("How long a quiet gap counts as the end of a sentence, so it can be "
+            "sent without waiting for a full stop. Lower reacts to quicker pauses.")),
         (tr("Wait before finishing a caption (ms)"), "finalize_silence_ms",
          0, 5000,
          tr("How long a pause has to be to end a sentence.")),

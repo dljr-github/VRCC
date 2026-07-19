@@ -187,35 +187,35 @@ class TestSpeechStartAndPreroll:
 
 
 class TestSpeculativeAndFinalWithIdentity:
-    def test_speculative_fires_once_at_11_silence_frames(self):
-        # Brief scenario: 20 speech frames, then 11 silence frames ->
-        # Speculative at overall frame 31 (350ms ~= 11 frames).
+    def test_speculative_fires_once_at_8_silence_frames(self):
+        # Brief scenario: 20 speech frames, then 8 silence frames ->
+        # Speculative at overall frame 28 (250ms ~= 8 frames).
         cfg = VadConfig()
-        probs = [0.9] * 20 + [0.1] * 11
+        probs = [0.9] * 20 + [0.1] * 8
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
 
         spec_events = []
-        for _ in range(31):
+        for _ in range(28):
             events = seg.process(_frame())
             spec_events.append(_by_type(events, SegSpeculative))
 
-        # Speculative must not fire before the 11th silence frame (index 30,
-        # 0-based -> overall frame 31).
-        for i in range(30):
+        # Speculative must not fire before the 8th silence frame (index 27,
+        # 0-based -> overall frame 28).
+        for i in range(27):
             assert spec_events[i] == [], f"unexpected speculative at frame {i + 1}"
-        assert len(spec_events[30]) == 1
-        spec = spec_events[30][0]
+        assert len(spec_events[27]) == 1
+        spec = spec_events[27][0]
         assert spec.utterance_id == 1
         assert isinstance(spec.samples, np.ndarray)
         assert spec.samples.dtype == np.float32
         assert spec.samples.ndim == 1
         # No pre-roll frames were ever idle-buffered before this run (speech
-        # started on frame 1), so buffer == 20 speech + 11 silence frames.
-        assert spec.samples.shape[0] == (20 + 11) * FRAME
+        # started on frame 1), so buffer == 20 speech + 8 silence frames.
+        assert spec.samples.shape[0] == (20 + 8) * FRAME
 
     def test_final_at_19_silence_frames_reuses_speculative_object(self):
-        # Continue: after the speculative at 11 silence frames, 8 more
+        # Continue: after the speculative at 8 silence frames, 11 more
         # silence frames (total 19) should force SegFinal, reusing the
         # exact speculative array object (behavior 8).
         cfg = VadConfig()
@@ -283,9 +283,9 @@ class TestSpeculativeAndFinalWithIdentity:
 
 class TestDiscardOnResume:
     def test_discard_fires_once_on_speech_resume_after_speculative(self):
-        # Brief scenario: speech -> 12 silence (speculative fires at 11th,
-        # 12th is just more silence) -> 5 speech frames -> Discard on the
-        # FIRST of those 5 (not repeated).
+        # Brief scenario: speech -> 12 silence (speculative fires at the
+        # 8th, 9th-12th are just more silence) -> 5 speech frames -> Discard
+        # on the FIRST of those 5 (not repeated).
         cfg = VadConfig()
         probs = [0.9] * 5 + [0.1] * 12 + [0.9] * 5
         vad = ScriptedVad(probs)
@@ -302,12 +302,12 @@ class TestDiscardOnResume:
                 discard_frames.append(i)
                 discards.append(e)
 
-        assert spec_frame == 5 + 11 - 1  # 0-based index of the 11th silence frame
+        assert spec_frame == 5 + 8 - 1  # 0-based index of the 8th silence frame
         assert discard_frames == [5 + 12]  # first of the 5 resumed speech frames
         assert discards[0].utterance_id == 1  # discard belongs to the SAME utterance
 
     def test_no_discard_if_speech_resumes_before_speculative_threshold(self):
-        # Only 5 silence frames (< 11) then speech resumes: no speculative
+        # Only 5 silence frames (< 8) then speech resumes: no speculative
         # was ever emitted, so no Discard should fire either.
         cfg = VadConfig()
         probs = [0.9] * 5 + [0.1] * 5 + [0.9] * 5
@@ -329,9 +329,9 @@ class TestDiscardOnResume:
         cfg = VadConfig()
         probs = (
             [0.9] * 5      # speech start
-            + [0.1] * 12   # speculative #1 at 11th, then one more silence
+            + [0.1] * 12   # speculative #1 at 8th, then more silence
             + [0.9] * 5    # resume -> discard
-            + [0.1] * 19   # new silence run -> speculative #2 at 11, final at 19
+            + [0.1] * 19   # new silence run -> speculative #2 at 8th, final at 19
         )
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)

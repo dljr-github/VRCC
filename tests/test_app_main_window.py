@@ -88,14 +88,14 @@ def test_main_window_profile_toggle_applies_kwargs_bundle(qapp, tmp_path):
         window._on_profile_toggled(True)  # Quality mode ON
         assert cfg.stt.beam_size == 5
         assert cfg.translate.beam_size == 3
-        assert cfg.vad.speculative_silence_ms == 450
+        assert cfg.vad.speculative_silence_ms == 350
         assert cfg.vad.finalize_silence_ms == 800
         assert cfg.gui.profile == "quality"
 
         window._on_profile_toggled(False)  # back to Latency
         assert cfg.stt.beam_size == 1
         assert cfg.translate.beam_size == 1
-        assert cfg.vad.speculative_silence_ms == 350
+        assert cfg.vad.speculative_silence_ms == 250
         assert cfg.vad.finalize_silence_ms == 600
         assert cfg.gui.profile == "latency"
     finally:
