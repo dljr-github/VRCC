@@ -81,12 +81,24 @@ class LiveApply:
 
     def refresh_input_devices(self, device_cfg: str) -> list:
         """Re-enumerate input devices after a PortAudio host cycle, resuming
-        capture on ``device_cfg`` if it was running. Returns the fresh list."""
+        capture on ``device_cfg`` if it was running. A failed reopen surfaces
+        MIC_OPEN_FAILED (like apply_audio_device) rather than crashing the GUI
+        slot. Returns the fresh device list either way."""
         from vrcc.audio.devices import list_input_devices, reinitialize_audio
 
-        self._pipeline.reinit_audio_and_resume(
-            reinitialize_audio, lambda: self._make_source(device_cfg)
-        )
+        try:
+            self._pipeline.reinit_audio_and_resume(
+                reinitialize_audio, lambda: self._make_source(device_cfg)
+            )
+        except Exception as exc:  # noqa: BLE001 -- surface, don't crash the slot
+            logger.exception("device refresh could not reopen the mic")
+            self._bus.publish(
+                AppError(
+                    "MIC_OPEN_FAILED",
+                    "Could not open the microphone. Check Settings > Audio",
+                    detail=str(exc),
+                )
+            )
         return list_input_devices()
 
     def apply_audio_gain(self, cfg: "AudioConfig") -> None:

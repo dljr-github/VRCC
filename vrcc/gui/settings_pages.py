@@ -7,7 +7,6 @@ Imports from ``settings`` are type-only (settings imports this, never reverse).
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -26,7 +25,7 @@ from PySide6.QtCore import Qt
 from vrcc.core import recommend
 from vrcc.core.hardware import resolved_device
 from vrcc.core.languages import LANGUAGES
-from vrcc.gui import model_prompts, settings_reset
+from vrcc.gui import model_prompts, settings_audio, settings_reset
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
 from vrcc.gui.widgets import SegmentedControl, no_wheel
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
@@ -34,8 +33,6 @@ from vrcc.stt.registry import WHISPER_MODELS
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
-
-logger = logging.getLogger("vrcc.gui.settings_pages")
 
 _AUTO = "auto"
 
@@ -97,40 +94,12 @@ def _add_deleted_placeholder_if_needed(combo: QComboBox, specs, configured_id) -
         combo.model().item(0).setEnabled(False)
 
 
-def _make_input_device_combo(dlg: "SettingsDialog") -> QComboBox:
-    """The microphone picker on the Simple page."""
-    combo = no_wheel(QComboBox())
-    combo.addItem(tr("Auto (system default)"), _AUTO)
-    try:
-        from vrcc.audio.devices import list_input_devices
-
-        for _index, name in list_input_devices():
-            combo.addItem(name, name)
-    except Exception:  # noqa: BLE001
-        logger.debug("could not list input devices", exc_info=True)
-    cur = dlg._cfg.audio.device
-    idx = combo.findData(cur)
-    if idx < 0:
-        combo.addItem(cur, cur)
-        idx = combo.findData(cur)
-    combo.setCurrentIndex(idx)
-    combo.setToolTip(tr("Which microphone to listen to."))
-
-    def on_device(_i):
-        if dlg._loading:
-            return
-        dlg._cfg.audio.device = combo.currentData()
-        dlg._changed()
-    combo.currentIndexChanged.connect(on_device)
-    return combo
-
-
 def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     page = QWidget()
     form = QFormLayout(page)
     form.setContentsMargins(24, 16, 24, 16)
 
-    form.addRow(tr("Microphone"), _make_input_device_combo(dlg))
+    form.addRow(tr("Microphone"), settings_audio.make_input_device_row(dlg))
 
     dlg._sensitivity = QSlider(Qt.Orientation.Horizontal)
     dlg._sensitivity.setRange(30, 60)
@@ -340,9 +309,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     gate_row, dlg._noise_low, dlg._noise_high = dlg._anchored_slider(slider, dlg._noise_value_label)
     form.addRow(tr("Background noise level"), gate_row)
 
-    from vrcc.gui.settings_audio import build_gain_controls
-
-    build_gain_controls(dlg, form)
+    settings_audio.build_gain_controls(dlg, form)
 
     # Advanced fine-tuning (quality gates + prompt).
     adv = QGroupBox(tr("Advanced (fine-tuning)"))

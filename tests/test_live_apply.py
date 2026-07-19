@@ -217,3 +217,32 @@ def test_refresh_input_devices_reinits_and_returns_fresh_list(monkeypatch):
     assert reinit_calls == ["reinit"]
     assert len(env.pipeline.reinit_calls) == 1
     assert env.built == ["Some Mic"]  # make_source called with device_cfg
+
+
+def test_refresh_input_devices_contains_a_failed_reopen(monkeypatch):
+    # A failed mic reopen during refresh must not raise into the GUI slot: it
+    # publishes MIC_OPEN_FAILED (like apply_audio_device) and still returns
+    # whatever list_input_devices() reports.
+    class _BoomPipeline(_FakePipeline):
+        def reinit_audio_and_resume(self, reinit, make_source):
+            raise RuntimeError("device unavailable")
+
+    pipe = _BoomPipeline(running=True)
+    env = _make(pipeline=pipe)
+    errors: list[AppError] = []
+    env.bus.subscribe(AppError, errors.append)
+
+    monkeypatch.setattr(
+        "vrcc.audio.devices.reinitialize_audio",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "vrcc.audio.devices.list_input_devices",
+        lambda: [(0, "Mic A")],
+    )
+
+    result = env.live.refresh_input_devices("Bad Mic")  # contained, not raised
+
+    assert result == [(0, "Mic A")]
+    assert [e.code for e in errors] == ["MIC_OPEN_FAILED"]
+    assert "device unavailable" in errors[0].detail

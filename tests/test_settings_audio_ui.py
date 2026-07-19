@@ -8,6 +8,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from vrcc.core.config import ConfigStore, default_paths
+from vrcc.gui import settings_audio
 from vrcc.gui.settings import SettingsDialog
 
 
@@ -46,6 +47,30 @@ def test_gain_controls_bind(qapp, tmp_path):
         assert store.config.audio.auto_gain is True
         # Auto on greys the manual slider.
         assert not dlg._gain_slider.isEnabled()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_device_refresh_repopulates_without_changing_selection(qapp, tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    store.load()
+
+    monkeypatch.setattr(
+        settings_audio, "list_input_devices",
+        lambda: [(1, "Mic A"), (2, "Mic B")], raising=False,
+    )
+
+    class FakeApply:
+        def refresh_input_devices(self, device_cfg):
+            return [(1, "Mic A"), (2, "Mic B")]
+
+    dlg = SettingsDialog(store, apply=FakeApply())
+    try:
+        before = store.config.audio.device
+        settings_audio._repopulate_input_devices(dlg)
+        assert dlg._input_device_combo.count() >= 3  # Auto + two mics
+        assert store.config.audio.device == before  # no spurious swap
     finally:
         dlg.close()
         dlg.deleteLater()

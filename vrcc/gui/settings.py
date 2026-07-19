@@ -113,6 +113,11 @@ class SettingsDialog(QDialog):
         # the Speed/Quality presets can't tune (greedy onnx_asr decoders).
         self._update_mode_for_model = lambda: None
 
+        if self._apply is not None:
+            try:
+                self._apply.refresh_input_devices(self._cfg.audio.device)
+            except Exception:  # noqa: BLE001 -- a refresh failure must not block Settings
+                pass
         self._build_ui()
         self._loading = False
 
