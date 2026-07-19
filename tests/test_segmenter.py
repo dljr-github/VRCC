@@ -372,8 +372,9 @@ class TestSilenceDecouple:
         # At a high speech threshold, mid-utterance dips to 0.40 must NOT count
         # as silence (silence bar pinned at 0.35), so no finalize fires.
         cfg = VadConfig(threshold=0.60, silence_threshold=0.35)
-        # start speech, then 30 frames dipping to 0.40 (below old 0.45 bar,
-        # above the decoupled 0.35 bar).
+        # Speech, then 30 frames dipping to 0.40. At threshold 0.60 a coupled
+        # formula would call 0.40 silence; the decoupled bar stays at 0.35, so
+        # 0.40 is dead band and the utterance must not finalize.
         probs = [0.9] + [0.40] * 30
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -383,13 +384,17 @@ class TestSilenceDecouple:
         assert not _by_type(events, SegFinal)
 
     def test_silence_bar_clamped_below_speech_threshold(self):
-        # Even if silence_threshold is set at/above the speech threshold, a
-        # frame at the speech threshold is never simultaneously silence.
+        # At high sensitivity the speech threshold is low, so the silence bar
+        # must clamp to threshold - MIN_GAP (0.25 here), not the raw
+        # silence_threshold (0.35). A 0.28 probe sits in the dead band under the
+        # clamp; without the clamp it would count as silence and finalize.
         cfg = VadConfig(threshold=0.30, silence_threshold=0.35)
-        vad = ScriptedVad([0.9, 0.30])
+        probs = [0.9] + [0.28] * 30
+        vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
-        seg.process(_frame())
-        events = seg.process(_frame())  # 0.30 == threshold -> speech, not silence
+        events = []
+        for _ in range(len(probs)):
+            events += seg.process(_frame())
         assert not _by_type(events, SegFinal)
 
 
