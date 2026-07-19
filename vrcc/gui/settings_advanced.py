@@ -382,6 +382,14 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     dlg._sentence_inject_check = inject
     form.addRow(inject)
 
+    dlg._update_check = QCheckBox(tr("Tell me when a new version is available"))
+    dlg._update_check.setChecked(dlg._cfg.gui.update_check_enabled)
+    dlg._update_check.setToolTip(
+        tr("Check GitHub for a newer VRCC when the app starts.")
+    )
+    dlg._bind_checkbox(dlg._update_check, dlg._cfg.gui, "update_check_enabled")
+    form.addRow(dlg._update_check)
+
     # Raw CTranslate2 kwargs tables (power users only).
     kw1 = QLabel(tr("Extra transcribe options (CTranslate2)"))
     outer.addWidget(kw1)

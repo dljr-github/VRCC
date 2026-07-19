@@ -148,6 +148,19 @@ def test_sentence_inject_toggle_writes_config(qapp, tmp_path):
         dlg.deleteLater()
 
 
+def test_update_check_toggle_writes_config(qapp, tmp_path):
+    # Not a live-apply field (read at next launch), so this only checks the
+    # config write, not apply.calls.
+    store = _store(tmp_path)
+    dlg = SettingsDialog(store)
+    try:
+        check = dlg._update_check
+        check.setChecked(not check.isChecked())
+        assert store.config.gui.update_check_enabled == check.isChecked()
+    finally:
+        dlg.deleteLater()
+
+
 def test_osc_port_change_applies_osc(qapp, tmp_path):
     store = _store(tmp_path)
     apply = _RecordingApply()
