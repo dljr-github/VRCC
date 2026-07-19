@@ -86,3 +86,11 @@ class AppError:
     code: str
     message: str
     detail: str = ""
+
+
+@dataclass(frozen=True)
+class UpdateCheckResult:
+    available: bool
+    latest: str = ""
+    url: str = ""
+    error: str = ""
