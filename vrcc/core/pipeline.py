@@ -41,8 +41,6 @@ FRAME_QUEUE_MAX = 100
 # STT/MT job queues: small so a slow engine backpressures up the chain.
 JOB_QUEUE_MAX = 4
 JOIN_TIMEOUT_S = 2.0
-# Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock.
-_PUT_POLL_S = 0.1
 
 
 class Pipeline:
@@ -112,6 +110,13 @@ class Pipeline:
         self._dropped_frames = 0
 
         self._lifecycle_lock = threading.Lock()
+        # Decreasing counter for typed-submission ids: -1, -2, ... . Negative
+        # so a typed id can never collide with the segmenter's non-negative
+        # utterance ids, and unique per call so two typed sends in flight at
+        # once never share a CaptionModel row (each gets its own translated()/
+        # sent() target). Survives across start()/stop(): a restart must not
+        # hand out an id a still-resolving prior typed job already owns.
+        self._typed_seq = 0
         # Current run's stop event: replaced each start() so a worker abandoned
         # by a timed-out stop() join keeps its own (set) event and can't be
         # un-stopped by a restart. Passed to workers as a thread arg.
@@ -209,6 +214,15 @@ class Pipeline:
     @property
     def captioning_enabled(self) -> bool:
         return self._captioning
+
+    @property
+    def mt_active(self) -> bool:
+        """Whether a live MT engine is installed right now. ``translate.
+        enabled`` alone can't tell a genuinely running engine from one that
+        never loaded or was swapped out mid-session; a caller that needs to
+        know whether a row will actually reach a translated state must check
+        both."""
+        return self._mt is not None
 
     @property
     def segmenter(self) -> "Segmenter":
@@ -451,9 +465,17 @@ class Pipeline:
 
     def submit_typed(self, text: str) -> bool:
         """Send typed text straight through translation to the chatbox,
-        bypassing STT and mute/captioning gating (utterance id 0). Returns False
+        bypassing STT and mute/captioning gating (each call gets its own
+        negative utterance id; see ``_next_typed_id``). Returns False
         (``PIPELINE_NOT_RUNNING``) when not started, keeping the text uncaptured."""
         return pipeline_jobs.submit_typed(self, text)
+
+    def _next_typed_id(self) -> int:
+        """A fresh negative id for a typed submission: -1, -2, ... . Never
+        collides with a segmenter id and never repeats, so a typed message's
+        translated()/sent() can't land on a different in-flight typed row."""
+        self._typed_seq -= 1
+        return self._typed_seq
 
     # -- typing helpers ------------------------------------------------------
 
@@ -473,28 +495,6 @@ class Pipeline:
         if self._typing.resolve(utterance_id):
             self._set_typing(False)
 
-    # -- shared-state helpers ----------------------------------------------
-
-    def _mark_finalized(self, utterance_id: int) -> None:
-        """Bound the speculative caches, then defensively prune typing
-        orphans below the cutoff (see TypingTracker.prune_orphans)."""
-        cutoff = self._spec.mark_finalized(utterance_id)
-        orphaned, emptied = self._typing.prune_orphans(cutoff)
-        if orphaned:
-            logger.warning(
-                "pruned orphaned typing entries %s (segmenter invariant "
-                "violated?)",
-                sorted(orphaned),
-            )
-        if emptied:
-            self._set_typing(False)
-
-    def _enqueue(self, q: queue.Queue, job) -> None:
-        """Put a job, applying backpressure (blocking) but waking to drop it if
-        stop() is requested, so a full downstream queue never deadlocks stop."""
-        while not self._stop_flag.is_set():
-            try:
-                q.put(job, timeout=_PUT_POLL_S)
-                return
-            except queue.Full:
-                continue
+    # _mark_finalized (SpecCache/TypingTracker bookkeeping) and _enqueue
+    # (backpressured queue put) live in pipeline_jobs alongside the job code
+    # that is their only caller.

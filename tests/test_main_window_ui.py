@@ -15,7 +15,7 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def _window(tmp_path, mt_available=True, store=None):
+def _window(tmp_path, mt_available=True, store=None, mt_active=True):
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.main_window import MainWindow
 
@@ -25,10 +25,12 @@ def _window(tmp_path, mt_available=True, store=None):
 
     class _P:
         captioning_enabled = False  # matches the real Pipeline's startup default
+        def __init__(self, mt_active):
+            self.mt_active = mt_active
         def submit_typed(self, t): return True
         def set_captioning(self, e): self.captioning_enabled = e
 
-    w = MainWindow(bridge, store, _P(), on_open_settings=lambda: None,
+    w = MainWindow(bridge, store, _P(mt_active), on_open_settings=lambda: None,
                    on_open_models=lambda: None, mt_available=mt_available)
     return w, bridge
 
@@ -232,12 +234,26 @@ def test_overflow_glyph_is_three_dots_no_caret(qapp, tmp_path):
 def test_translate_gate_reads_live_config_not_ctor_snapshot(qapp, tmp_path):
     # mt_available=False used to permanently suppress "translating..." even
     # once config turned translation on -- engines hot-swap mid-session now,
-    # so only the live config value may decide this.
-    w, bridge = _window(tmp_path, mt_available=False)
+    # so only the live config value (and a live engine) may decide this.
+    w, bridge = _window(tmp_path, mt_available=False, mt_active=True)
     try:
         w._store.config.translate.enabled = True
         w._on_phrase_recognized(SimpleNamespace(utterance_id=1, text="hi"))
         assert "translating" in w._log.toPlainText().lower()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_translate_gate_requires_a_live_mt_engine(qapp, tmp_path):
+    # Regression: config.translate.enabled alone marked a row TRANSLATING
+    # even when no MT engine had ever loaded (or was swapped out). With
+    # send-to-VRChat off that left the row with no terminal status to ever
+    # reach -- stuck on "translating..." forever.
+    w, bridge = _window(tmp_path, mt_active=False)
+    try:
+        w._store.config.translate.enabled = True
+        w._on_phrase_recognized(SimpleNamespace(utterance_id=1, text="hi"))
+        assert "translating" not in w._log.toPlainText().lower()
     finally:
         w.close(); w.deleteLater(); bridge.detach()
 
@@ -397,6 +413,7 @@ def test_check_for_updates_flashes_and_invokes_callback(qapp, tmp_path):
 
     class _P:
         captioning_enabled = False
+        mt_active = True
         def submit_typed(self, t): return True
         def set_captioning(self, e): self.captioning_enabled = e
 

@@ -424,6 +424,52 @@ def test_stop_of_an_active_session_publishes_unknown_state():
     assert changes == [True, None]
 
 
+def test_republish_reemits_current_state_without_changing_it():
+    # A rebuilt UI (e.g. after a language change) subscribes fresh and would
+    # otherwise never learn the current mute state, since MuteChanged only
+    # fires on a real transition -- the rebuilt window's mute chip would stay
+    # hidden until the next actual mute toggle.
+    bus = EventBus()
+    events = _collect(bus)
+    holder: list = []
+    mute = MuteSync(
+        MuteSyncConfig(),
+        "127.0.0.1",
+        bus,
+        server_factory=_factory(holder),
+        initial_fetch=lambda: None,
+    )
+    mute.start()
+    holder[0].on_mute(True)
+    events.clear()
+
+    mute.republish()
+
+    assert mute.muted is True  # unchanged
+    changes = [e for e in events if isinstance(e, MuteChanged)]
+    assert changes == [MuteChanged(True)]
+    mute.stop()
+
+
+def test_republish_with_unknown_state_emits_none():
+    bus = EventBus()
+    events = _collect(bus)
+    holder: list = []
+    mute = MuteSync(
+        MuteSyncConfig(),
+        "127.0.0.1",
+        bus,
+        server_factory=_factory(holder),
+        initial_fetch=lambda: None,
+    )
+
+    mute.republish()  # never started; still a valid no-op re-emit
+
+    assert mute.muted is None
+    changes = [e for e in events if isinstance(e, MuteChanged)]
+    assert changes == [MuteChanged(None)]
+
+
 def test_stop_without_an_active_session_publishes_nothing():
     # stop() is also the shutdown hook for a coordinator that never started
     # (disabled config, non-localhost OSC); no session, no event.

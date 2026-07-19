@@ -231,9 +231,15 @@ class MainWindow(QMainWindow):
         self._mic_meter.set_level(rms)
 
     def _translate_active(self) -> bool:
-        # Live config only: an MT engine can hot-swap in mid-session, so show
-        # "translating…" whenever the toggle is on, not just if one existed at launch.
-        return self._store.config.translate.enabled
+        # Live config AND a live engine: an MT engine can hot-swap in
+        # mid-session, so the toggle alone (an engine existed at launch or
+        # not) can't decide this. But the toggle alone also can't tell a
+        # genuinely loaded engine from one that never finished loading or was
+        # swapped out -- marking the row TRANSLATING then would leave it with
+        # no event that will ever resolve it (forward_final's else-branch
+        # with send_to_vrchat off publishes neither PhraseTranslated nor
+        # ChatboxSent), stuck on "translating…" forever.
+        return self._store.config.translate.enabled and self._pipeline.mt_active
 
     def _send_active(self) -> bool:
         return bool(self._store.config.osc.send_to_vrchat)

@@ -8,6 +8,7 @@ direction: pipeline imports this module (never the reverse at runtime).
 from __future__ import annotations
 
 import logging
+import queue
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,9 @@ logger = logging.getLogger("vrcc.core.pipeline")
 # transcription result (quality-gated): a job that sees _NO_ENGINE is dropped.
 _NO_ENGINE = object()
 
+# Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock.
+_PUT_POLL_S = 0.1
+
 
 @dataclass
 class _SttJob:
@@ -53,6 +57,36 @@ class _MtJob:
     manage_typing: bool
 
 
+# -- shared-state helpers (queues/caches live on Pipeline; only the logic
+# that touches them from job code lives here) --------------------------------
+
+
+def _mark_finalized(p: "Pipeline", utterance_id: int) -> None:
+    """Bound the speculative caches, then defensively prune typing orphans
+    below the cutoff (see TypingTracker.prune_orphans)."""
+    cutoff = p._spec.mark_finalized(utterance_id)
+    orphaned, emptied = p._typing.prune_orphans(cutoff)
+    if orphaned:
+        logger.warning(
+            "pruned orphaned typing entries %s (segmenter invariant "
+            "violated?)",
+            sorted(orphaned),
+        )
+    if emptied:
+        p._set_typing(False)
+
+
+def _enqueue(p: "Pipeline", q: "queue.Queue", job) -> None:
+    """Put a job, applying backpressure (blocking) but waking to drop it if
+    stop() is requested, so a full downstream queue never deadlocks stop."""
+    while not p._stop_flag.is_set():
+        try:
+            q.put(job, timeout=_PUT_POLL_S)
+            return
+        except queue.Full:
+            continue
+
+
 # -- segmenter-event handlers (job creation) --------------------------------
 
 
@@ -62,7 +96,8 @@ def handle_speculative(p: "Pipeline", event: "SegSpeculative") -> None:
     samples_id = id(event.samples)
     p._spec.note_speculative(event.utterance_id, samples_id)
     p._begin_typing(event.utterance_id)
-    p._enqueue(
+    _enqueue(
+        p,
         p._stt_queue,
         _SttJob(event.utterance_id, event.samples, True, samples_id),
     )
@@ -73,9 +108,10 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
         # Gated at finalize time: no transcription. Still resolve any
         # typing indicator and bound the caches for this utterance.
         p._resolve_typing(event.utterance_id)
-        p._mark_finalized(event.utterance_id)
+        _mark_finalized(p, event.utterance_id)
         return
-    p._enqueue(
+    _enqueue(
+        p,
         p._stt_queue,
         _SttJob(event.utterance_id, event.samples, False, id(event.samples)),
     )
@@ -98,7 +134,8 @@ def handle_partial(p: "Pipeline", event: "SegPartial") -> None:
         if p._partial_pending:
             return  # one already in flight: this snapshot is coalesced away
         p._partial_pending = True
-    p._enqueue(
+    _enqueue(
+        p,
         p._stt_queue,
         _SttJob(
             event.utterance_id,
@@ -151,7 +188,7 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     # emits no final at all.
     if p._spec.pop_emitted_early(job.utterance_id):
         p._resolve_typing(job.utterance_id)
-        p._mark_finalized(job.utterance_id)
+        _mark_finalized(p, job.utterance_id)
         return
 
     # Reuse the speculative's cached result on identical samples, else
@@ -206,13 +243,13 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         # STT job is already in flight. Still resolve typing and bound the
         # caches, exactly like the other early-return branches below.
         p._resolve_typing(utterance_id)
-        p._mark_finalized(utterance_id)
+        _mark_finalized(p, utterance_id)
         return
 
     if result is None:
         # Quality-gated: nothing downstream, just resolve typing.
         p._resolve_typing(utterance_id)
-        p._mark_finalized(utterance_id)
+        _mark_finalized(p, utterance_id)
         return
 
     p._bus.publish(
@@ -244,7 +281,7 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         )
         safe_submit(p, result.text, [], utterance_id)
         p._resolve_typing(utterance_id)
-        p._mark_finalized(utterance_id)
+        _mark_finalized(p, utterance_id)
         return
 
     if p._mt is not None and p._config.translate.enabled:
@@ -252,7 +289,8 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         # worker can't resolve it before the exemption (_mark_finalized)
         # is visible.
         p._typing.own_by_mt(utterance_id)
-        p._enqueue(
+        _enqueue(
+            p,
             p._mt_queue,
             _MtJob(utterance_id, result.text, src, manage_typing=True),
         )
@@ -261,7 +299,7 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         safe_submit(p, result.text, [], utterance_id)
         p._resolve_typing(utterance_id)
 
-    p._mark_finalized(utterance_id)
+    _mark_finalized(p, utterance_id)
 
 
 def resolve_source_language(p: "Pipeline", detected_whisper: str) -> "Language | None":
@@ -381,8 +419,11 @@ def safe_submit(
 
 def submit_typed(p: "Pipeline", text: str) -> bool:
     """Send typed text straight through translation to the chatbox, bypassing
-    STT and mute/captioning gating (utterance id 0). Returns False
-    (PIPELINE_NOT_RUNNING) when not started, keeping the text uncaptured."""
+    STT and mute/captioning gating. Each call gets its own unique negative
+    utterance id (see ``Pipeline._next_typed_id``): a shared id would let a
+    second Send's recognized() remap CaptionModel's row lookup before the
+    first's async translate/send completes, stamping the wrong row. Returns
+    False (PIPELINE_NOT_RUNNING) when not started, keeping the text uncaptured."""
     if not text or not text.strip():
         return False
     if not p._started:
@@ -393,11 +434,12 @@ def submit_typed(p: "Pipeline", text: str) -> bool:
             )
         )
         return False
+    utterance_id = p._next_typed_id()
     src_cfg = p._config.stt.source_language
     src = languages.get("English") if src_cfg == "auto" else languages.get(src_cfg)
     p._bus.publish(
         PhraseRecognized(
-            utterance_id=0,
+            utterance_id=utterance_id,
             text=text,
             language=src.whisper,
             avg_logprob=0.0,
@@ -405,9 +447,9 @@ def submit_typed(p: "Pipeline", text: str) -> bool:
         )
     )
     if p._mt is not None and p._config.translate.enabled:
-        p._enqueue(p._mt_queue, _MtJob(0, text, src, manage_typing=False))
+        _enqueue(p, p._mt_queue, _MtJob(utterance_id, text, src, manage_typing=False))
     else:
         # Runs on the caller's (GUI) thread: never propagate a chatbox
         # failure back into it.
-        safe_submit(p, text, [], 0)
+        safe_submit(p, text, [], utterance_id)
     return True

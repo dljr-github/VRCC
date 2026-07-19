@@ -43,10 +43,12 @@ def test_submit_typed_bypasses_stt_and_mute_and_translates():
         assert _wait_until(lambda: len(env.chatbox.submits) == 1)
         assert _wait_until(lambda: len(translated) == 1)
     assert env.stt.calls == 0  # STT bypassed
-    assert [(e.utterance_id, e.text) for e in recognized] == [(0, "typed hello")]
-    assert translated[0].utterance_id == 0
+    # A typed submission gets a unique negative id (never the segmenter's 0+
+    # ids), so a first-message id must be -1 here.
+    assert [(e.utterance_id, e.text) for e in recognized] == [(-1, "typed hello")]
+    assert translated[0].utterance_id == -1
     text, uid = env.chatbox.submits[0]
-    assert uid == 0
+    assert uid == -1
     assert text == "typed hello\nJapanese:typed hello"
 
 
@@ -56,8 +58,26 @@ def test_submit_typed_without_mt_sends_original():
     with running(env.pipeline):
         env.pipeline.submit_typed("just this")
         assert _wait_until(lambda: len(env.chatbox.submits) == 1)
-    assert [(e.utterance_id, e.text) for e in recognized] == [(0, "just this")]
-    assert env.chatbox.submits[0] == ("just this", 0)
+    assert [(e.utterance_id, e.text) for e in recognized] == [(-1, "just this")]
+    assert env.chatbox.submits[0] == ("just this", -1)
+
+
+def test_submit_typed_uses_unique_ids_across_calls():
+    # Regression: every typed message used to share utterance_id 0, so a
+    # second Send before the first's async translate/send completed remapped
+    # CaptionModel's row lookup and stamped the wrong row. Each submission now
+    # gets its own, never-repeating id, and it never collides with the
+    # segmenter's non-negative ids.
+    env = make_pipeline(mt=None)
+    recognized = collect(env.bus, PhraseRecognized)
+    with running(env.pipeline):
+        env.pipeline.submit_typed("first")
+        env.pipeline.submit_typed("second")
+        assert _wait_until(lambda: len(env.chatbox.submits) == 2)
+    ids = [e.utterance_id for e in recognized]
+    assert len(ids) == 2
+    assert len(set(ids)) == 2  # never repeats
+    assert all(i < 0 for i in ids)  # never collides with a segmenter id
 
 
 def test_submit_typed_before_start_publishes_apperror_and_nothing_else():

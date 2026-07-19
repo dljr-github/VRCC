@@ -70,8 +70,9 @@ def test_send_disabled_shows_not_sent():
 
 
 def test_reused_utterance_id_zero_creates_distinct_rows():
-    # Typed messages all use utterance_id 0; each must be its own row and its
-    # sent event must attach to the most recent one.
+    # Defensive property of the model itself: a reused id (whatever the
+    # caller's reason) always starts a fresh row, and a later event for that
+    # id attaches to the most recent one, not an older row sharing the id.
     m = _model()
     m.recognized(0, "first typed", translate_enabled=False, send_enabled=True)
     m.recognized(0, "second typed", translate_enabled=False, send_enabled=True)
@@ -80,6 +81,27 @@ def test_reused_utterance_id_zero_creates_distinct_rows():
     assert [r.original for r in rows] == ["first typed", "second typed"]
     assert rows[0].status == QUEUED  # first is untouched
     assert rows[1].status == SENT  # sent attached to the newest
+
+
+def test_distinct_ids_do_not_cross_stamp_translated_or_sent():
+    # Regression for the typed-message misattribution bug: with each
+    # submission on its own id (as Pipeline now assigns), a translated()/
+    # sent() for one row must never land on a different, still-pending row.
+    m = _model()
+    m.recognized(-1, "first typed", translate_enabled=True, send_enabled=True)
+    m.recognized(-2, "second typed", translate_enabled=True, send_enabled=True)
+
+    m.translated(-1, [("Japanese", "こんにちは")], send_enabled=True)
+    m.sent(-1, truncated=False)
+
+    rows = m.rows()
+    assert rows[0].original == "first typed"
+    assert rows[0].status == SENT
+    assert rows[0].translations == [("Japanese", "こんにちは")]
+
+    assert rows[1].original == "second typed"
+    assert rows[1].status == TRANSLATING  # untouched: still awaiting its own translate
+    assert rows[1].translations == []
 
 
 def test_cap_trims_oldest_rows():
@@ -250,6 +272,33 @@ def test_translation_line_has_left_rule():
     m.translated(1, [("Japanese", "こんにちは")], send_enabled=True)
     html = render_rows_html(m.rows())
     assert "border-left" in html
+
+
+def test_translation_line_shows_language_label():
+    # Regression: render_rows_html iterated (display, text) tuples but only
+    # rendered text, dropping which language each line was. With 2-3 targets
+    # the log showed unlabeled indented lines with no way to tell them apart.
+    m = _model()
+    m.recognized(1, "hello", translate_enabled=True, send_enabled=True)
+    m.translated(
+        1,
+        [("Japanese", "こんにちは"), ("Korean", "안녕하세요")],
+        send_enabled=True,
+    )
+    html = render_rows_html(m.rows())
+    assert "Japanese" in html
+    assert "こんにちは" in html
+    assert "Korean" in html
+    assert "안녕하세요" in html
+
+
+def test_translation_line_label_is_escaped():
+    m = _model()
+    m.recognized(1, "hello", translate_enabled=True, send_enabled=True)
+    m.translated(1, [("<b>Lang</b>", "text")], send_enabled=True)
+    html = render_rows_html(m.rows())
+    assert "<b>Lang</b>" not in html
+    assert "&lt;b&gt;Lang&lt;/b&gt;" in html
 
 
 def test_status_markup_colors_distinct():

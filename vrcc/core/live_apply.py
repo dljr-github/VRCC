@@ -60,6 +60,12 @@ class LiveApply:
         self._make_mute = make_mute
         self._mute = mute
 
+    @property
+    def mute(self) -> "MuteSync | None":
+        """The live mute-sync coordinator, if one has been built (``None``
+        until the first enable when mute sync was off at launch)."""
+        return self._mute
+
     def apply_audio_device(self, device_cfg: str) -> bool:
         """Swap the mic to ``device_cfg`` live. A failed open publishes
         ``MIC_OPEN_FAILED`` (like :func:`~vrcc.app._start_pipeline_guarded`) and

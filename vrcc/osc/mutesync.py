@@ -202,6 +202,21 @@ class MuteSync:
                     return  # superseded by a newer update: never publish
             self._bus.publish(MuteChanged(value))
 
+    def republish(self) -> None:
+        """Re-emit the current :class:`MuteChanged` state without changing it.
+
+        ``_update`` only publishes on a real transition, so a subscriber that
+        starts fresh mid-session (e.g. a main window rebuilt after a UI-
+        language change) never learns the current mute state until the next
+        actual toggle. Safe to call whether or not sync is active: an unknown
+        state (never fetched, or after :meth:`stop`) re-emits ``None`` the
+        same way a stopped session's own transition does.
+        """
+        with self._publish_lock:
+            with self._state_lock:
+                value = self._muted
+            self._bus.publish(MuteChanged(value))
+
     @property
     def muted(self) -> bool | None:
         return self._muted
