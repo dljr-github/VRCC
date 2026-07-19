@@ -243,6 +243,10 @@ def test_captioning_starts_off_by_default():
     assert env.pipeline.captioning_enabled is False
 
 
+# forward_final's send-time re-check of this same gate (catching a mute or
+# captioning-off that lands after enqueue) lives in test_pipeline_gate.py.
+
+
 def test_seg_final_before_enabling_creates_no_stt_job():
     # A final segment arriving before the user ever enables captioning must
     # not create an STT job -- _should_caption() gates it just like the
@@ -395,6 +399,25 @@ def test_final_after_early_send_does_not_duplicate():
     pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, s), threading.Event())
     assert len(env.chatbox.submits) == sent_after_spec  # no second send
     assert env.stt.calls == 1  # the final neither re-sent nor re-transcribed
+
+
+def test_gated_early_inject_composes_with_final_dedupe_no_double_send():
+    # forward_final runs BEFORE mark_emitted_early. A gate closing right
+    # before that call skips the speculative send, but the guard still ends
+    # up set (mark_emitted_early runs unconditionally after), so the
+    # natural final racing the commit doesn't send either.
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    seg = _CommitRecorder()
+    env.pipeline._segmenter = seg
+    s = sample()
+    env.pipeline.set_captioning(False)  # closed before the speculative resolves
+    _run_speculative(env, 1, s)
+    assert env.chatbox.submits == []  # gated: the early send never happened
+    assert seg.commits == [1]  # sentence injection still cuts the utterance
+    assert 1 in env.pipeline._spec._emitted_early  # guard still set after
+    pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, s), threading.Event())
+    assert env.chatbox.submits == []  # dedupe path: still no send, no re-transcribe
+    assert env.stt.calls == 1
 
 
 def test_speculative_without_terminal_punctuation_is_not_sent_early():

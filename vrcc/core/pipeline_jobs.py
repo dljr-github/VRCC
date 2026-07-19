@@ -200,6 +200,15 @@ def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
 
 
 def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") -> None:
+    if not p._should_caption():
+        # The gate is checked again HERE, at send time: enqueue-time gating
+        # (handle_final) can't see a mute/captioning-off that lands while the
+        # STT job is already in flight. Still resolve typing and bound the
+        # caches, exactly like the other early-return branches below.
+        p._resolve_typing(utterance_id)
+        p._mark_finalized(utterance_id)
+        return
+
     if result is None:
         # Quality-gated: nothing downstream, just resolve typing.
         p._resolve_typing(utterance_id)
@@ -216,6 +225,27 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         )
     )
     src = resolve_source_language(p, result.language)
+
+    if src is None:
+        # "auto" detected a Whisper code with no registered Language: the MT
+        # engine must never be told the wrong source (garbage translation
+        # with no warning). Send the original untranslated instead.
+        logger.warning(
+            "auto-detected language %r has no registered match; sending "
+            "original text without translation",
+            result.language,
+        )
+        p._bus.publish(
+            AppError(
+                "SOURCE_LANG_UNSUPPORTED",
+                f"Detected language '{result.language}' is not supported "
+                "for translation; sent untranslated.",
+            )
+        )
+        safe_submit(p, result.text, [], utterance_id)
+        p._resolve_typing(utterance_id)
+        p._mark_finalized(utterance_id)
+        return
 
     if p._mt is not None and p._config.translate.enabled:
         # Register MT ownership of typing-off BEFORE enqueueing, so the MT
@@ -234,7 +264,10 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
     p._mark_finalized(utterance_id)
 
 
-def resolve_source_language(p: "Pipeline", detected_whisper: str) -> "Language":
+def resolve_source_language(p: "Pipeline", detected_whisper: str) -> "Language | None":
+    """Resolve the MT source language, or ``None`` when "auto" detected a
+    Whisper code the registry has no entry for (translation must be skipped,
+    never mislabeled as English)."""
     src_cfg = p._config.stt.source_language
     if src_cfg != "auto":
         return languages.get(src_cfg)
@@ -242,7 +275,7 @@ def resolve_source_language(p: "Pipeline", detected_whisper: str) -> "Language":
     for lang in languages.LANGUAGES.values():
         if lang.whisper == detected_whisper:
             return lang
-    return languages.get("English")
+    return None
 
 
 # -- MT job processing -------------------------------------------------------

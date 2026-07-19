@@ -9,7 +9,7 @@ import time
 
 from vrcc.audio.segmenter import SegFinal, SegSpeculative
 from vrcc.core.config import AppConfig, OscConfig, SttConfig, TranslateConfig
-from vrcc.core.events import PhraseTranslated
+from vrcc.core.events import AppError, PhraseTranslated
 from vrcc.core.languages import get as get_lang
 from vrcc.osc.chatbox import format_message
 
@@ -136,6 +136,26 @@ def test_auto_chinese_traditional_target_still_translates():
     _text, src, targets = env.mt.calls[0]
     assert src == get_lang("Chinese Simplified")
     assert targets == [get_lang("Chinese Traditional")]
+
+
+def test_auto_detected_language_outside_registry_sends_original_untranslated():
+    # A Whisper code the registry has no entry for (Bengali "bn") must not be
+    # silently relabeled English: that would hand the MT engine the wrong
+    # source and produce garbage. The original still reaches the chatbox, MT
+    # is skipped entirely, and a warning is surfaced.
+    cfg = AppConfig(
+        stt=SttConfig(source_language="auto"),
+        translate=TranslateConfig(targets=["English"]),
+    )
+    env = make_pipeline(config=cfg, stt=FakeStt(result=make_result(language="bn")))
+    errors = collect(env.bus, AppError)
+    with running(env.pipeline):
+        env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
+        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+        time.sleep(0.02)
+    assert env.mt.calls == []  # MT engine never invoked with a wrong source
+    assert env.chatbox.submits[0] == ("hello world", 1)
+    assert any(e.code == "SOURCE_LANG_UNSUPPORTED" for e in errors)
 
 
 def test_explicit_source_matching_a_target_is_skipped_too():
