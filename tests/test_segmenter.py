@@ -367,6 +367,32 @@ _ABORT_CFG = dict(
 )
 
 
+class TestSilenceDecouple:
+    def test_high_threshold_does_not_raise_the_silence_bar(self):
+        # At a high speech threshold, mid-utterance dips to 0.40 must NOT count
+        # as silence (silence bar pinned at 0.35), so no finalize fires.
+        cfg = VadConfig(threshold=0.60, silence_threshold=0.35)
+        # start speech, then 30 frames dipping to 0.40 (below old 0.45 bar,
+        # above the decoupled 0.35 bar).
+        probs = [0.9] + [0.40] * 30
+        vad = ScriptedVad(probs)
+        seg = Segmenter(cfg, vad)
+        events = []
+        for _ in range(len(probs)):
+            events += seg.process(_frame())
+        assert not _by_type(events, SegFinal)
+
+    def test_silence_bar_clamped_below_speech_threshold(self):
+        # Even if silence_threshold is set at/above the speech threshold, a
+        # frame at the speech threshold is never simultaneously silence.
+        cfg = VadConfig(threshold=0.30, silence_threshold=0.35)
+        vad = ScriptedVad([0.9, 0.30])
+        seg = Segmenter(cfg, vad)
+        seg.process(_frame())
+        events = seg.process(_frame())  # 0.30 == threshold -> speech, not silence
+        assert not _by_type(events, SegFinal)
+
+
 class TestAbort:
     def test_abort_with_pending_speculative_returns_discard(self):
         # Speech, then 11 silence frames -> speculative in flight. Abort must
