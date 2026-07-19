@@ -102,6 +102,7 @@ class TestMinUtteranceRejection:
             min_utterance_ms=1000,
             finalize_silence_ms=400,
             speculative_silence_ms=350,
+            live_partials=False,  # this timeline only cares about spec/discard
         )
         vad = ScriptedVad([0.9] + [0.1] * 13)
         seg = Segmenter(cfg, vad)
@@ -335,6 +336,7 @@ class TestConfigFrameCounts:
         assert seg._min_utterance_frames == 16
         assert seg._preroll_frames == 5
         assert seg._max_utterance_frames == 875
+        assert seg._partial_frames == 10
 
 
 class TestReconfigure:

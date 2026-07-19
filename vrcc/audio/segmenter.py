@@ -35,6 +35,16 @@ class SegSpeculative:
 
 
 @dataclass(frozen=True)
+class SegPartial:
+    """A periodic buffer snapshot while an utterance is still active. Not part
+    of the speculative/final resolve contract: additive, and never resolved by
+    a SegFinal/SegDiscard."""
+
+    utterance_id: int
+    samples: np.ndarray
+
+
+@dataclass(frozen=True)
 class SegFinal:
     utterance_id: int
     samples: np.ndarray
@@ -84,6 +94,7 @@ class Segmenter:
         self._frames_since_start = 0
         self._silence_run = 0
         self._pending_spec_samples: np.ndarray | None = None
+        self._frames_since_partial = 0
         self._commit_lock = threading.Lock()
         self._commit_requested: int | None = None
 
@@ -103,12 +114,14 @@ class Segmenter:
         min_utterance = math.ceil(cfg.min_utterance_ms / frame_ms)
         preroll = math.ceil(cfg.pre_roll_ms / frame_ms)
         max_utterance = math.ceil(cfg.max_utterance_s * 1000.0 / frame_ms)
+        partial = math.ceil(cfg.partial_interval_ms / frame_ms)
         self.cfg = cfg
         self._speculative_frames = speculative
         self._finalize_frames = finalize
         self._min_utterance_frames = min_utterance
         self._preroll_frames = preroll
         self._max_utterance_frames = max_utterance
+        self._partial_frames = partial
 
     def reconfigure(self, cfg: VadConfig) -> None:
         """Apply new VAD timings/threshold live (GUI thread) without dropping an
@@ -194,6 +207,7 @@ class Segmenter:
                 self._frames_since_start = 1
                 self._silence_run = 0
                 self._pending_spec_samples = None
+                self._frames_since_partial = 0
                 events.append(SegSpeechStart(utterance_id=self._utterance_id))
                 # Degenerate configs (pre-roll >= max cap) can hit the cap on
                 # this very transition frame; force the final here, not late.
@@ -213,6 +227,24 @@ class Segmenter:
         self._preroll.append(frame_copy)
         self._buffer.append(frame_copy)
         self._frames_since_start += 1
+
+        # Live partials are additive: a periodic buffer snapshot while the
+        # utterance is active, independent of the speculative/final resolve
+        # contract below. Counted in real frames, not silence, so it fires
+        # throughout continuous speech, not just once silence starts.
+        self._frames_since_partial += 1
+        if (
+            self.cfg.live_partials
+            and self._frames_since_partial >= self._partial_frames
+            and len(self._buffer) > self._preroll_frames
+        ):
+            events.append(
+                SegPartial(
+                    utterance_id=self._utterance_id,
+                    samples=_concat(self._buffer),
+                )
+            )
+            self._frames_since_partial = 0
 
         if is_speech:
             self._silence_run = 0
@@ -275,4 +307,5 @@ class Segmenter:
         self._frames_since_start = 0
         self._silence_run = 0
         self._pending_spec_samples = None
+        self._frames_since_partial = 0
         self._utterance_id += 1

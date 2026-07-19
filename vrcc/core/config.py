@@ -48,6 +48,11 @@ class VadConfig(BaseModel):
     # ends in terminal punctuation, instead of waiting for the full stop.
     sentence_inject: bool = True
     sentence_min_words: int = 2
+    # Stream the in-progress transcription to the log and chatbox while the
+    # utterance is still active, ahead of the speculative/final result.
+    live_partials: bool = True
+    # How often the segmenter snapshots the active buffer for a live partial.
+    partial_interval_ms: int = 300
 
 
 class SttConfig(BaseModel):

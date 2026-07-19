@@ -30,6 +30,16 @@ class PhraseRecognized:
 
 
 @dataclass(frozen=True)
+class PhrasePartial:
+    """A tentative, in-progress transcription of the active utterance. Original
+    text only; no language/logprob/no-speech fields, since it never firms up
+    into a stored result on its own."""
+
+    utterance_id: int
+    text: str
+
+
+@dataclass(frozen=True)
 class PhraseTranslated:
     utterance_id: int
     original: str
