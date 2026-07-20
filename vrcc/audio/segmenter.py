@@ -126,12 +126,14 @@ class Segmenter:
         self._speculative_frames = speculative
         self._finalize_frames = finalize
         self._min_utterance_frames = min_utterance
-        # Invariant: pre-roll can never exceed the speculative-silence
-        # window. The commit path (_reset_to_idle) keeps the pre-roll ring
-        # across an early commit; if pre-roll held more audio than the
-        # speculative window, it could still contain end-of-sentence speech
-        # at commit time and prepend a stale word onto the next utterance.
-        self._preroll_frames = min(preroll, speculative)
+        # The idle ring seeds a fresh utterance's onset, so it holds the full
+        # pre-roll the user configured (uncapped). A commit keeps the ring
+        # across the reset, so the commit path trims it to the last
+        # _commit_preroll_frames (never more than the speculative window):
+        # that drops the just-committed sentence's tail and keeps only the
+        # resumed onset, so no stale word prepends onto the next utterance.
+        self._preroll_frames = preroll
+        self._commit_preroll_frames = min(preroll, speculative)
         self._max_utterance_frames = max_utterance
         self._partial_frames = partial
 
@@ -190,25 +192,29 @@ class Segmenter:
         vad_prob = float(self._vad_fn(frame))
         rms = float(np.sqrt(np.mean(frame**2)))
         events.append(SegLevel(rms=rms, vad_prob=vad_prob))
+        frame_copy = frame.copy()  # frame buffers may be reused by the caller
 
         with self._commit_lock:
             commit_id = self._commit_requested
             self._commit_requested = None
         if commit_id is not None and self._active and commit_id == self._utterance_id:
             # STT already emitted this sentence; drop the buffer and start a
-            # fresh utterance. Keep the pre-roll ring so the next sentence's
-            # onset is not clipped. No SegFinal (would double-send). Return
-            # now instead of falling into the idle branch below: this exact
-            # frame is not fed into the state machine, so it cannot both
-            # close the old utterance and open the new one in one call --
-            # the next process() call starts the next utterance cleanly.
+            # fresh utterance. No SegFinal (would double-send). This exact
+            # frame is not fed into the state machine (so it can't both close
+            # the old utterance and open a new one in one call); instead it
+            # seeds the ring as the contiguous first frame of the next onset.
+            # Trim the retained ring to the commit window so only the resumed
+            # onset, not the committed sentence's tail, prepends to the next
+            # utterance.
             self._reset_to_idle()
+            self._preroll.append(frame_copy)
+            while len(self._preroll) > self._commit_preroll_frames:
+                self._preroll.popleft()
             return events
 
         is_speech = vad_prob >= self.cfg.threshold
         silence_bar = min(self.cfg.silence_threshold, self.cfg.threshold - MIN_GAP)
         is_silence = vad_prob < silence_bar
-        frame_copy = frame.copy()  # frame buffers may be reused by the caller
 
         if not self._active:
             if is_speech:

@@ -38,6 +38,9 @@ class GainProcessor:
         # (single reference swap is GIL-atomic; no lock needed).
         self._params: tuple[bool, float] = (False, 1.0)
         self._auto_gain = 1.0
+        # Was the previous frame above the noise floor? Drives the onset snap:
+        # the first above-floor frame after silence jumps straight to target.
+        self._prev_above_floor = False
 
     def configure(self, gain_db: float, auto: bool) -> None:
         self._gain_db = float(gain_db)
@@ -46,6 +49,7 @@ class GainProcessor:
 
     def reset(self) -> None:
         self._auto_gain = 1.0
+        self._prev_above_floor = False
 
     def process(self, frame: np.ndarray) -> np.ndarray:
         frame = np.asarray(frame, dtype=np.float32)
@@ -65,11 +69,19 @@ class GainProcessor:
         if not math.isfinite(rms):
             return self._auto_gain  # never let a bad frame poison the gain
         if rms < _NOISE_FLOOR_RMS:
+            self._prev_above_floor = False
             return self._auto_gain  # hold; don't amplify the noise floor
         desired = _TARGET_RMS / max(rms, 1e-9)
         desired = float(np.clip(desired, _MIN_GAIN, _MAX_GAIN))
-        coeff = _ATTACK if desired > self._auto_gain else _RELEASE
-        next_gain = self._auto_gain + coeff * (desired - self._auto_gain)
+        if not self._prev_above_floor:
+            # First above-floor frame after silence: snap straight to target
+            # rather than ramp, so the onset (and the pre-roll recovered
+            # around it) is amplified now instead of trailing a slow attack.
+            self._prev_above_floor = True
+            next_gain = desired
+        else:
+            coeff = _ATTACK if desired > self._auto_gain else _RELEASE
+            next_gain = self._auto_gain + coeff * (desired - self._auto_gain)
         if not math.isfinite(next_gain):
             return self._auto_gain
         self._auto_gain = next_gain

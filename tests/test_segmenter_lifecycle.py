@@ -335,32 +335,48 @@ class TestConfigFrameCounts:
         assert seg._finalize_frames == 19
         assert seg._min_utterance_frames == 16
         assert seg._preroll_frames == 5
+        assert seg._commit_preroll_frames == 5
         assert seg._max_utterance_frames == 875
         assert seg._partial_frames == 10
 
 
 class TestPrerollBound:
-    def test_preroll_longer_than_speculative_is_clamped(self):
+    def test_preroll_ring_uses_full_length_not_clamped(self):
         # pre_roll 400ms (13 frames) > speculative_silence 250ms (8 frames):
-        # an early commit can leave end-of-sentence speech sitting in the
-        # ring, which would then prepend onto the next utterance. The ring
-        # must never hold more than the speculative-silence window.
+        # the idle ring must hold the full pre-roll the user asked for so a
+        # fresh onset is not clipped. The commit window is the separate
+        # speculative-bounded value used to trim the ring after a commit.
         cfg = VadConfig(pre_roll_ms=400, speculative_silence_ms=250)
         seg = Segmenter(cfg, ScriptedVad([]))
         assert seg._speculative_frames == 8
-        assert seg._preroll_frames == 8
-        assert seg._preroll.maxlen == 8
+        assert seg._preroll_frames == 13
+        assert seg._preroll.maxlen == 13
+        assert seg._commit_preroll_frames == 8
 
     def test_preroll_shorter_than_speculative_is_unaffected(self):
         cfg = VadConfig(pre_roll_ms=150, speculative_silence_ms=250)
         seg = Segmenter(cfg, ScriptedVad([]))
         assert seg._preroll_frames == 5
+        assert seg._commit_preroll_frames == 5
 
-    def test_reconfigure_also_clamps_preroll(self):
+    def test_reconfigure_uses_full_preroll_length(self):
         seg = Segmenter(VadConfig(), ScriptedVad([]))
         seg.reconfigure(VadConfig(pre_roll_ms=400, speculative_silence_ms=250))
-        assert seg._preroll_frames == 8
-        assert seg._preroll.maxlen == 8
+        assert seg._preroll_frames == 13
+        assert seg._preroll.maxlen == 13
+        assert seg._commit_preroll_frames == 8
+
+    def test_idle_onset_seed_uses_full_preroll(self):
+        # With pre_roll 400ms (13 frames) the idle->speech buffer seed must use
+        # up to the full 13 pre-roll frames, not the speculative-window clamp.
+        cfg = VadConfig(pre_roll_ms=400, speculative_silence_ms=250)
+        vad = ScriptedVad([0.1] * 13 + [0.9])
+        seg = Segmenter(cfg, vad)
+        for _ in range(13):
+            seg.process(_frame())
+        seg.process(_frame())
+        assert seg._preroll_frames == 13
+        assert len(seg._buffer) == 14  # 13 pre-roll + the triggering frame
 
 
 class TestReconfigure:

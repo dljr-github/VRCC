@@ -14,11 +14,54 @@ from vrcc.core import pipeline_jobs
 from vrcc.core.events import PhrasePartialCleared, PhraseRecognized
 from vrcc.core.pipeline_jobs import _SttJob
 
-from .conftest import FakeMute, collect, make_pipeline, make_result, sample
+from .conftest import FakeMute, FakeStt, collect, make_pipeline, make_result, sample
 
 
 def _final_job(uid: int, s) -> _SttJob:
     return _SttJob(utterance_id=uid, samples=s, speculative=False, samples_id=id(s))
+
+
+def _spec_job(uid: int, s) -> _SttJob:
+    return _SttJob(utterance_id=uid, samples=s, speculative=True, samples_id=id(s))
+
+
+class _OrderedCommitRecorder:
+    """Stand-in segmenter recording request_commit into a shared ordered log
+    alongside the chatbox's submits, so a test can assert the commit lands
+    BEFORE the send."""
+
+    def __init__(self, log: list) -> None:
+        self.commits: list = []
+        self._log = log
+
+    def request_commit(self, utterance_id: int) -> None:
+        self.commits.append(utterance_id)
+        self._log.append(("commit", utterance_id))
+
+
+def test_request_commit_precedes_the_early_send():
+    # The early inject must cut the utterance BEFORE forward_final's blocking
+    # enqueue: request_commit only flags the segmenter (read on its next
+    # frame), so cutting first stops it appending the next sentence's onset to
+    # the still-open buffer during that block, which would otherwise drop the
+    # onset. The emitted-early guard is still set after, so the dedupe holds.
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    seg = _OrderedCommitRecorder(env.chatbox.log)
+    env.pipeline._segmenter = seg
+    s = sample()
+    env.pipeline._begin_typing(1)
+    env.pipeline._spec.note_speculative(1, id(s))
+    pipeline_jobs.process_stt_job(env.pipeline, _spec_job(1, s), threading.Event())
+
+    ordered = [e[0] for e in env.chatbox.log if e[0] in ("commit", "submit")]
+    assert ordered == ["commit", "submit"]  # commit cuts before the send
+    assert seg.commits == [1]
+    assert env.chatbox.submits == [("Hello there.", 1)]
+    assert 1 in env.pipeline._spec._emitted_early  # dedupe guard set after send
+    # A natural final racing the commit must still not double-send.
+    pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, s), threading.Event())
+    assert env.chatbox.submits == [("Hello there.", 1)]
+    assert env.stt.calls == 1  # the final neither re-sent nor re-transcribed
 
 
 def test_forward_final_regated_by_captioning_off_does_not_send():

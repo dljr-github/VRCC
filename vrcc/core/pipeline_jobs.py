@@ -186,19 +186,19 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
             return
         stored = p._spec.store_result(key, result)
         if stored and _should_inject_sentence(p, result):
-            # A finished sentence: send it now and cut the utterance so the
-            # next words become a fresh one. forward_final finalizes this id
-            # (which prunes the caches for it), so mark the emitted-early guard
-            # AFTER, where it survives to dedupe a natural final racing the
-            # commit; a later utterance's finalize is what eventually clears it.
-            # A second inject for this id cannot form: a resume racing this
-            # speculative would have gone through SegDiscard -> drop_discarded
-            # and made store_result return False above; since it did not, the
-            # next process() frame consumes this request_commit and starts a
-            # fresh id before another speculative for this one can form.
+            # A finished sentence: cut the utterance FIRST, then send it.
+            # forward_final enqueues the MT job through the blocking _enqueue;
+            # request_commit only sets the segmenter's commit flag (read on its
+            # next frame), so cutting first stops the segmenter appending the
+            # next sentence's onset to the still-open buffer during that block.
+            # mark_emitted_early stays AFTER forward_final: its _mark_finalized
+            # prunes _emitted_early at cutoff==uid, so marking earlier would
+            # erase the guard that dedupes a natural final racing the commit.
+            # The single FIFO STT worker sets that guard before it could dequeue
+            # the racing final, so pop_emitted_early still holds.
+            p.segmenter.request_commit(job.utterance_id)
             forward_final(p, job.utterance_id, result)
             p._spec.mark_emitted_early(job.utterance_id)
-            p.segmenter.request_commit(job.utterance_id)
         return
 
     # Final: a sentence already emitted early from the speculative pass must

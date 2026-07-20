@@ -88,6 +88,34 @@ def test_configure_publishes_auto_and_fixed_linear_as_one_atomic_read():
     assert fixed_linear == pytest.approx(1.0)
 
 
+def test_auto_gain_snaps_to_target_on_first_frame_after_silence():
+    # Regression: with auto-gain default-on, a slow attack under-amplified the
+    # first speech frame after silence, delaying the VAD trip and leaving the
+    # recovered pre-roll too quiet. The onset frame must reach the target gain
+    # immediately, not ramp toward it.
+    g = GainProcessor()
+    g.configure(0.0, auto=True)
+    silent = np.full(512, 0.0, dtype=np.float32)
+    g.process(silent)  # below the floor: prev-above-floor is False
+    quiet = np.full(512, 0.02, dtype=np.float32)  # desired gain = 0.1/0.02 = 5x
+    g.process(quiet)   # first above-floor frame -> snap
+    assert g._auto_gain == pytest.approx(5.0)
+
+
+def test_auto_gain_mid_stream_frame_still_ramps():
+    # Once speech is established, a step change must ramp with the normal
+    # attack/release, not snap: the snap is only for the silence->speech onset.
+    g = GainProcessor()
+    g.configure(0.0, auto=True)
+    quiet = np.full(512, 0.02, dtype=np.float32)
+    g.process(quiet)   # onset snap to 5.0
+    assert g._auto_gain == pytest.approx(5.0)
+    louder = np.full(512, 0.05, dtype=np.float32)  # desired = 0.1/0.05 = 2x
+    g.process(louder)  # no silence in between: this must ramp, not snap
+    assert g._auto_gain != pytest.approx(2.0)
+    assert g._auto_gain < 5.0  # released toward 2.0, not jumped to it
+
+
 def test_empty_frame_then_normal_frame_still_works():
     g = GainProcessor()
     g.configure(0.0, auto=True)
