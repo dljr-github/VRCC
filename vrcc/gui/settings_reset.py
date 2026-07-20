@@ -54,7 +54,10 @@ _RESET_FIELDS = {
         "max_utterance_s", "sentence_inject", "sentence_min_words",
         "live_partials", "partial_interval_ms",
     ),
-    "audio": ("gain_db", "auto_gain", "energy_gate_enabled", "energy_threshold"),
+    "audio": (
+        "gain_db", "auto_gain", "energy_gate_enabled", "energy_threshold",
+        "denoise_enabled", "denoise_strength",
+    ),
     "stt": (
         "beam_size", "temperature", "avg_logprob_gate", "no_speech_gate",
         "no_repeat_ngram_size", "compression_ratio_gate",
@@ -303,6 +306,7 @@ def _apply_reset_defaults(dlg: "SettingsDialog") -> None:
     if dlg._apply is not None:
         dlg._apply.apply_vad(dlg._cfg.vad)
         dlg._apply.apply_audio_gain(dlg._cfg.audio)
+        dlg._apply.apply_audio_denoise(dlg._cfg.audio)
     dlg._applied = settings_live.snapshot(dlg._specs())
 
 
@@ -332,6 +336,15 @@ def _resync_reset_widgets(dlg: "SettingsDialog") -> None:
         # The resync runs under _loading, so auto-gain's toggled handler
         # (which normally flips this) never fires: set it by hand.
         gain.setEnabled(not cfg.audio.auto_gain)
+    check = getattr(dlg, "_denoise_check", None)
+    if check is not None:
+        check.setChecked(cfg.audio.denoise_enabled)
+    strength = getattr(dlg, "_denoise_strength", None)
+    if strength is not None:
+        strength.setValue(int(round(cfg.audio.denoise_strength * 100)))
+        # The resync runs under _loading, so the checkbox's toggled handler
+        # (which normally flips this) never fires: set it by hand.
+        strength.setEnabled(cfg.audio.denoise_enabled)
     gate = getattr(dlg, "_gate_check", None)
     if gate is not None:
         gate.setChecked(cfg.audio.energy_gate_enabled)

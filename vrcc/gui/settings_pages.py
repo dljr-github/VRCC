@@ -324,6 +324,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     form.addRow(tr("Background noise level"), gate_row)
 
     settings_audio.build_gain_controls(dlg, form)
+    settings_audio.build_denoise_controls(dlg, form)
 
     # Advanced fine-tuning (quality gates + prompt).
     adv = QGroupBox(tr("Advanced (fine-tuning)"))

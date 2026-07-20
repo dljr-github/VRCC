@@ -69,6 +69,22 @@ def test_gain_controls_bind(qapp, tmp_path):
         dlg.deleteLater()
 
 
+def test_denoise_toggle_writes_config(qapp, tmp_path):
+    store = _store(tmp_path)
+    dlg = SettingsDialog(store)
+    try:
+        assert dlg._denoise_check.isChecked() is False
+        assert not dlg._denoise_strength.isEnabled()
+        dlg._denoise_check.setChecked(True)
+        assert store.config.audio.denoise_enabled is True
+        assert dlg._denoise_strength.isEnabled()
+        dlg._denoise_strength.setValue(30)
+        assert abs(store.config.audio.denoise_strength - 0.30) < 1e-6
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
 def test_device_refresh_repopulates_without_changing_selection(qapp, tmp_path, monkeypatch):
     store = _store(tmp_path)
     store.load()

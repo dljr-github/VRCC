@@ -24,6 +24,9 @@ class _RecordingApply:
     def apply_audio_gain(self, cfg):
         self.calls.append(("audio_gain", cfg.gain_db, cfg.auto_gain))
 
+    def apply_audio_denoise(self, cfg):
+        self.calls.append(("audio_denoise", cfg.denoise_enabled, cfg.denoise_strength))
+
     def reload_engine(self, kind):
         self.calls.append(("reload", kind))
 
@@ -131,6 +134,18 @@ def test_gain_edit_runs_audio_gain_hook_once_without_source_restart():
     # A second flush with no further change must not re-fire the hook.
     _flush(cfg, apply, theme, applied)
     assert apply.calls == [("audio_gain", 6.0, True)]
+
+
+def test_denoise_edit_runs_audio_denoise_hook_once_without_source_restart():
+    # The denoise fields must apply in place, never through apply_audio_device
+    # (which restarts the source).
+    cfg, apply, theme, applied = _env()
+    cfg.audio.denoise_enabled = True
+    _flush(cfg, apply, theme, applied)
+    assert apply.calls == [("audio_denoise", True, 0.5)]
+    # A second flush with no further change must not re-fire the hook.
+    _flush(cfg, apply, theme, applied)
+    assert apply.calls == [("audio_denoise", True, 0.5)]
 
 
 def test_ui_language_is_not_a_live_group():

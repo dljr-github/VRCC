@@ -295,6 +295,8 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
     store.config.stt.avg_logprob_gate = -2.5
     store.config.stt.no_speech_gate = 0.9
     store.config.stt.condition_on_previous_text = True
+    store.config.audio.denoise_enabled = True
+    store.config.audio.denoise_strength = 0.9
 
     dlg = SettingsDialog(store)
     monkeypatch.setattr(QMessageBox, "question",
@@ -309,6 +311,8 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         assert store.config.vad.sentence_inject == d.vad.sentence_inject
         assert store.config.vad.live_partials == d.vad.live_partials
         assert store.config.gui.update_check_enabled == d.gui.update_check_enabled
+        assert store.config.audio.denoise_enabled == d.audio.denoise_enabled
+        assert store.config.audio.denoise_strength == d.audio.denoise_strength
         # Personal preserved.
         assert store.config.audio.device == "My USB Mic"
         assert store.config.stt.source_language == "Japanese"
@@ -323,6 +327,9 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         assert dlg._sentence_inject_check.isChecked() == d.vad.sentence_inject
         assert dlg._live_partials_check.isChecked() == d.vad.live_partials
         assert dlg._update_check.isChecked() == d.gui.update_check_enabled
+        assert dlg._denoise_check.isChecked() == d.audio.denoise_enabled
+        assert dlg._denoise_strength.value() == round(d.audio.denoise_strength * 100)
+        assert dlg._denoise_strength.isEnabled() == d.audio.denoise_enabled
     finally:
         dlg.close()
         dlg.deleteLater()

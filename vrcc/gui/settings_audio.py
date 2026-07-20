@@ -77,6 +77,42 @@ def build_gain_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
     form.addRow(tr("Microphone boost"), gain_row)
 
 
+def build_denoise_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
+    """Add a "Reduce background noise" checkbox and its strength slider."""
+    dlg._denoise_check = QCheckBox(tr("Reduce background noise"))
+    dlg._denoise_check.setChecked(dlg._cfg.audio.denoise_enabled)
+    dlg._denoise_check.setToolTip(
+        tr(
+            "Clean up steady background noise before transcription. Gentle "
+            "by design. Uses a little more of your graphics card."
+        )
+    )
+
+    dlg._denoise_strength = QSlider(Qt.Orientation.Horizontal)
+    dlg._denoise_strength.setRange(0, 100)
+    dlg._denoise_strength.setValue(int(round(dlg._cfg.audio.denoise_strength * 100)))
+
+    def on_strength(v):
+        if dlg._loading:
+            return
+        dlg._cfg.audio.denoise_strength = v / 100.0
+        dlg._changed()
+
+    def on_toggle(checked):
+        dlg._denoise_strength.setEnabled(bool(checked))
+        if dlg._loading:
+            return
+        dlg._cfg.audio.denoise_enabled = bool(checked)
+        dlg._changed()
+
+    dlg._denoise_strength.valueChanged.connect(on_strength)
+    dlg._denoise_check.toggled.connect(on_toggle)
+    dlg._denoise_strength.setEnabled(dlg._cfg.audio.denoise_enabled)
+
+    form.addRow(dlg._denoise_check)
+    form.addRow(tr("Noise reduction strength"), dlg._denoise_strength)
+
+
 def _fill_input_devices(dlg: "SettingsDialog", combo: QComboBox) -> None:
     combo.clear()
     combo.addItem(tr("Auto (system default)"), _AUTO)
