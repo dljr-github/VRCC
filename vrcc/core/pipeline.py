@@ -19,7 +19,7 @@ import numpy as np
 from vrcc.audio.segmenter import (
     SegDiscard, SegFinal, SegLevel, SegPartial, SegSpeculative, SegSpeechStart,
 )
-from vrcc.core import pipeline_frames, pipeline_jobs
+from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_jobs import _NO_ENGINE
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
@@ -305,11 +305,12 @@ class Pipeline:
         return self._started
 
     def set_source_gain(self, gain_db: float, auto: bool) -> None:
-        """Push a live gain change to the current source (no restart). No-op if
-        the source has no gain processor."""
-        setter = getattr(self._source, "set_gain", None)
-        if setter is not None:
-            setter(gain_db, auto)
+        """Push a live gain change to the current source (no restart)."""
+        pipeline_source.set_source_gain(self, gain_db, auto)
+
+    def set_source_denoise(self, enabled: bool, strength: float) -> None:
+        """Push a live denoise change to the current source (no restart)."""
+        pipeline_source.set_source_denoise(self, enabled, strength)
 
     @staticmethod
     def _spawn(target, name: str, *args) -> threading.Thread:

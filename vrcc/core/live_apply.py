@@ -111,6 +111,10 @@ class LiveApply:
         """Apply mic gain live (no restart)."""
         self._pipeline.set_source_gain(cfg.gain_db, cfg.auto_gain)
 
+    def apply_audio_denoise(self, cfg: "AudioConfig") -> None:
+        """Apply the denoise toggle/strength live (no restart)."""
+        self._pipeline.set_source_denoise(cfg.denoise_enabled, cfg.denoise_strength)
+
     def apply_vad(self, cfg: "VadConfig") -> None:
         """Apply new VAD timings/threshold; the next utterance adopts them."""
         self._segmenter.reconfigure(cfg)
