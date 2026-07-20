@@ -148,7 +148,10 @@ class TestPartialDiscard:
 
         assert partials  # a partial was emitted
         assert seg._pending_spec_samples is None  # yet no speculative pending
-        assert seg.abort() == [SegDiscard(utterance_id=1)]
+        # Abort ends the utterance: the discard must be terminal so the
+        # LISTENING row is cleared, not left waiting for a SegPartial that
+        # will never come.
+        assert seg.abort() == [SegDiscard(utterance_id=1, terminal=True)]
 
     def test_too_short_finalize_with_partial_emitted_returns_discard(self):
         # A partial was emitted, then silence finalizes while the utterance is
@@ -170,4 +173,23 @@ class TestPartialDiscard:
 
         assert _by_type(events, SegPartial)   # a partial was emitted
         assert not _by_type(events, SegFinal)  # too short: no final
-        assert _by_type(events, SegDiscard) == [SegDiscard(utterance_id=1)]
+        # The utterance ends here (too short to finalize): terminal, so the
+        # LISTENING row is cleared.
+        assert _by_type(events, SegDiscard) == [SegDiscard(utterance_id=1, terminal=True)]
+
+
+class TestDiscardTerminalFlag:
+    def test_speech_resume_discard_is_not_terminal(self):
+        # Speculative fires during a pause, then speech resumes mid-utterance:
+        # the SAME utterance continues (more SegPartials will follow and keep
+        # updating the same row), so this discard must NOT be terminal.
+        cfg = VadConfig()
+        probs = [0.9] * 5 + [0.1] * 12 + [0.9] * 5
+        vad = ScriptedVad(probs)
+        seg = Segmenter(cfg, vad)
+
+        discards = []
+        for _ in range(22):
+            discards.extend(_by_type(seg.process(_frame()), SegDiscard))
+
+        assert discards == [SegDiscard(utterance_id=1, terminal=False)]

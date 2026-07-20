@@ -44,13 +44,35 @@ def test_forward_final_regated_by_captioning_off_clears_partial():
     assert [e.utterance_id for e in cleared] == [1]
 
 
-def test_handle_discard_publishes_partial_cleared():
-    # A discarded utterance may have shown a live partial with no recognized/
-    # sent event ever coming to firm or remove it; discard must clear it.
+def test_handle_discard_terminal_publishes_partial_cleared():
+    # A terminal discard (abort / too-short-finalize) ends the utterance: no
+    # recognized/sent event is ever coming to firm or remove the row, so it
+    # must be cleared here.
     env = make_pipeline()
     cleared = collect(env.bus, PhrasePartialCleared)
-    pipeline_jobs.handle_discard(env.pipeline, SegDiscard(utterance_id=1))
+    pipeline_jobs.handle_discard(env.pipeline, SegDiscard(utterance_id=1, terminal=True))
     assert [e.utterance_id for e in cleared] == [1]
+
+
+def test_handle_discard_non_terminal_keeps_the_partial_row():
+    # A speech-resume discard leaves the SAME utterance active: more
+    # SegPartials will follow and keep updating the row, so it must survive
+    # (no PhrasePartialCleared), unlike the terminal case above.
+    env = make_pipeline()
+    cleared = collect(env.bus, PhrasePartialCleared)
+    pipeline_jobs.handle_discard(env.pipeline, SegDiscard(utterance_id=1, terminal=False))
+    assert cleared == []
+
+
+def test_handle_discard_drops_cache_and_resolves_typing_regardless_of_terminal():
+    # drop_discarded and _resolve_typing must run for every discard; only the
+    # partial-row clearing is gated on the terminal flag.
+    env = make_pipeline()
+    env.pipeline._begin_typing(1)
+    env.pipeline._spec.note_speculative(1, 99)
+    pipeline_jobs.handle_discard(env.pipeline, SegDiscard(utterance_id=1, terminal=False))
+    assert env.pipeline._spec._pending == {}
+    assert env.pipeline._typing._in_flight == set()
 
 
 def test_forward_final_regated_by_mute_does_not_send():

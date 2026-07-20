@@ -439,7 +439,7 @@ class TestAbort:
         assert len(specs) == 1  # the speculative is pending
 
         events = seg.abort()
-        assert events == [SegDiscard(utterance_id=1)]
+        assert events == [SegDiscard(utterance_id=1, terminal=True)]
         assert seg.active is False
 
         starts = _by_type(seg.process(_frame()), SegSpeechStart)

@@ -137,8 +137,8 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
 def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._spec.drop_discarded(event.utterance_id)
     p._resolve_typing(event.utterance_id)
-    # Speech resumed / abort on mute: nothing will firm this partial, so clear it.
-    p._bus.publish(PhrasePartialCleared(event.utterance_id))
+    if event.terminal:  # utterance over: nothing will firm this partial
+        p._bus.publish(PhrasePartialCleared(event.utterance_id))
 
 
 def handle_partial(p: "Pipeline", event: "SegPartial") -> None:

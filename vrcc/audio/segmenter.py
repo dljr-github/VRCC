@@ -52,7 +52,13 @@ class SegFinal:
 
 @dataclass(frozen=True)
 class SegDiscard:
+    """``terminal`` distinguishes the utterance ending (abort, too-short
+    finalize) from a speech-resume mid-utterance: only a terminal discard
+    should clear a downstream LISTENING row, since a non-terminal one is
+    followed by more ``SegPartial``s for the same utterance."""
+
     utterance_id: int
+    terminal: bool = False
 
 
 @dataclass(frozen=True)
@@ -159,7 +165,7 @@ class Segmenter:
         :meth:`process`."""
         events: list[object] = []
         if self._pending_spec_samples is not None or self._partial_emitted:
-            events.append(SegDiscard(utterance_id=self._utterance_id))
+            events.append(SegDiscard(utterance_id=self._utterance_id, terminal=True))
         self.reset()
         return events
 
@@ -258,6 +264,8 @@ class Segmenter:
             self._silence_run = 0
             if self._pending_spec_samples is not None:
                 self._pending_spec_samples = None
+                # Speech resumed: the utterance CONTINUES (not terminal), so
+                # the default terminal=False stands.
                 events.append(SegDiscard(utterance_id=self._utterance_id))
         elif is_silence:
             self._silence_run += 1
@@ -304,8 +312,11 @@ class Segmenter:
             elif self._pending_spec_samples is not None or self._partial_emitted:
                 # Too short for a final but a speculative or a live partial is
                 # in flight: discard so the STT worker drops the job and the
-                # LISTENING row is cleared (resolve-every invariant).
-                events.append(SegDiscard(utterance_id=self._utterance_id))
+                # LISTENING row is cleared (resolve-every invariant). The
+                # utterance ends here, so this discard is terminal.
+                events.append(
+                    SegDiscard(utterance_id=self._utterance_id, terminal=True)
+                )
             self._reset_to_idle()
 
         return events
