@@ -1,0 +1,22 @@
+[
+  {"file": "word_hello__babble__snr0.wav", "text": "hello"},
+  {"file": "word_hello__modbabble__snr-5.wav", "text": "hello"},
+  {"file": "word_help__babble__snr0.wav", "text": "help"},
+  {"file": "word_help__modbabble__snr-5.wav", "text": "help"},
+  {"file": "word_no__babble__snr0.wav", "text": "no"},
+  {"file": "word_no__modbabble__snr-5.wav", "text": "no"},
+  {"file": "word_okay__babble__snr0.wav", "text": "okay"},
+  {"file": "word_okay__modbabble__snr-5.wav", "text": "okay"},
+  {"file": "word_sorry__babble__snr0.wav", "text": "sorry"},
+  {"file": "word_sorry__modbabble__snr-5.wav", "text": "sorry"},
+  {"file": "word_stop__babble__snr0.wav", "text": "stop"},
+  {"file": "word_stop__modbabble__snr-5.wav", "text": "stop"},
+  {"file": "word_thanks__babble__snr0.wav", "text": "thanks"},
+  {"file": "word_thanks__modbabble__snr-5.wav", "text": "thanks"},
+  {"file": "word_wait__babble__snr0.wav", "text": "wait"},
+  {"file": "word_wait__modbabble__snr-5.wav", "text": "wait"},
+  {"file": "word_water__babble__snr0.wav", "text": "water"},
+  {"file": "word_water__modbabble__snr-5.wav", "text": "water"},
+  {"file": "word_yes__babble__snr0.wav", "text": "yes"},
+  {"file": "word_yes__modbabble__snr-5.wav", "text": "yes"}
+]
