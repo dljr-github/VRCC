@@ -175,12 +175,15 @@ class MicSource:
 
     def stop(self) -> None:
         # A restart must not inherit stale recurrent/smoothing state from the
-        # prior run's stream.
-        if self._denoiser is not None:
-            self._denoiser.reset()
-        if self._gain is not None:
-            self._gain.reset()
+        # prior run's stream. stop() runs on the caller's thread while the
+        # audio callback may still be mid-flight on the audio thread, so the
+        # resets wait until the stream is fully stopped and closed; resetting
+        # earlier could interleave with a callback's in-progress cache update.
         if self._stream is None:
+            if self._denoiser is not None:
+                self._denoiser.reset()
+            if self._gain is not None:
+                self._gain.reset()
             return
         stream, self._stream = self._stream, None
         try:
@@ -188,6 +191,10 @@ class MicSource:
             stream.close()
         except Exception:
             logger.warning("error stopping audio stream", exc_info=True)
+        if self._denoiser is not None:
+            self._denoiser.reset()
+        if self._gain is not None:
+            self._gain.reset()
         self._log_suppressed_summary()
 
     def _log_suppressed_summary(self) -> None:

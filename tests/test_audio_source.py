@@ -282,6 +282,36 @@ def test_denoiser_runs_before_gain_in_emit():
     assert len(calls) == 1 and calls[0].shape == (512,)
 
 
+def test_gain_receives_denoised_output_not_raw_frame():
+    # test_denoiser_runs_before_gain_in_emit uses an identity denoiser and no
+    # gain, so it would pass even with the order reversed. This test uses a
+    # denoiser that applies a distinctive transform and a gain that records
+    # exactly what it was handed, so it fails if gain ever sees the raw frame.
+    class FakeDenoiser:
+        def process(self, x):
+            return x + 1.0
+
+    class FakeGain:
+        def __init__(self):
+            self.received = None
+
+        def process(self, x):
+            self.received = x
+            return x
+
+    denoiser = FakeDenoiser()
+    gain = FakeGain()
+    src = MicSource(gain=gain, denoiser=denoiser)
+    outputs = []
+    src._on_frame = lambda f: outputs.append(f)
+    frame = np.zeros(512, dtype=np.float32)
+    src._emit(frame)
+
+    assert gain.received is not None
+    np.testing.assert_array_equal(gain.received, frame + 1.0)
+    np.testing.assert_array_equal(outputs[0], frame + 1.0)
+
+
 def test_set_denoise_updates_processor():
     d = Denoiser()
     src = MicSource(gain=None, denoiser=d)
