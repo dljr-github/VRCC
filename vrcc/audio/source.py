@@ -15,6 +15,7 @@ import numpy as np
 import sounddevice as sd
 import soxr
 
+from vrcc.audio.denoise import Denoiser
 from vrcc.audio.gain import GainProcessor
 
 logger = logging.getLogger("vrcc.audio")
@@ -82,10 +83,12 @@ class MicSource:
         device: int | None = None,
         stream_factory: Callable[..., object] | None = None,
         gain: GainProcessor | None = None,
+        denoiser: Denoiser | None = None,
     ) -> None:
         self._device = device
         self._stream_factory = stream_factory if stream_factory is not None else sd.InputStream
         self._gain = gain
+        self._denoiser = denoiser
         self._stream = None
         self._on_frame: Callable[[np.ndarray], None] | None = None
         self._rechunker = _Rechunker(FRAME_LEN)
@@ -165,7 +168,18 @@ class MicSource:
         if self._gain is not None:
             self._gain.configure(gain_db, auto)
 
+    def set_denoise(self, enabled: bool, strength: float) -> None:
+        """Update the live denoiser; no stream restart. No-op if no processor."""
+        if self._denoiser is not None:
+            self._denoiser.configure(enabled, strength)
+
     def stop(self) -> None:
+        # A restart must not inherit stale recurrent/smoothing state from the
+        # prior run's stream.
+        if self._denoiser is not None:
+            self._denoiser.reset()
+        if self._gain is not None:
+            self._gain.reset()
         if self._stream is None:
             return
         stream, self._stream = self._stream, None
@@ -198,6 +212,9 @@ class MicSource:
 
     def _apply_gain(self, mono: np.ndarray) -> np.ndarray:
         return self._gain.process(mono) if self._gain is not None else mono
+
+    def _apply_denoise(self, mono: np.ndarray) -> np.ndarray:
+        return self._denoiser.process(mono) if self._denoiser is not None else mono
 
     def _direct_callback(self, indata, frames, time, status) -> None:
         # indata is PortAudio-owned/reused; _to_mono's 2-D branch allocates
@@ -238,12 +255,13 @@ class MicSource:
                 )
 
     def _emit(self, frame: np.ndarray) -> None:
-        # Gain is applied here, per exact 512-sample frame, rather than in
-        # the callback: the resample-fallback callback delivers host-sized
-        # chunks (~85 ms), which would pace auto-gain far slower than the
-        # direct path's 32 ms frames.
+        # Denoise and gain are applied here, per exact 512-sample frame,
+        # rather than in the callback: the resample-fallback callback delivers
+        # host-sized chunks (~85 ms), which would pace auto-gain far slower
+        # than the direct path's 32 ms frames. Denoise runs first so gain
+        # (fixed or auto) sees the cleaned signal.
         try:
-            self._on_frame(self._apply_gain(frame))
+            self._on_frame(self._apply_gain(self._apply_denoise(frame)))
         except Exception:
             self._on_frame_errors += 1
             if self._on_frame_errors == 1:

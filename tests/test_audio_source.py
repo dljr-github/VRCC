@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import sounddevice as sd
 
+from vrcc.audio.denoise import Denoiser
 from vrcc.audio.source import FRAME_LEN, SAMPLE_RATE, MicSource
 
 
@@ -268,6 +269,24 @@ def test_mic_source_applies_gain_to_frames():
     cb(block, 512, None, None)
     assert frames, "no frame emitted"
     assert float(np.sqrt(np.mean(frames[0] ** 2))) > 0.19
+
+
+def test_denoiser_runs_before_gain_in_emit():
+    calls = []
+    d = Denoiser()
+    d.configure(enabled=False, strength=0.5)  # identity, so we only test wiring
+    src = MicSource(gain=None, denoiser=d)
+    src._on_frame = lambda f: calls.append(f)
+    frame = (np.random.default_rng(0).standard_normal(512) * 0.1).astype(np.float32)
+    src._emit(frame)
+    assert len(calls) == 1 and calls[0].shape == (512,)
+
+
+def test_set_denoise_updates_processor():
+    d = Denoiser()
+    src = MicSource(gain=None, denoiser=d)
+    src.set_denoise(True, 0.3)
+    assert d._enabled is True and abs(d._strength - 0.3) < 1e-9
 
 
 class TestMicSourceHardware:

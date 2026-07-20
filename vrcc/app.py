@@ -39,11 +39,14 @@ logger = logging.getLogger("vrcc.app")
 
 
 def _make_source_with_gain(config, device_cfg: str) -> MicSource:
+    from vrcc.audio.denoise import Denoiser
     from vrcc.audio.gain import GainProcessor
 
     gain = GainProcessor()
     gain.configure(config.audio.gain_db, config.audio.auto_gain)
-    return MicSource(_resolve_audio_device(device_cfg), gain=gain)
+    denoiser = Denoiser()
+    denoiser.configure(config.audio.denoise_enabled, config.audio.denoise_strength)
+    return MicSource(_resolve_audio_device(device_cfg), gain=gain, denoiser=denoiser)
 
 
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
