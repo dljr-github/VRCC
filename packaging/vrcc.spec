@@ -113,6 +113,11 @@ datas += [
 # Window icon: vrcc.gui.style resolves it relative to the vrcc package, so
 # it must land at _internal/vrcc/vrcc.ico, same shape as the i18n catalogs.
 datas += [(os.path.join(REPO_ROOT, "vrcc", "vrcc.ico"), "vrcc")]
+# GTCRN denoiser model and license.
+datas += [
+    (os.path.join(REPO_ROOT, "vrcc", "audio", "gtcrn.onnx"), os.path.join("vrcc", "audio")),
+    (os.path.join(REPO_ROOT, "vrcc", "audio", "GTCRN_LICENSE.txt"), os.path.join("vrcc", "audio")),
+]
 binaries = collect_dynamic_libs("ctranslate2")
 # onnxruntime's own DLLs -- in the CUDA build this includes the CUDA execution
 # provider libraries from the onnxruntime-gpu overlay (see release.yml), which
