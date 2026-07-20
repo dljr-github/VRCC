@@ -126,14 +126,19 @@ class Segmenter:
         self._speculative_frames = speculative
         self._finalize_frames = finalize
         self._min_utterance_frames = min_utterance
-        # The idle ring seeds a fresh utterance's onset, so it holds the full
-        # pre-roll the user configured (uncapped). A commit keeps the ring
-        # across the reset, so the commit path trims it to the last
+        # The idle ring seeds a fresh utterance's onset, so it holds the pre-
+        # roll the user configured, capped at the finalize window: pre-roll
+        # never exceeds the trailing silence a normal finalize requires, so
+        # those frames always roll the ring clean before the next utterance
+        # seeds from it (no prior-utterance speech can survive into a normal
+        # finalize's onset). Sane configs never hit the cap (pre-roll stays
+        # well below finalize). A commit keeps the ring across the reset, so
+        # the commit path additionally trims it to the last
         # _commit_preroll_frames (never more than the speculative window):
         # that drops the just-committed sentence's tail and keeps only the
         # resumed onset, so no stale word prepends onto the next utterance.
-        self._preroll_frames = preroll
-        self._commit_preroll_frames = min(preroll, speculative)
+        self._preroll_frames = min(preroll, finalize)
+        self._commit_preroll_frames = min(self._preroll_frames, speculative)
         self._max_utterance_frames = max_utterance
         self._partial_frames = partial
 

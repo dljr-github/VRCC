@@ -346,12 +346,29 @@ class TestPrerollBound:
         # the idle ring must hold the full pre-roll the user asked for so a
         # fresh onset is not clipped. The commit window is the separate
         # speculative-bounded value used to trim the ring after a commit.
-        cfg = VadConfig(pre_roll_ms=400, speculative_silence_ms=250)
+        # finalize_silence_ms=800 (25 frames) keeps this a sane config, so the
+        # finalize-window clamp (below) is also a no-op: the onset benefit of
+        # the full pre-roll is retained.
+        cfg = VadConfig(
+            pre_roll_ms=400, speculative_silence_ms=250, finalize_silence_ms=800
+        )
         seg = Segmenter(cfg, ScriptedVad([]))
         assert seg._speculative_frames == 8
+        assert seg._finalize_frames == 25
         assert seg._preroll_frames == 13
         assert seg._preroll.maxlen == 13
         assert seg._commit_preroll_frames == 8
+
+    def test_preroll_clamped_to_finalize_window_when_misconfigured(self):
+        # A user-set pre_roll_ms above finalize_silence_ms is a misconfig
+        # (presets keep pre_roll well below finalize); the ring must be capped
+        # at the finalize window so a normal finalize always seeds the next
+        # utterance from silence, never from the tail of the one just closed.
+        cfg = VadConfig(pre_roll_ms=400, finalize_silence_ms=64)  # 13 vs 2 frames
+        seg = Segmenter(cfg, ScriptedVad([]))
+        assert seg._finalize_frames == 2
+        assert seg._preroll_frames == 2
+        assert seg._preroll.maxlen == 2
 
     def test_preroll_shorter_than_speculative_is_unaffected(self):
         cfg = VadConfig(pre_roll_ms=150, speculative_silence_ms=250)

@@ -85,21 +85,30 @@ class TestCommitPreroll:
         # 8 pre-roll frames (commit window) + the triggering frame.
         assert len(seg._buffer) == 9
 
-    def test_normal_finalize_does_not_trim_preroll(self):
-        # A normal (silence) finalize must NOT trim the ring to the commit
-        # window; only a commit trims. The speculative window (8) is >= the
-        # finalize window (2), so no speculative fires and the ring stays full.
+    def test_normal_finalize_bounds_preroll_to_finalize_window(self):
+        # If pre_roll_ms is misconfigured above finalize_silence_ms, the idle
+        # ring must be clamped to the finalize window (Segmenter._apply_config):
+        # the trailing `finalize` frames of silence before a normal finalize
+        # always roll the ring clean, so no prior-utterance speech can survive
+        # into the next utterance's onset seed.
         cfg = VadConfig(
-            pre_roll_ms=400,               # 13 frames
-            speculative_silence_ms=250,    # 8 frames -> commit window 8
-            finalize_silence_ms=64,        # 2 frames
+            pre_roll_ms=400,               # would be 13 frames, uncapped
+            speculative_silence_ms=250,    # 8 frames
+            finalize_silence_ms=64,        # 2 frames -> preroll clamped to 2
             min_utterance_ms=32,
         )
         vad = ScriptedVad([0.9] * 15 + [0.1] * 2)
         seg = Segmenter(cfg, vad)
+        assert seg._preroll_frames == 2  # clamped, not the configured 13
+
         finals = []
-        for _ in range(17):
-            finals.extend(_by_type(seg.process(_frame()), SegFinal))
+        for i in range(17):
+            # Tag speech frames distinctly from the trailing silence so the
+            # ring's content (not just its length) proves the fix.
+            value = 0.77 if i < 15 else 0.02
+            finals.extend(_by_type(seg.process(_frame(value)), SegFinal))
+
         assert len(finals) == 1  # a normal finalize fired
-        assert seg._commit_preroll_frames == 8
-        assert len(seg._preroll) > seg._commit_preroll_frames  # not trimmed
+        assert len(seg._preroll) == 2  # bounded to the finalize window
+        # Only trailing silence survives; no pre-finalize speech frame does.
+        assert all(np.all(f == np.float32(0.02)) for f in seg._preroll)
