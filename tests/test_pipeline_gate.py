@@ -45,7 +45,7 @@ def test_request_commit_precedes_the_early_send():
     # frame), so cutting first stops it appending the next sentence's onset to
     # the still-open buffer during that block, which would otherwise drop the
     # onset. The emitted-early guard is still set after, so the dedupe holds.
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _OrderedCommitRecorder(env.chatbox.log)
     env.pipeline._segmenter = seg
     s = sample()
@@ -56,11 +56,11 @@ def test_request_commit_precedes_the_early_send():
     ordered = [e[0] for e in env.chatbox.log if e[0] in ("commit", "submit")]
     assert ordered == ["commit", "submit"]  # commit cuts before the send
     assert seg.commits == [1]
-    assert env.chatbox.submits == [("Hello there.", 1)]
+    assert env.chatbox.submits == [("Hello there now.", 1)]
     assert 1 in env.pipeline._spec._emitted_early  # dedupe guard set after send
     # A natural final racing the commit must still not double-send.
     pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, s), threading.Event())
-    assert env.chatbox.submits == [("Hello there.", 1)]
+    assert env.chatbox.submits == [("Hello there now.", 1)]
     assert env.stt.calls == 1  # the final neither re-sent nor re-transcribed
 
 

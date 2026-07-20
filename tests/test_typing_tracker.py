@@ -67,7 +67,7 @@ def test_final_after_early_send_does_not_resolve_typing_while_mt_owns():
     # Translation active (the default fixture): the natural final racing the
     # early-injected commit must not turn typing off while the MT job it
     # queued (own_by_mt, in forward_final) still owns utterance 1.
-    env = make_pipeline(stt=FakeStt(result=make_result(text="Hello there.")))
+    env = make_pipeline(stt=FakeStt(result=make_result(text="Hello there now.")))
     env.pipeline._segmenter = SimpleNamespace(request_commit=lambda uid: None)
     s = sample()
     env.pipeline._begin_typing(1)

@@ -47,7 +47,10 @@ class VadConfig(BaseModel):
     # Emit a sentence to the chatbox as soon as a speculative transcription
     # ends in terminal punctuation, instead of waiting for the full stop.
     sentence_inject: bool = True
-    sentence_min_words: int = 2
+    # Words required before sentence_inject fires early. A gate of 2 lets a
+    # mid-sentence pause (a comma, a breath) leave behind a short punctuated
+    # fragment that reads as a complete sentence and gets injected too soon.
+    sentence_min_words: int = 3
     # Stream the in-progress transcription to the log and chatbox while the
     # utterance is still active, ahead of the speculative/final result.
     live_partials: bool = True

@@ -377,17 +377,17 @@ def _run_speculative(env, uid: int, s) -> None:
 
 
 def test_speculative_sentence_is_sent_early_and_commits():
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _CommitRecorder()
     env.pipeline._segmenter = seg
     s = sample()
     _run_speculative(env, 1, s)
-    assert env.chatbox.submits == [("Hello there.", 1)]  # sent once, now
+    assert env.chatbox.submits == [("Hello there now.", 1)]  # sent once, now
     assert seg.commits == [1]  # and the segmenter was told to commit
 
 
 def test_final_after_early_send_does_not_duplicate():
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _CommitRecorder()
     env.pipeline._segmenter = seg
     s = sample()
@@ -406,7 +406,7 @@ def test_gated_early_inject_composes_with_final_dedupe_no_double_send():
     # before that call skips the speculative send, but the guard still ends
     # up set (mark_emitted_early runs unconditionally after), so the
     # natural final racing the commit doesn't send either.
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there.")))
+    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _CommitRecorder()
     env.pipeline._segmenter = seg
     s = sample()
@@ -433,7 +433,7 @@ def test_speculative_without_terminal_punctuation_is_not_sent_early():
 
 
 def test_one_word_sentence_is_blocked_by_the_min_word_guard():
-    # "Hi." is a terminal mark but a single word; sentence_min_words is 2, so
+    # "Hi." is a terminal mark but a single word, well below sentence_min_words;
     # an early send here would be a false positive on an abbreviation-like word.
     env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hi.")))
     seg = _CommitRecorder()

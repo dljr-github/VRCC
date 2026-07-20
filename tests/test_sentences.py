@@ -55,3 +55,13 @@ def test_min_words_guard():
     # Abbreviation-like single token with a period must not count as a sentence.
     assert not ends_sentence("Mr.", 2)
     assert not ends_sentence("3.14", 2)
+
+
+def test_default_min_words_holds_a_mid_sentence_fragment():
+    # A comma pause mid-sentence can leave a short, punctuated fragment behind
+    # ("Hello there.") that reads as a complete sentence at a low word-count
+    # gate. Raising the default gate to 3 holds it until the full clause
+    # arrives, while a genuine short clause still injects.
+    assert ends_sentence("Hello there.", 2)
+    assert not ends_sentence("Hello there.", 3)
+    assert ends_sentence("Hello there, how are you doing today?", 3)
