@@ -20,6 +20,7 @@ from vrcc.core.events import (
 )
 from vrcc.core.pipeline_send import safe_submit
 from vrcc.core.pipeline_state import _MISSING
+from vrcc.translate import pinyin
 
 if TYPE_CHECKING:
     import threading
@@ -309,6 +310,10 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
 
     if stop.is_set():
         return  # abandoned mid-call: discard, publish nothing
+    if translations and p._config.translate.pinyin:
+        # Annotate before publish so the caption log and the chatbox show the
+        # same reading line.
+        translations = pinyin.annotate(translations)
     p._bus.publish(
         PhraseTranslated(
             utterance_id=job.utterance_id,

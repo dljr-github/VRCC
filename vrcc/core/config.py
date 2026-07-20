@@ -96,6 +96,9 @@ class TranslateConfig(BaseModel):
     # own default), -1 = unlimited. Applied at Translator build time.
     max_queued_batches: int = 0
     targets: list[str] = Field(default_factory=lambda: ["Japanese"])  # display names, max 3
+    # Append a tone-marked pinyin reading line under Chinese translations
+    # (vrcc.translate.pinyin). Opt-in; read per-job, so it applies live.
+    pinyin: bool = False
     beam_size: int = 1
     repetition_penalty: float = 1.1
     no_repeat_ngram_size: int = 3
