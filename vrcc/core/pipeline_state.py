@@ -88,6 +88,13 @@ class SpecCache:
         with self._lock:
             return self._cache.pop(key, _MISSING)
 
+    def last_finalized(self) -> int:
+        """The newest finalized utterance id (0 before any finalize). Read
+        under the lock so a partial job can drop itself when its utterance
+        finalized while it was still transcribing."""
+        with self._lock:
+            return self._last_finalized
+
     def mark_finalized(self, utterance_id: int) -> int:
         """Bound the caches: drop everything for utterances at or below the
         newest finalized one (their speculatives can never be reused now).

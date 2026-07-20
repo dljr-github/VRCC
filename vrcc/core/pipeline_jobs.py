@@ -68,8 +68,10 @@ class _MtJob:
 
 
 def _mark_finalized(p: "Pipeline", utterance_id: int) -> None:
-    """Bound the speculative caches, then defensively prune typing orphans
-    below the cutoff (see TypingTracker.prune_orphans)."""
+    """Bound the speculative caches, prune typing orphans below the cutoff
+    (see TypingTracker.prune_orphans), then clear this utterance's live-partial
+    row. clear_partial is idempotent: a firmed row is untouched, while a
+    finalize that published no recognized event removes a row left stuck."""
     cutoff = p._spec.mark_finalized(utterance_id)
     orphaned, emptied = p._typing.prune_orphans(cutoff)
     if orphaned:
@@ -80,6 +82,15 @@ def _mark_finalized(p: "Pipeline", utterance_id: int) -> None:
         )
     if emptied:
         p._set_typing(False)
+    p._bus.publish(PhrasePartialCleared(utterance_id))
+
+
+def _finalize_dropped(p: "Pipeline", utterance_id: int) -> None:
+    """Resolve typing and finalize a final dropped before forward_final,
+    clearing typing dots and any live-partial row (ids monotonic across runs,
+    so a late/zombie drop is safe)."""
+    p._resolve_typing(utterance_id)
+    _mark_finalized(p, utterance_id)
 
 
 def _enqueue(p: "Pipeline", q: "queue.Queue", job) -> None:
@@ -126,8 +137,7 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
 def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._spec.drop_discarded(event.utterance_id)
     p._resolve_typing(event.utterance_id)
-    # Speech resumed / abort on mute: no recognized/sent will ever firm this
-    # utterance's live partial, so the log must clear it itself.
+    # Speech resumed / abort on mute: nothing will firm this partial, so clear it.
     p._bus.publish(PhrasePartialCleared(event.utterance_id))
 
 
@@ -211,9 +221,11 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     if result is _MISSING:
         result = p._transcribe(job.samples)
         if result is _NO_ENGINE:
-            return  # engine swapped out mid-flight: drop the job
+            _finalize_dropped(p, job.utterance_id)  # engine swapped out: clear the row
+            return
     if stop.is_set():
-        return  # abandoned mid-call: discard, publish nothing
+        _finalize_dropped(p, job.utterance_id)  # abandoned: clear typing + the row
+        return
     forward_final(p, job.utterance_id, result)
 
 
@@ -234,6 +246,8 @@ def _process_partial_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -
         return  # engine swapped out, or quality-gated: nothing to show
     if stop.is_set() or not p._should_caption():
         return  # mute/captioning-off raced the transcribe: keep it off the log
+    if job.utterance_id <= p._spec.last_finalized():
+        return  # finalized mid-transcribe: a late partial would restick the row
     p._bus.publish(PhrasePartial(job.utterance_id, result.text))
 
 
@@ -251,15 +265,11 @@ def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
 
 def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") -> None:
     if not p._should_caption():
-        # The gate is checked again HERE, at send time: enqueue-time gating
-        # (handle_final) can't see a mute/captioning-off that lands while the
-        # STT job is already in flight. Still resolve typing and bound the
-        # caches, exactly like the other early-return branches below. A live
-        # partial for this utterance may still be on the log with nothing
-        # else left to firm or remove it, so clear it here too.
+        # Re-check the gate at send time: enqueue-time gating (handle_final)
+        # can't see a mute/captioning-off that landed while the STT job was in
+        # flight. _mark_finalized resolves the caches and clears any partial row.
         p._resolve_typing(utterance_id)
         _mark_finalized(p, utterance_id)
-        p._bus.publish(PhrasePartialCleared(utterance_id))
         return
 
     if result is None:

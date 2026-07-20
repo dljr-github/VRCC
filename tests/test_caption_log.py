@@ -166,6 +166,32 @@ def test_clear_partial_does_not_remove_non_listening_live_row():
     assert rows[0].status == TRANSLATING
 
 
+def test_clear_all_partials_removes_listening_not_sent_rows():
+    m = _model()
+    m.partial(1, "hel")  # LISTENING
+    m.recognized(2, "done", translate_enabled=False, send_enabled=True)
+    m.sent(2, truncated=False)  # SENT
+    m.partial(3, "wor")  # LISTENING
+    m.clear_all_partials()
+    rows = m.rows()
+    assert [r.utterance_id for r in rows] == [2]
+    assert rows[0].status == SENT
+
+
+def test_clear_all_partials_leaves_firmed_row_intact():
+    # A partial firmed by recognized() moved past LISTENING; the catch-all
+    # clear must not remove it, only bare live partials.
+    m = _model()
+    m.partial(1, "hel")
+    m.recognized(1, "hello there", translate_enabled=False, send_enabled=True)
+    assert m.rows()[0].status == QUEUED
+    m.clear_all_partials()
+    rows = m.rows()
+    assert len(rows) == 1
+    assert rows[0].original == "hello there"
+    assert rows[0].status == QUEUED
+
+
 def test_partial_after_terminal_row_does_not_resurrect_it():
     m = _model()
     m.recognized(1, "hello", translate_enabled=False, send_enabled=True)

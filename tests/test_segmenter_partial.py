@@ -6,7 +6,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from vrcc.audio.segmenter import FRAME, SegPartial, SegSpeechStart, Segmenter
+from vrcc.audio.segmenter import (
+    FRAME,
+    SegDiscard,
+    SegFinal,
+    SegPartial,
+    SegSpeechStart,
+    Segmenter,
+)
 from vrcc.core.config import VadConfig
 
 
@@ -119,3 +126,48 @@ class TestLivePartials:
         # Utterance 2 starts at index 3; the sole partial lands 3 ACTIVE
         # frames later (index 6), not immediately.
         assert partial_frames == [6]
+
+
+class TestPartialDiscard:
+    def test_abort_with_partial_emitted_returns_discard(self):
+        # A live partial was emitted (a LISTENING row exists downstream) but no
+        # speculative is pending; abort must still return a SegDiscard so the
+        # row is cleared, not left stuck listening.
+        cfg = VadConfig(
+            live_partials=True,
+            partial_interval_ms=64,          # 2 frames
+            speculative_silence_ms=64_000,   # disabled
+            finalize_silence_ms=64_000,      # disabled
+            pre_roll_ms=0,
+        )
+        vad = ScriptedVad([0.9] * 6)
+        seg = Segmenter(cfg, vad)
+        partials = []
+        for _ in range(6):
+            partials.extend(_by_type(seg.process(_frame()), SegPartial))
+
+        assert partials  # a partial was emitted
+        assert seg._pending_spec_samples is None  # yet no speculative pending
+        assert seg.abort() == [SegDiscard(utterance_id=1)]
+
+    def test_too_short_finalize_with_partial_emitted_returns_discard(self):
+        # A partial was emitted, then silence finalizes while the utterance is
+        # still under the minimum length. No SegFinal fires, so the LISTENING
+        # row is cleared with a SegDiscard instead.
+        cfg = VadConfig(
+            live_partials=True,
+            partial_interval_ms=64,          # 2 frames
+            speculative_silence_ms=64_000,   # disabled
+            finalize_silence_ms=64,          # 2 frames
+            min_utterance_ms=64_000,         # never long enough for a final
+            pre_roll_ms=0,
+        )
+        vad = ScriptedVad([0.9] * 4 + [0.1] * 2)
+        seg = Segmenter(cfg, vad)
+        events = []
+        for _ in range(6):
+            events.extend(seg.process(_frame()))
+
+        assert _by_type(events, SegPartial)   # a partial was emitted
+        assert not _by_type(events, SegFinal)  # too short: no final
+        assert _by_type(events, SegDiscard) == [SegDiscard(utterance_id=1)]

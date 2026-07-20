@@ -385,7 +385,12 @@ class MainWindow(QMainWindow):
         self._render_capture_status()
 
     def _render_capture_status(self) -> None:
-        status_render.render_capture_status(self)
+        if not status_render.render_capture_status(self):
+            # Stopped, paused or mute-gated: no PhraseRecognized or
+            # PhrasePartialCleared will arrive to firm or remove a leftover
+            # live-partial row, so drop any here (GUI thread only).
+            self._caption_model.clear_all_partials()
+            self._render_log()
 
     def reload_from_config(self) -> None:
         """Re-sync the toolbar controls to config (e.g. after the modal Settings

@@ -95,6 +95,7 @@ class Segmenter:
         self._silence_run = 0
         self._pending_spec_samples: np.ndarray | None = None
         self._frames_since_partial = 0
+        self._partial_emitted = False
         self._commit_lock = threading.Lock()
         self._commit_requested: int | None = None
 
@@ -157,7 +158,7 @@ class Segmenter:
         contract as :meth:`reset`: call only from the thread that feeds
         :meth:`process`."""
         events: list[object] = []
-        if self._pending_spec_samples is not None:
+        if self._pending_spec_samples is not None or self._partial_emitted:
             events.append(SegDiscard(utterance_id=self._utterance_id))
         self.reset()
         return events
@@ -213,6 +214,7 @@ class Segmenter:
                 self._silence_run = 0
                 self._pending_spec_samples = None
                 self._frames_since_partial = 0
+                self._partial_emitted = False
                 events.append(SegSpeechStart(utterance_id=self._utterance_id))
                 # Degenerate configs (pre-roll >= max cap) can hit the cap on
                 # this very transition frame; force the final here, not late.
@@ -250,6 +252,7 @@ class Segmenter:
                 )
             )
             self._frames_since_partial = 0
+            self._partial_emitted = True
 
         if is_speech:
             self._silence_run = 0
@@ -298,9 +301,10 @@ class Segmenter:
                 events.append(
                     SegFinal(utterance_id=self._utterance_id, samples=samples)
                 )
-            elif self._pending_spec_samples is not None:
-                # Too short for a final but a speculative is in flight: discard
-                # it so the STT worker drops the job (resolve-every invariant).
+            elif self._pending_spec_samples is not None or self._partial_emitted:
+                # Too short for a final but a speculative or a live partial is
+                # in flight: discard so the STT worker drops the job and the
+                # LISTENING row is cleared (resolve-every invariant).
                 events.append(SegDiscard(utterance_id=self._utterance_id))
             self._reset_to_idle()
 
@@ -313,4 +317,5 @@ class Segmenter:
         self._silence_run = 0
         self._pending_spec_samples = None
         self._frames_since_partial = 0
+        self._partial_emitted = False
         self._utterance_id += 1

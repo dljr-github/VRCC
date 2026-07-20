@@ -9,13 +9,22 @@ Split out of `test_pipeline.py` to keep both files under the line cap.
 
 from __future__ import annotations
 
+import threading
 import time
 
 from vrcc.audio.segmenter import SegPartial
+from vrcc.core import pipeline_jobs
 from vrcc.core.config import AppConfig, VadConfig
 from vrcc.core.events import AppError, PhrasePartial, PhraseRecognized
+from vrcc.core.pipeline_jobs import _SttJob
 
 from .conftest import FakeStt, collect, make_pipeline, make_result, running, sample
+
+
+def _partial_job(uid: int, s) -> _SttJob:
+    return _SttJob(
+        utterance_id=uid, samples=s, speculative=False, samples_id=id(s), partial=True
+    )
 
 
 def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
@@ -107,6 +116,31 @@ def test_live_partials_disabled_produces_no_event_no_send_no_pending_flag():
     assert env.chatbox.submits == []
     assert env.stt.calls == 0
     assert env.pipeline._partial_pending is False
+
+
+def test_partial_at_or_below_last_finalized_is_dropped():
+    # The utterance finalized while this partial was transcribing: its final
+    # already firmed or cleared the row, so a late PhrasePartial would reopen a
+    # LISTENING row nothing will ever resolve again. Drop it.
+    env = make_pipeline(stt=FakeStt(result=make_result(text="hello")))
+    partials = collect(env.bus, PhrasePartial)
+    env.pipeline._spec.mark_finalized(3)  # utterances up to 3 are finalized
+    pipeline_jobs._process_partial_job(
+        env.pipeline, _partial_job(3, sample()), threading.Event()
+    )
+    assert partials == []
+
+
+def test_partial_for_newer_utterance_still_publishes():
+    # The guard is strictly <= last_finalized: a partial for a later utterance
+    # (the current one) must still stream to the log.
+    env = make_pipeline(stt=FakeStt(result=make_result(text="hi")))
+    partials = collect(env.bus, PhrasePartial)
+    env.pipeline._spec.mark_finalized(3)
+    pipeline_jobs._process_partial_job(
+        env.pipeline, _partial_job(4, sample()), threading.Event()
+    )
+    assert [(e.utterance_id, e.text) for e in partials] == [(4, "hi")]
 
 
 def test_partial_gated_mid_transcribe_publishes_no_phrasepartial():

@@ -127,6 +127,19 @@ class CaptionModel:
         self._by_utt.pop(utterance_id, None)
         self._recv.pop(row.key, None)
 
+    def clear_all_partials(self) -> None:
+        """Drop every row still on a live partial (status LISTENING), leaving
+        terminal and firmed rows untouched. The GUI-thread catch-all for a
+        capture stop/pause: any partial the pipeline never firmed or cleared is
+        removed in one pass."""
+        stuck = [key for key, row in self._rows.items() if row.status == LISTENING]
+        for key in stuck:
+            del self._rows[key]
+            self._recv.pop(key, None)
+            for utt, k in list(self._by_utt.items()):
+                if k == key:
+                    del self._by_utt[utt]
+
     def translated(
         self, utterance_id: int, translations, *, send_enabled: bool
     ) -> None:
