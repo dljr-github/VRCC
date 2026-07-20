@@ -433,3 +433,10 @@ def test_new_feature_defaults():
     assert cfg.gui.update_check_enabled is True
     assert cfg.vad.live_partials is True
     assert cfg.vad.partial_interval_ms == 300
+
+
+def test_denoise_defaults():
+    from vrcc.core.config import AudioConfig
+    c = AudioConfig()
+    assert c.denoise_enabled is False
+    assert c.denoise_strength == 0.5
