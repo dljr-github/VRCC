@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 from vrcc.audio.stft import StreamingSTFT, N_FFT, HOP
 
@@ -33,3 +35,12 @@ def test_shapes_and_reset():
     out = st.synthesize(spec)
     assert out.shape == (HOP,) and out.dtype == np.float32
     st.reset()  # must not raise
+
+
+def test_synthesize_raises_no_runtime_warning():
+    rng = np.random.default_rng(3)
+    sig = rng.standard_normal(4000).astype(np.float32) * 0.1
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = _process(sig)
+    assert np.all(np.isfinite(out))

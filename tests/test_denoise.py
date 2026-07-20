@@ -70,6 +70,18 @@ def test_non_finite_frame_returns_input_and_survives():
     assert d.process(good).shape == (512,)  # state intact
 
 
+def test_configure_enabled_warms_session_on_calling_thread():
+    d = Denoiser()
+    d.configure(enabled=True, strength=0.5)
+    assert d._session is not None
+
+
+def test_configure_disabled_does_not_load_session():
+    d = Denoiser()
+    d.configure(enabled=False, strength=0.5)
+    assert d._session is None
+
+
 def test_parity_with_golden():
     from pathlib import Path
     g = np.load(Path(__file__).parent / "fixtures" / "denoise" / "golden.npz")

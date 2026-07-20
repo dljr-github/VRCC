@@ -41,6 +41,8 @@ class Denoiser:
     def configure(self, enabled: bool, strength: float) -> None:
         self._strength = float(np.clip(strength, 0.0, 1.0))
         self._enabled = bool(enabled)
+        if self._enabled and self._session is None:
+            self._load()
 
     def reset(self) -> None:
         self._stft.reset()

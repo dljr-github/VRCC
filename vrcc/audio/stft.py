@@ -45,5 +45,6 @@ class StreamingSTFT:
         wsum = self._wsum[:HOP].copy()
         self._ola = np.concatenate([self._ola[HOP:], np.zeros(HOP, dtype=np.float32)])
         self._wsum = np.concatenate([self._wsum[HOP:], np.zeros(HOP, dtype=np.float32)])
-        out = np.where(wsum > 1e-8, sig / wsum, 0.0)
+        out = np.zeros_like(sig)
+        np.divide(sig, wsum, out=out, where=wsum > 1e-8)
         return out.astype(np.float32)
