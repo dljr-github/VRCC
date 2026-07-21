@@ -16,6 +16,8 @@ from .conftest import collect, make_pipeline, make_result
 def test_final_sends_only_the_uncommitted_tail():
     # Partials already streamed the first two sentences of a continuous
     # utterance; the final must send only the sentence they could not confirm.
+    # The tail is one of the leftover sentences, so it goes out under a fresh
+    # negative id (the per-sentence branch), not the utterance id.
     env = make_pipeline(mt=None)
     recognized = collect(env.bus, PhraseRecognized)
     env.pipeline._commits.uncommitted(1, ["This is one.", "That is two."])
@@ -25,7 +27,29 @@ def test_final_sends_only_the_uncommitted_tail():
         make_result(text="This is one. That is two. And this three."),
     )
     assert [e.text for e in recognized] == ["And this three."]
-    assert env.chatbox.submits == [("And this three.", 1)]
+    assert len(recognized) == 1
+    assert recognized[0].utterance_id < 0
+    assert [text for text, _ in env.chatbox.submits] == ["And this three."]
+    assert env.chatbox.submits[0][1] < 0
+
+
+def test_final_sends_non_adjacent_leftovers_as_separate_ordered_captions():
+    # A short sentence the partials skipped ("Yes.") sits BEFORE the sentence
+    # they committed, so the leftovers are non-adjacent. Each must go out as its
+    # own caption in text order, never merged into "Yes. Bye.".
+    env = make_pipeline(mt=None)
+    recognized = collect(env.bus, PhraseRecognized)
+    env.pipeline._commits.uncommitted(1, ["I went to the store today."])
+    pipeline_jobs.forward_final(
+        env.pipeline,
+        1,
+        make_result(text="Yes. I went to the store today. Bye."),
+    )
+    assert [e.text for e in recognized] == ["Yes.", "Bye."]
+    assert [text for text, _ in env.chatbox.submits] == ["Yes.", "Bye."]
+    ids = [uid for _, uid in env.chatbox.submits]
+    assert all(uid < 0 for uid in ids)
+    assert len(set(ids)) == 2
 
 
 def test_nothing_precommitted_sends_verbatim():

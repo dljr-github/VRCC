@@ -220,10 +220,10 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     if result is _MISSING:
         result = p._transcribe(job.samples)
         if result is _NO_ENGINE:
-            _finalize_dropped(p, job.utterance_id)  # engine swapped out: clear the row
+            _finalize_dropped(p, job.utterance_id)  # engine swapped out: resolve typing and bound the caches
             return
     if stop.is_set():
-        _finalize_dropped(p, job.utterance_id)  # abandoned: clear typing + the row
+        _finalize_dropped(p, job.utterance_id)  # abandoned: resolve typing and bound the caches
         return
     forward_final(p, job.utterance_id, result)
 
@@ -316,7 +316,7 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
     if not p._should_caption():
         # Re-check the gate at send time: enqueue-time gating (handle_final)
         # can't see a mute/captioning-off that landed while the STT job was in
-        # flight. _mark_finalized resolves the caches and clears any partial row.
+        # flight. _mark_finalized resolves the caches and bounds them for this utterance.
         p._resolve_typing(utterance_id)
         _mark_finalized(p, utterance_id)
         return
@@ -362,24 +362,34 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
     sentences = split_sentences(result.text)
     remaining = p._commits.uncommitted(utterance_id, sentences)
     if sentences and not remaining:
-        # Every sentence already streamed out by the partials or the pause:
-        # nothing new to send, just resolve typing and finalize.
+        # Every sentence already streamed out by the partials or the pause,
+        # so there is nothing new to send.
         p._resolve_typing(utterance_id)
         _mark_finalized(p, utterance_id)
         return
-    # Nothing pre-committed (or unsplittable text): send verbatim, identical to
-    # the pre-dedup path. Otherwise send only the tail the partials could not
-    # confirm, as one message under the utterance id.
-    text = result.text if len(remaining) == len(sentences) else " ".join(remaining)
-    _send_caption(
-        p,
-        utterance_id,
-        text,
-        src,
-        language=result.language,
-        avg_logprob=result.avg_logprob,
-        no_speech_prob=result.no_speech_prob,
-    )
+    if len(remaining) == len(sentences):
+        # No sentence streamed early (or the text has no sentence boundary):
+        # the whole transcription goes out as one caption under the utterance id.
+        _send_caption(
+            p,
+            utterance_id,
+            result.text,
+            src,
+            language=result.language,
+            avg_logprob=result.avg_logprob,
+            no_speech_prob=result.no_speech_prob,
+        )
+        _mark_finalized(p, utterance_id)
+        return
+    # Some sentences streamed early. Send the rest one caption each, in text
+    # order, so a short sentence the partials skipped is never merged with a
+    # non-adjacent tail. Each gets its own id, like the partial commits; the
+    # per-caption sends own their typing-off, and the utterance's own typing
+    # (begun only at a pause) is resolved here so _mark_finalized does not
+    # prune it as an orphan.
+    for sentence in remaining:
+        _send_caption(p, p._next_message_id(), sentence, src, language=result.language)
+    p._resolve_typing(utterance_id)
     _mark_finalized(p, utterance_id)
 
 

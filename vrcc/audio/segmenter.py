@@ -251,7 +251,7 @@ class Segmenter:
         self._buffer.append(frame_copy)
         self._frames_since_start += 1
 
-        # Live partials are additive: a periodic buffer snapshot while the
+        # The periodic partial snapshot is additive: a buffer snapshot while the
         # utterance is active, independent of the speculative/final resolve
         # contract below. Counted in real frames, not silence, so it fires
         # throughout continuous speech, not just once silence starts.

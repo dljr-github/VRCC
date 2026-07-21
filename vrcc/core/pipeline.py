@@ -110,13 +110,9 @@ class Pipeline:
 
         self._dropped_frames = 0
         self._lifecycle_lock = threading.Lock()
-        # Decreasing counter for typed-submission ids: -1, -2, ... . Negative
-        # so a typed id can never collide with the segmenter's non-negative
-        # utterance ids, and unique per call so two typed sends in flight at
-        # once never share a CaptionModel row (each gets its own translated()/
-        # sent() target). Survives across start()/stop(): a restart must not
-        # hand out an id a still-resolving prior typed job already owns.
+        # Survives start()/stop() so a restart never reissues a still-live id.
         self._message_seq = 0
+        self._message_lock = threading.Lock()
         # Current run's stop event: replaced each start() so a worker abandoned
         # by a timed-out stop() join keeps its own (set) event and can't be
         # un-stopped by a restart. Passed to workers as a thread arg.
@@ -473,11 +469,15 @@ class Pipeline:
         return pipeline_typed.submit_typed(self, text)
 
     def _next_message_id(self) -> int:
-        """A fresh negative id for a send not tied to a segmenter utterance (typed text, or a
-        sentence committed mid-utterance); never collides with a segmenter id and never repeats,
-        so its translated()/sent() can't land on a different in-flight row."""
-        self._message_seq -= 1
-        return self._message_seq
+        """A fresh negative id for a send not tied to a segmenter utterance
+        (typed text, or a sentence committed mid-utterance). Never collides
+        with a positive segmenter id and never repeats, so its
+        translated()/sent() can't land on a different in-flight row. Allocated
+        under a lock: both the GUI thread (typed send) and the STT worker
+        (sentence commit) call this."""
+        with self._message_lock:
+            self._message_seq -= 1
+            return self._message_seq
 
     # -- typing helpers ------------------------------------------------------
 
