@@ -185,3 +185,44 @@ class TypingTracker:
             if orphaned:
                 self._in_flight.difference_update(orphaned)
             return orphaned, bool(orphaned) and not self._in_flight
+
+
+class CommitTracker:
+    """Per-utterance record of which sentences have been committed to the
+    chatbox, plus the previous partial's followed-sentence list for the
+    two-partial stability gate. One internal lock, SpecCache style."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._committed: dict[int, list[str]] = {}
+        self._prev: dict[int, list[str]] = {}
+
+    def reset(self) -> None:
+        with self._lock:
+            self._committed.clear()
+            self._prev.clear()
+
+    def stable_new(self, utterance_id: int, followed: list[str]) -> list[str]:
+        with self._lock:
+            prev = self._prev.get(utterance_id, [])
+            done = self._committed.setdefault(utterance_id, [])
+            new = [s for s in followed if s in prev and s not in done]
+            done.extend(new)
+            self._prev[utterance_id] = list(followed)
+            return new
+
+    def uncommitted(self, utterance_id: int, sentences: list[str]) -> list[str]:
+        with self._lock:
+            done = self._committed.setdefault(utterance_id, [])
+            new = [s for s in sentences if s not in done]
+            done.extend(new)
+            return new
+
+    def committed_count(self, utterance_id: int) -> int:
+        with self._lock:
+            return len(self._committed.get(utterance_id, []))
+
+    def clear(self, utterance_id: int) -> None:
+        with self._lock:
+            self._committed.pop(utterance_id, None)
+            self._prev.pop(utterance_id, None)
