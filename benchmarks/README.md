@@ -10,8 +10,10 @@ tables for all of them.
 The harness drives VRCC's own engine path (`create_stt_engine` with the
 app-default settings: Speed mode, source language English) over
 utterances from [LibriSpeech](https://www.openslr.org/12/) test-clean,
-fed pre-segmented exactly as the app's VAD hands them over. Per model and
-device it records:
+fed pre-segmented exactly as the app's VAD hands them over. The app's mic
+capture path does not run here (the denoiser, on by default, and the
+gain), so these numbers isolate the model and the denoiser default does
+not change them. Per model and device it records:
 
 - **WER**: word error rate against the reference transcripts, after
   Whisper-style English text normalization of both sides. Lower is better.
