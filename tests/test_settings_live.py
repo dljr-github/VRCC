@@ -140,12 +140,12 @@ def test_denoise_edit_runs_audio_denoise_hook_once_without_source_restart():
     # The denoise fields must apply in place, never through apply_audio_device
     # (which restarts the source).
     cfg, apply, theme, applied = _env()
-    cfg.audio.denoise_enabled = True
+    cfg.audio.denoise_strength = 0.7  # denoise is on by default; edit a field
     _flush(cfg, apply, theme, applied)
-    assert apply.calls == [("audio_denoise", True, 0.5)]
+    assert apply.calls == [("audio_denoise", True, 0.7)]
     # A second flush with no further change must not re-fire the hook.
     _flush(cfg, apply, theme, applied)
-    assert apply.calls == [("audio_denoise", True, 0.5)]
+    assert apply.calls == [("audio_denoise", True, 0.7)]
 
 
 def test_ui_language_is_not_a_live_group():

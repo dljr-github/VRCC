@@ -438,5 +438,5 @@ def test_new_feature_defaults():
 def test_denoise_defaults():
     from vrcc.core.config import AudioConfig
     c = AudioConfig()
-    assert c.denoise_enabled is False
+    assert c.denoise_enabled is True
     assert c.denoise_strength == 0.5

@@ -31,10 +31,10 @@ class AudioConfig(BaseModel):
     # value with a smoothed auto-level toward a target loudness.
     gain_db: float = 0.0
     auto_gain: bool = True
-    # GTCRN noise suppression before the VAD/STT. Off by default until the
-    # real-noise gate passes. strength is a dry/wet blend in [0,1]; full
-    # strength damages short words, so the default is a gentle 0.5.
-    denoise_enabled: bool = False
+    # GTCRN noise suppression before the VAD/STT. On by default, validated on
+    # real mic noise. strength is a dry/wet blend in [0,1]; full strength
+    # damages short words, so the default is a gentle 0.5.
+    denoise_enabled: bool = True
     denoise_strength: float = Field(default=0.5, ge=0.0, le=1.0)
 
 

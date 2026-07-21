@@ -71,6 +71,7 @@ def test_gain_controls_bind(qapp, tmp_path):
 
 def test_denoise_toggle_writes_config(qapp, tmp_path):
     store = _store(tmp_path)
+    store.config.audio.denoise_enabled = False  # pin the off->on flow, default is on
     dlg = SettingsDialog(store)
     try:
         assert dlg._denoise_check.isChecked() is False
