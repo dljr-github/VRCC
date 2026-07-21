@@ -53,8 +53,7 @@ class SegFinal:
 @dataclass(frozen=True)
 class SegDiscard:
     """``terminal`` distinguishes the utterance ending (abort, too-short
-    finalize) from a speech-resume mid-utterance: only a terminal discard
-    should clear a downstream LISTENING row, since a non-terminal one is
+    finalize) from a speech-resume mid-utterance: a non-terminal discard is
     followed by more ``SegPartial``s for the same utterance."""
 
     utterance_id: int
@@ -322,9 +321,9 @@ class Segmenter:
                 )
             elif self._pending_spec_samples is not None or self._partial_emitted:
                 # Too short for a final but a speculative or a live partial is
-                # in flight: discard so the STT worker drops the job and the
-                # LISTENING row is cleared (resolve-every invariant). The
-                # utterance ends here, so this discard is terminal.
+                # in flight: discard so the STT worker drops the job
+                # (resolve-every invariant). The utterance ends here, so this
+                # discard is terminal.
                 events.append(
                     SegDiscard(utterance_id=self._utterance_id, terminal=True)
                 )

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from vrcc.core import languages
 from vrcc.core.events import (
     AppError,
-    PhrasePartialCleared,
     PhraseRecognized,
     PhraseTranslated,
 )
@@ -72,10 +71,8 @@ class _MtJob:
 
 
 def _mark_finalized(p: "Pipeline", utterance_id: int) -> None:
-    """Bound the speculative caches, prune typing orphans below the cutoff
-    (see TypingTracker.prune_orphans), then clear this utterance's live-partial
-    row. clear_partial is idempotent: a firmed row is untouched, while a
-    finalize that published no recognized event removes a row left stuck."""
+    """Bound the speculative caches and prune typing orphans below the cutoff
+    (see TypingTracker.prune_orphans)."""
     cutoff = p._spec.mark_finalized(utterance_id)
     orphaned, emptied = p._typing.prune_orphans(cutoff)
     if orphaned:
@@ -86,14 +83,12 @@ def _mark_finalized(p: "Pipeline", utterance_id: int) -> None:
         )
     if emptied:
         p._set_typing(False)
-    p._bus.publish(PhrasePartialCleared(utterance_id))
     p._commits.clear(utterance_id)
 
 
 def _finalize_dropped(p: "Pipeline", utterance_id: int) -> None:
-    """Resolve typing and finalize a final dropped before forward_final,
-    clearing typing dots and any live-partial row (ids monotonic across runs,
-    so a late/zombie drop is safe)."""
+    """Resolve typing and finalize a final dropped before forward_final
+    (ids monotonic across runs, so a late/zombie drop is safe)."""
     p._resolve_typing(utterance_id)
     _mark_finalized(p, utterance_id)
 
@@ -143,8 +138,6 @@ def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._spec.drop_discarded(event.utterance_id)
     p._commits.clear(event.utterance_id)
     p._resolve_typing(event.utterance_id)
-    if event.terminal:  # utterance over: nothing will firm this partial
-        p._bus.publish(PhrasePartialCleared(event.utterance_id))
 
 
 def handle_partial(p: "Pipeline", event: "SegPartial") -> None:

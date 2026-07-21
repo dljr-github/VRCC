@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from vrcc.i18n import tr
 
 # Status values (also the render key).
-LISTENING = "listening"
 TRANSLATING = "translating"
 QUEUED = "queued"
 SENT = "sent"
@@ -39,12 +38,10 @@ class CaptionRow:
 class CaptionModel:
     """Ordered, capped set of caption rows keyed by utterance.
 
-    recognized() starts a fresh row for a reused utterance_id, so an older
-    entry is never overwritten -- UNLESS the current row for that id is still
-    LISTENING (a live partial), in which case recognized() firms up that same
-    row in place rather than duplicating it. translated()/sent() always update
-    the most recent row for the id. (Pipeline gives every typed submission its
-    own id for exactly this reason: two rows sharing an id would let a later
+    recognized() starts a fresh row per reused utterance_id, so an older
+    entry is never overwritten. translated()/sent() always update the most
+    recent row for the id. (Pipeline gives every typed submission its own id
+    for exactly this reason: two rows sharing an id would let a later
     recognized() remap where an earlier one's translated()/sent() lands.)
     """
 
@@ -64,17 +61,6 @@ class CaptionModel:
             status = TRANSLATING
         else:
             status = QUEUED if send_enabled else NOT_SENT
-        row = self._current_row(utterance_id)
-        if row is not None and row.status == LISTENING:
-            # A live partial firming up: update the same row instead of
-            # allocating a new one, so the log doesn't show the tentative
-            # line and the final line as two separate entries. A typed
-            # submission (its own fresh id, never seen by partial()) always
-            # takes the branch below.
-            row.original = text
-            row.status = status
-            self._recv[row.key] = self._clock()
-            return
         key = self._next_key
         self._next_key += 1
         self._rows[key] = CaptionRow(
@@ -87,58 +73,6 @@ class CaptionModel:
         self._by_utt[utterance_id] = key
         self._recv[key] = self._clock()
         self._trim()
-
-    def partial(self, utterance_id: int, text: str) -> None:
-        """A tentative, in-progress transcription. Updates the current row for
-        this utterance in place while it's still live (any non-terminal
-        status); once that row is terminal (sent/truncated/not_sent), a
-        stray/late partial starts a fresh row rather than reopening it, the
-        same reuse-a-fresh-id policy recognized() already applies."""
-        row = self._current_row(utterance_id)
-        if row is not None and row.status not in _TERMINAL:
-            row.original = text
-            row.status = LISTENING
-            return
-        key = self._next_key
-        self._next_key += 1
-        self._rows[key] = CaptionRow(
-            key=key,
-            utterance_id=utterance_id,
-            time_label=self._time_label(),
-            original=text,
-            status=LISTENING,
-        )
-        self._by_utt[utterance_id] = key
-        self._recv[key] = self._clock()
-        self._trim()
-
-    def clear_partial(self, utterance_id: int) -> None:
-        """Drop the current row for this utterance if it never firmed past a
-        live partial (status still LISTENING) -- the abandon path for an
-        utterance discarded or gated mid-partial, with no recognized/sent
-        event left to firm or remove the row itself. A no-op for a missing
-        utterance, or one whose row already moved past LISTENING (firmed or
-        terminal): a normal recognized/translated/sent row is never removed
-        here."""
-        row = self._current_row(utterance_id)
-        if row is None or row.status != LISTENING:
-            return
-        del self._rows[row.key]
-        self._by_utt.pop(utterance_id, None)
-        self._recv.pop(row.key, None)
-
-    def clear_all_partials(self) -> None:
-        """Drop every row still on a live partial (status LISTENING), leaving
-        terminal and firmed rows untouched. The GUI-thread catch-all for a
-        capture stop/pause: any partial the pipeline never firmed or cleared is
-        removed in one pass."""
-        stuck = [key for key, row in self._rows.items() if row.status == LISTENING]
-        for key in stuck:
-            del self._rows[key]
-            self._recv.pop(key, None)
-            for utt, k in list(self._by_utt.items()):
-                if k == key:
-                    del self._by_utt[utt]
 
     def translated(
         self, utterance_id: int, translations, *, send_enabled: bool
@@ -238,8 +172,6 @@ def status_markup(
         return (tr("not sent"), c["bad"])
     if row.status == QUEUED:
         return (tr("queued"), c["muted"])
-    if row.status == LISTENING:
-        return (tr("listening…"), c["muted"])
     return (tr("translating…"), c["muted"])
 
 

@@ -5,11 +5,9 @@ caps in-flight partials at one), and mid-utterance sentence commits.
 A stable complete sentence (seen in two consecutive partials' followed
 lists, per `CommitTracker.stable_new`) is committed to the chatbox as its
 own message, its own id, without finalizing the utterance or resetting the
-segmenter buffer. `PhrasePartial` is no longer published from this path (it
-stays defined for the log-clear event and the GUI bridge); the raw partial
-text itself never reaches the log or the chatbox until a sentence in it is
-stable. Split out of `test_pipeline.py` to keep both files under the line
-cap.
+segmenter buffer. The raw partial text itself never reaches the log or the
+chatbox until a sentence in it is stable. Split out of `test_pipeline.py`
+to keep both files under the line cap.
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ import time
 from vrcc.audio.segmenter import SegPartial
 from vrcc.core import pipeline_jobs
 from vrcc.core.config import AppConfig, VadConfig
-from vrcc.core.events import AppError, PhrasePartial, PhraseRecognized
+from vrcc.core.events import AppError, PhraseRecognized
 from vrcc.core.pipeline_jobs import _SttJob
 
 from .conftest import FakeStt, collect, make_pipeline, make_result, running, sample
@@ -86,25 +84,6 @@ def test_later_partial_does_not_recommit_already_committed_sentences():
     assert [e.text for e in recognized] == ["This is one.", "That is two.", "Now a third one."]
 
 
-# -- 3: no PhrasePartial from this path --------------------------------------
-
-
-def test_partial_stream_never_publishes_phrasepartial():
-    env = make_pipeline(mt=None, stt=FakeStt(results=[
-        make_result(text="This is one. That is two. tail"),
-        make_result(text="This is one. That is two. tail end"),
-    ]))
-    partials = collect(env.bus, PhrasePartial)
-    with running(env.pipeline):
-        env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.stt.calls == 1)
-        assert _wait_until(lambda: env.pipeline._partial_pending is False)
-        env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.stt.calls == 2)
-        time.sleep(0.02)
-    assert partials == []
-
-
 def test_partial_does_not_finalize_or_send_on_first_sighting():
     env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="hello there")))
     recognized = collect(env.bus, PhraseRecognized)
@@ -117,7 +96,7 @@ def test_partial_does_not_finalize_or_send_on_first_sighting():
     assert env.pipeline._spec._last_finalized == 0
 
 
-# -- 4: muted mid-transcribe commits nothing --------------------------------
+# -- 3: muted mid-transcribe commits nothing --------------------------------
 
 
 def test_captioning_off_mid_transcribe_commits_nothing():
@@ -148,7 +127,7 @@ def test_captioning_off_mid_transcribe_commits_nothing():
     assert env.chatbox.submits == []
 
 
-# -- 5: unchanged machinery (coalescing, pending flag, last_finalized) ------
+# -- 4: unchanged machinery (coalescing, pending flag, last_finalized) ------
 
 
 def test_second_partial_while_one_pending_is_coalesced():
@@ -238,7 +217,7 @@ def test_partial_for_newer_utterance_still_commits():
     assert env.chatbox.submits == [("This is one.", recognized[0].utterance_id)]
 
 
-# -- 6: sentence_inject=False is a hard gate ---------------------------------
+# -- 5: sentence_inject=False is a hard gate ---------------------------------
 
 
 def test_sentence_inject_disabled_commits_nothing():

@@ -9,7 +9,6 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from vrcc.gui.caption_log import (
-    LISTENING,
     NOT_SENT,
     QUEUED,
     SENT,
@@ -103,111 +102,6 @@ def test_distinct_ids_do_not_cross_stamp_translated_or_sent():
     assert rows[1].original == "second typed"
     assert rows[1].status == TRANSLATING  # untouched: still awaiting its own translate
     assert rows[1].translations == []
-
-
-def test_partial_then_partial_updates_one_row_in_place():
-    m = _model()
-    m.partial(1, "hel")
-    assert len(m.rows()) == 1
-    assert m.rows()[0].original == "hel"
-    assert m.rows()[0].status == LISTENING
-
-    m.partial(1, "hello there")
-    assert len(m.rows()) == 1  # same row, not a new one
-    assert m.rows()[0].original == "hello there"
-    assert m.rows()[0].status == LISTENING
-
-
-def test_partial_then_recognized_firms_the_same_row():
-    m = _model()
-    m.partial(1, "hel")
-    assert len(m.rows()) == 1
-
-    m.recognized(1, "hello there", translate_enabled=False, send_enabled=True)
-    assert len(m.rows()) == 1  # no duplicate row
-    assert m.rows()[0].original == "hello there"
-    assert m.rows()[0].status == QUEUED
-
-
-def test_clear_partial_removes_listening_row():
-    m = _model()
-    m.partial(1, "hel")
-    assert len(m.rows()) == 1
-    m.clear_partial(1)
-    assert m.rows() == []
-
-
-def test_clear_partial_on_unknown_utterance_is_a_noop():
-    m = _model()
-    m.clear_partial(999)
-    assert m.rows() == []
-
-
-def test_clear_partial_does_not_remove_terminal_row():
-    m = _model()
-    m.recognized(1, "hello", translate_enabled=False, send_enabled=True)
-    m.sent(1, truncated=False)
-    m.clear_partial(1)
-    rows = m.rows()
-    assert len(rows) == 1
-    assert rows[0].status == SENT
-
-
-def test_clear_partial_does_not_remove_non_listening_live_row():
-    # A row that's live but already firmed past LISTENING (translating,
-    # queued, ...) must not be dropped either -- only a bare, never-firmed
-    # partial is an abandon-time no-op target.
-    m = _model()
-    m.recognized(1, "hello", translate_enabled=True, send_enabled=True)
-    assert m.rows()[0].status == TRANSLATING
-    m.clear_partial(1)
-    rows = m.rows()
-    assert len(rows) == 1
-    assert rows[0].status == TRANSLATING
-
-
-def test_clear_all_partials_removes_listening_not_sent_rows():
-    m = _model()
-    m.partial(1, "hel")  # LISTENING
-    m.recognized(2, "done", translate_enabled=False, send_enabled=True)
-    m.sent(2, truncated=False)  # SENT
-    m.partial(3, "wor")  # LISTENING
-    m.clear_all_partials()
-    rows = m.rows()
-    assert [r.utterance_id for r in rows] == [2]
-    assert rows[0].status == SENT
-
-
-def test_clear_all_partials_leaves_firmed_row_intact():
-    # A partial firmed by recognized() moved past LISTENING; the catch-all
-    # clear must not remove it, only bare live partials.
-    m = _model()
-    m.partial(1, "hel")
-    m.recognized(1, "hello there", translate_enabled=False, send_enabled=True)
-    assert m.rows()[0].status == QUEUED
-    m.clear_all_partials()
-    rows = m.rows()
-    assert len(rows) == 1
-    assert rows[0].original == "hello there"
-    assert rows[0].status == QUEUED
-
-
-def test_partial_after_terminal_row_does_not_resurrect_it():
-    m = _model()
-    m.recognized(1, "hello", translate_enabled=False, send_enabled=True)
-    m.sent(1, truncated=False)
-    assert m.rows()[0].status == SENT
-
-    m.partial(1, "a stale partial")
-    rows = m.rows()
-    # The terminal row is untouched: its text and status never move backward.
-    assert rows[0].original == "hello"
-    assert rows[0].status == SENT
-    # A fresh row is started for the new activity on this utterance id (same
-    # policy recognized() already applies to a reused id).
-    assert len(rows) == 2
-    assert rows[1].original == "a stale partial"
-    assert rows[1].status == LISTENING
 
 
 def test_cap_trims_oldest_rows():
@@ -405,14 +299,6 @@ def test_translation_line_label_is_escaped():
     html = render_rows_html(m.rows())
     assert "<b>Lang</b>" not in html
     assert "&lt;b&gt;Lang&lt;/b&gt;" in html
-
-
-def test_listening_status_renders_a_muted_marker():
-    m = _model()
-    m.partial(1, "hel")
-    text, color = status_markup(m.rows()[0])
-    assert "listening" in text
-    assert color == "#98a2b3"  # default muted
 
 
 def test_status_markup_colors_distinct():

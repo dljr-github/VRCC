@@ -65,8 +65,7 @@ def render_capture_status(w) -> bool:
     and the pipeline's mute gate, in that priority order. The toggle outranks
     the mute gate because the pipeline checks it first: naming the mute while
     the toggle is off would point the user at the wrong control. Returns
-    whether the app is actually listening (the green state), so the caller can
-    clear stuck live-partial rows when it is not."""
+    whether the app is actually listening (the green state)."""
     ok = getattr(w, "_capture_ok", None)
     listening = False
     if ok is None:

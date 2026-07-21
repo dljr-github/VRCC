@@ -205,8 +205,6 @@ class MainWindow(QMainWindow):
         return (
             (b.mic_level, self._on_mic_level),
             (b.phrase_recognized, self._on_phrase_recognized),
-            (b.phrase_partial, self._on_partial),
-            (b.phrase_partial_cleared, self._on_partial_cleared),
             (b.phrase_translated, self._on_phrase_translated),
             (b.chatbox_sent, self._on_chatbox_sent),
             (b.mute_changed, self._on_mute_changed),
@@ -253,18 +251,6 @@ class MainWindow(QMainWindow):
             translate_enabled=self._translate_active(),
             send_enabled=self._send_active(),
         )
-        self._render_log()
-
-    def _on_partial(self, event) -> None:
-        # A stale partial for an already-finalized utterance is a no-op: the
-        # model ignores it (row is terminal) instead of reopening the row.
-        self._caption_model.partial(event.utterance_id, event.text)
-        self._render_log()
-
-    def _on_partial_cleared(self, event) -> None:
-        # The utterance was discarded or gated mid-partial: no recognized/
-        # sent will ever firm or remove its LISTENING row, so clear it here.
-        self._caption_model.clear_partial(event.utterance_id)
         self._render_log()
 
     def _on_phrase_translated(self, event) -> None:
@@ -385,12 +371,7 @@ class MainWindow(QMainWindow):
         self._render_capture_status()
 
     def _render_capture_status(self) -> None:
-        if not status_render.render_capture_status(self):
-            # Stopped, paused or mute-gated: no PhraseRecognized or
-            # PhrasePartialCleared will arrive to firm or remove a leftover
-            # live-partial row, so drop any here (GUI thread only).
-            self._caption_model.clear_all_partials()
-            self._render_log()
+        status_render.render_capture_status(self)
 
     def reload_from_config(self) -> None:
         """Re-sync the toolbar controls to config (e.g. after the modal Settings

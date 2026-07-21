@@ -130,9 +130,8 @@ class TestLivePartials:
 
 class TestPartialDiscard:
     def test_abort_with_partial_emitted_returns_discard(self):
-        # A live partial was emitted (a LISTENING row exists downstream) but no
-        # speculative is pending; abort must still return a SegDiscard so the
-        # row is cleared, not left stuck listening.
+        # A live partial was emitted but no speculative is pending; abort must
+        # still return a SegDiscard.
         cfg = VadConfig(
             sentence_inject=True,
             partial_interval_ms=64,          # 2 frames
@@ -148,15 +147,14 @@ class TestPartialDiscard:
 
         assert partials  # a partial was emitted
         assert seg._pending_spec_samples is None  # yet no speculative pending
-        # Abort ends the utterance: the discard must be terminal so the
-        # LISTENING row is cleared, not left waiting for a SegPartial that
-        # will never come.
+        # Abort ends the utterance: the discard must be terminal, not left
+        # waiting for a SegPartial that will never come.
         assert seg.abort() == [SegDiscard(utterance_id=1, terminal=True)]
 
     def test_too_short_finalize_with_partial_emitted_returns_discard(self):
         # A partial was emitted, then silence finalizes while the utterance is
-        # still under the minimum length. No SegFinal fires, so the LISTENING
-        # row is cleared with a SegDiscard instead.
+        # still under the minimum length. No SegFinal fires, so a terminal
+        # SegDiscard fires instead.
         cfg = VadConfig(
             sentence_inject=True,
             partial_interval_ms=64,          # 2 frames
@@ -173,8 +171,8 @@ class TestPartialDiscard:
 
         assert _by_type(events, SegPartial)   # a partial was emitted
         assert not _by_type(events, SegFinal)  # too short: no final
-        # The utterance ends here (too short to finalize): terminal, so the
-        # LISTENING row is cleared.
+        # The utterance ends here (too short to finalize), so the discard is
+        # terminal.
         assert _by_type(events, SegDiscard) == [SegDiscard(utterance_id=1, terminal=True)]
 
 
