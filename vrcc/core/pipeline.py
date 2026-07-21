@@ -19,7 +19,7 @@ import numpy as np
 from vrcc.audio.segmenter import (
     SegDiscard, SegFinal, SegLevel, SegPartial, SegSpeculative, SegSpeechStart,
 )
-from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source
+from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source, pipeline_typed
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_jobs import _NO_ENGINE
 from vrcc.core.pipeline_state import CommitTracker, SpecCache, TypingTracker
@@ -116,7 +116,7 @@ class Pipeline:
         # once never share a CaptionModel row (each gets its own translated()/
         # sent() target). Survives across start()/stop(): a restart must not
         # hand out an id a still-resolving prior typed job already owns.
-        self._typed_seq = 0
+        self._message_seq = 0
         # Current run's stop event: replaced each start() so a worker abandoned
         # by a timed-out stop() join keeps its own (set) event and can't be
         # un-stopped by a restart. Passed to workers as a thread arg.
@@ -468,16 +468,16 @@ class Pipeline:
     def submit_typed(self, text: str) -> bool:
         """Send typed text straight through translation to the chatbox,
         bypassing STT and mute/captioning gating (each call gets its own
-        negative utterance id; see ``_next_typed_id``). Returns False
+        negative utterance id; see ``_next_message_id``). Returns False
         (``PIPELINE_NOT_RUNNING``) when not started, keeping the text uncaptured."""
-        return pipeline_jobs.submit_typed(self, text)
+        return pipeline_typed.submit_typed(self, text)
 
-    def _next_typed_id(self) -> int:
-        """A fresh negative id for a typed submission: -1, -2, ... . Never
-        collides with a segmenter id and never repeats, so a typed message's
-        translated()/sent() can't land on a different in-flight typed row."""
-        self._typed_seq -= 1
-        return self._typed_seq
+    def _next_message_id(self) -> int:
+        """A fresh negative id for a send not tied to a segmenter utterance (typed text, or a
+        sentence committed mid-utterance); never collides with a segmenter id and never repeats,
+        so its translated()/sent() can't land on a different in-flight row."""
+        self._message_seq -= 1
+        return self._message_seq
 
     # -- typing helpers ------------------------------------------------------
 
