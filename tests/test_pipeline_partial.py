@@ -194,8 +194,8 @@ def test_partial_exception_clears_pending_flag_and_later_partial_is_not_coalesce
     assert recognized == []  # "hi" has no terminal punctuation: nothing to commit
 
 
-def test_live_partials_disabled_produces_no_commit_no_pending_flag():
-    cfg = AppConfig(vad=VadConfig(live_partials=False))
+def test_sentence_inject_disabled_produces_no_commit_no_pending_flag():
+    cfg = AppConfig(vad=VadConfig(sentence_inject=False))
     env = make_pipeline(config=cfg, stt=FakeStt(result=make_result(text="hello")))
     recognized = collect(env.bus, PhraseRecognized)
     with running(env.pipeline):
@@ -242,7 +242,7 @@ def test_partial_for_newer_utterance_still_commits():
 
 
 def test_sentence_inject_disabled_commits_nothing():
-    cfg = AppConfig(vad=VadConfig(sentence_inject=False, live_partials=True))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=False))
     env = make_pipeline(mt=None, config=cfg, stt=FakeStt(results=[
         make_result(text="This is one. tail"),
         make_result(text="This is one. tail more"),

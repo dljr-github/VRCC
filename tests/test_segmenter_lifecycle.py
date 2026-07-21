@@ -102,7 +102,7 @@ class TestMinUtteranceRejection:
             min_utterance_ms=1000,
             finalize_silence_ms=400,
             speculative_silence_ms=350,
-            live_partials=False,  # this timeline only cares about spec/discard
+            sentence_inject=False,  # this timeline only cares about spec/discard
         )
         vad = ScriptedVad([0.9] + [0.1] * 13)
         seg = Segmenter(cfg, vad)

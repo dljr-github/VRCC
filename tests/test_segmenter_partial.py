@@ -47,7 +47,7 @@ class TestLivePartials:
         # partial_interval_ms=64 -> 2 frames at 32ms/frame. Sustained speech
         # (never entering silence, so speculative/final never fire) should
         # emit a SegPartial roughly every 2 frames.
-        cfg = VadConfig(live_partials=True, partial_interval_ms=64)
+        cfg = VadConfig(sentence_inject=True, partial_interval_ms=64)
         vad = ScriptedVad([0.9] * 10)
         seg = Segmenter(cfg, vad)
         assert seg._partial_frames == 2
@@ -66,7 +66,7 @@ class TestLivePartials:
         assert partial_frames == [5, 7, 9]
 
     def test_partial_events_carry_utterance_id_and_snapshot_samples(self):
-        cfg = VadConfig(live_partials=True, partial_interval_ms=64, pre_roll_ms=0)
+        cfg = VadConfig(sentence_inject=True, partial_interval_ms=64, pre_roll_ms=0)
         vad = ScriptedVad([0.9] * 6)
         seg = Segmenter(cfg, vad)
         assert seg._preroll_frames == 0
@@ -83,8 +83,8 @@ class TestLivePartials:
         assert p.samples.dtype == np.float32
         assert p.samples.ndim == 1
 
-    def test_live_partials_false_never_emits(self):
-        cfg = VadConfig(live_partials=False, partial_interval_ms=64)
+    def test_sentence_inject_false_never_emits(self):
+        cfg = VadConfig(sentence_inject=False, partial_interval_ms=64)
         vad = ScriptedVad([0.9] * 20)
         seg = Segmenter(cfg, vad)
 
@@ -103,7 +103,7 @@ class TestLivePartials:
         # reset by _reset_to_idle, the first partial would land earlier than
         # 3 ACTIVE frames after utterance 2's speech start.
         cfg = VadConfig(
-            live_partials=True,
+            sentence_inject=True,
             partial_interval_ms=96,   # 3 frames
             speculative_silence_ms=64_000,  # disabled
             finalize_silence_ms=64,   # 2 frames
@@ -134,7 +134,7 @@ class TestPartialDiscard:
         # speculative is pending; abort must still return a SegDiscard so the
         # row is cleared, not left stuck listening.
         cfg = VadConfig(
-            live_partials=True,
+            sentence_inject=True,
             partial_interval_ms=64,          # 2 frames
             speculative_silence_ms=64_000,   # disabled
             finalize_silence_ms=64_000,      # disabled
@@ -158,7 +158,7 @@ class TestPartialDiscard:
         # still under the minimum length. No SegFinal fires, so the LISTENING
         # row is cleared with a SegDiscard instead.
         cfg = VadConfig(
-            live_partials=True,
+            sentence_inject=True,
             partial_interval_ms=64,          # 2 frames
             speculative_silence_ms=64_000,   # disabled
             finalize_silence_ms=64,          # 2 frames

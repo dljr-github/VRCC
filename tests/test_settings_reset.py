@@ -290,7 +290,6 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
     store.config.audio.gain_db = 12.0
     store.config.audio.auto_gain = False
     store.config.vad.sentence_inject = False
-    store.config.vad.live_partials = False
     store.config.gui.update_check_enabled = False
     store.config.stt.avg_logprob_gate = -2.5
     store.config.stt.no_speech_gate = 0.9
@@ -309,7 +308,6 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         assert store.config.audio.gain_db == d.audio.gain_db
         assert store.config.audio.auto_gain == d.audio.auto_gain
         assert store.config.vad.sentence_inject == d.vad.sentence_inject
-        assert store.config.vad.live_partials == d.vad.live_partials
         assert store.config.gui.update_check_enabled == d.gui.update_check_enabled
         assert store.config.audio.denoise_enabled == d.audio.denoise_enabled
         assert store.config.audio.denoise_strength == d.audio.denoise_strength
@@ -325,7 +323,6 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         assert dlg._stt_cond_check.isChecked() == d.stt.condition_on_previous_text
         assert dlg._sensitivity.value() == 90 - round(d.vad.threshold * 100)
         assert dlg._sentence_inject_check.isChecked() == d.vad.sentence_inject
-        assert dlg._live_partials_check.isChecked() == d.vad.live_partials
         assert dlg._update_check.isChecked() == d.gui.update_check_enabled
         assert dlg._denoise_check.isChecked() == d.audio.denoise_enabled
         assert dlg._denoise_strength.value() == round(d.audio.denoise_strength * 100)

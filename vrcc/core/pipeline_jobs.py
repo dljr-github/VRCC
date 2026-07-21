@@ -151,7 +151,7 @@ def handle_partial(p: "Pipeline", event: "SegPartial") -> None:
     """Queue at most one in-flight partial transcription. Additive to the
     speculative/final flow: never touches SpecCache or typing, never begins
     typing (the speculative pass already owns that indicator)."""
-    if not p._config.vad.live_partials:
+    if not p._config.vad.sentence_inject:
         return
     if not p._should_caption():
         return

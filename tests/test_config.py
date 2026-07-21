@@ -432,7 +432,6 @@ def test_new_feature_defaults():
     assert cfg.vad.sentence_inject is True
     assert cfg.vad.sentence_min_words == 3
     assert cfg.gui.update_check_enabled is True
-    assert cfg.vad.live_partials is True
     assert cfg.vad.partial_interval_ms == 300
 
 

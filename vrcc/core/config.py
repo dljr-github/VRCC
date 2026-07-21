@@ -60,9 +60,6 @@ class VadConfig(BaseModel):
     # mid-sentence pause (a comma, a breath) leave behind a short punctuated
     # fragment that reads as a complete sentence and gets injected too soon.
     sentence_min_words: int = 3
-    # Stream the in-progress transcription to the log and chatbox while the
-    # utterance is still active, ahead of the speculative/final result.
-    live_partials: bool = True
     # How often the segmenter snapshots the active buffer for a live partial.
     partial_interval_ms: int = 300
 

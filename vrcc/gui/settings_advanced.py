@@ -383,17 +383,6 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     dlg._sentence_inject_check = inject
     form.addRow(inject)
 
-    live_partials = QCheckBox(tr("Fill in the caption live as I speak"))
-    live_partials.setChecked(dlg._cfg.vad.live_partials)
-    live_partials.setToolTip(
-        tr("Show the caption filling in live in the log as you talk, "
-           "instead of only when a sentence finishes. The chatbox still "
-           "shows complete sentences. Uses more of your graphics card.")
-    )
-    dlg._bind_checkbox(live_partials, dlg._cfg.vad, "live_partials")
-    dlg._live_partials_check = live_partials
-    form.addRow(live_partials)
-
     dlg._update_check = QCheckBox(tr("Tell me when a new version is available"))
     dlg._update_check.setChecked(dlg._cfg.gui.update_check_enabled)
     dlg._update_check.setToolTip(

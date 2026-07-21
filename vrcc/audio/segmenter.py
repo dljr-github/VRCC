@@ -258,7 +258,7 @@ class Segmenter:
         # throughout continuous speech, not just once silence starts.
         self._frames_since_partial += 1
         if (
-            self.cfg.live_partials
+            self.cfg.sentence_inject
             and self._frames_since_partial >= self._partial_frames
             and len(self._buffer) > self._preroll_frames
         ):
