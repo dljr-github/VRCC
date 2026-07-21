@@ -21,7 +21,11 @@ from vrcc.core.events import (
 )
 from vrcc.core.pipeline_send import safe_submit
 from vrcc.core.pipeline_state import _MISSING
-from vrcc.core.sentences import ends_sentence, followed_complete_sentences
+from vrcc.core.sentences import (
+    ends_sentence,
+    followed_complete_sentences,
+    split_sentences,
+)
 
 if TYPE_CHECKING:
     import threading
@@ -83,6 +87,7 @@ def _mark_finalized(p: "Pipeline", utterance_id: int) -> None:
     if emptied:
         p._set_typing(False)
     p._bus.publish(PhrasePartialCleared(utterance_id))
+    p._commits.clear(utterance_id)
 
 
 def _finalize_dropped(p: "Pipeline", utterance_id: int) -> None:
@@ -136,6 +141,7 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
 
 def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._spec.drop_discarded(event.utterance_id)
+    p._commits.clear(event.utterance_id)
     p._resolve_typing(event.utterance_id)
     if event.terminal:  # utterance over: nothing will firm this partial
         p._bus.publish(PhrasePartialCleared(event.utterance_id))
@@ -360,10 +366,22 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         _mark_finalized(p, utterance_id)
         return
 
+    sentences = split_sentences(result.text)
+    remaining = p._commits.uncommitted(utterance_id, sentences)
+    if sentences and not remaining:
+        # Every sentence already streamed out by the partials or the pause:
+        # nothing new to send, just resolve typing and finalize.
+        p._resolve_typing(utterance_id)
+        _mark_finalized(p, utterance_id)
+        return
+    # Nothing pre-committed (or unsplittable text): send verbatim, identical to
+    # the pre-dedup path. Otherwise send only the tail the partials could not
+    # confirm, as one message under the utterance id.
+    text = result.text if len(remaining) == len(sentences) else " ".join(remaining)
     _send_caption(
         p,
         utterance_id,
-        result.text,
+        text,
         src,
         language=result.language,
         avg_logprob=result.avg_logprob,
