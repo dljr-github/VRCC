@@ -427,7 +427,8 @@ def test_new_feature_defaults():
     cfg = AppConfig()
     assert cfg.audio.gain_db == 0.0
     assert cfg.audio.auto_gain is True
-    assert cfg.vad.silence_threshold == 0.35
+    assert cfg.vad.threshold == 0.35
+    assert cfg.vad.silence_threshold == 0.25
     assert cfg.vad.sentence_inject is True
     assert cfg.vad.sentence_min_words == 3
     assert cfg.gui.update_check_enabled is True

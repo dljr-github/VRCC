@@ -176,9 +176,10 @@ class TestMaxUtteranceForceFinal:
     def test_force_final_reuses_pending_speculative_identity(self):
         # Behavior 8 must hold on the force-final path too: a speculative
         # fires (1 silence frame with speculative_silence_ms=32), then only
-        # dead-band frames (0.4 -- NOT speech) pad the buffer to the max;
-        # no speech frame occurred between speculative and final, so the
-        # forced SegFinal must reuse the speculative array by identity.
+        # dead-band frames (between the silence bar and the speech threshold,
+        # NOT speech) pad the buffer to the max; no speech frame occurred
+        # between speculative and final, so the forced SegFinal must reuse the
+        # speculative array by identity.
         cfg = VadConfig(
             pre_roll_ms=0,
             speculative_silence_ms=32,   # 1 frame
@@ -186,7 +187,8 @@ class TestMaxUtteranceForceFinal:
             min_utterance_ms=32,
             max_utterance_s=6 * 32 / 1000,  # 6 frames
         )
-        vad = ScriptedVad([0.9, 0.9, 0.9, 0.1, 0.4, 0.4])
+        db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
+        vad = ScriptedVad([0.9, 0.9, 0.9, 0.1, db, db])
         seg = Segmenter(cfg, vad)
 
         spec = None
@@ -268,11 +270,12 @@ class TestFrameCopySafety:
 class TestHysteresisDeadBand:
     def test_dead_band_frames_do_not_move_silence_run_while_active(self):
         cfg = VadConfig()
-        # speech start, 5 silence frames, 3 dead-band frames (0.4, between
-        # 0.35 and 0.5), then 6 more silence frames -> speculative should
-        # fire at the 8th *classified-silence* frame (5 + 3), unaffected
-        # by the 3 dead-band frames in between.
-        probs = [0.9] + [0.1] * 5 + [0.4] * 3 + [0.1] * 6
+        db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
+        # speech start, 5 silence frames, 3 dead-band frames (between the
+        # silence bar and the speech threshold), then 6 more silence frames ->
+        # speculative should fire at the 8th *classified-silence* frame (5 + 3),
+        # unaffected by the 3 dead-band frames in between.
+        probs = [0.9] + [0.1] * 5 + [db] * 3 + [0.1] * 6
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
 
@@ -295,7 +298,8 @@ class TestHysteresisDeadBand:
 
     def test_dead_band_frames_do_not_trigger_speech_start_while_idle(self):
         cfg = VadConfig()
-        vad = ScriptedVad([0.4] * 4)
+        db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
+        vad = ScriptedVad([db] * 4)
         seg = Segmenter(cfg, vad)
         for _ in range(4):
             events = seg.process(_frame())

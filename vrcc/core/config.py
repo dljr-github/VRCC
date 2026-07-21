@@ -39,11 +39,15 @@ class AudioConfig(BaseModel):
 
 
 class VadConfig(BaseModel):
-    threshold: float = 0.5
+    # Silero speech probability to start an utterance. Errs sensitive on
+    # purpose: a missed utterance is silent and reads as a broken app, while a
+    # false trigger is visible and easy to turn down. Clean speech sits only
+    # just above 0.5, so a lower bar also catches soft or unclear speech.
+    threshold: float = 0.35
     # Silence bar, decoupled from the speech threshold so raising sensitivity
     # (lowering the speech threshold) never raises the silence bar and chops
     # words mid-utterance. Clamped below the speech threshold at use.
-    silence_threshold: float = 0.35
+    silence_threshold: float = 0.25
     speculative_silence_ms: int = 250
     finalize_silence_ms: int = 600
     min_utterance_ms: int = 500
