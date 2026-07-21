@@ -15,14 +15,13 @@ from typing import TYPE_CHECKING
 from vrcc.core import languages
 from vrcc.core.events import (
     AppError,
-    PhrasePartial,
     PhrasePartialCleared,
     PhraseRecognized,
     PhraseTranslated,
 )
 from vrcc.core.pipeline_send import safe_submit, submit_to_chatbox
 from vrcc.core.pipeline_state import _MISSING
-from vrcc.core.sentences import ends_sentence
+from vrcc.core.sentences import ends_sentence, followed_complete_sentences
 
 if TYPE_CHECKING:
     import threading
@@ -231,25 +230,47 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
 
 
 def _process_partial_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
-    """Transcribe-and-publish only: never touches SpecCache, forward_final,
-    mark_finalized, typing, or the chatbox -- a partial streams to the log
-    (PhrasePartial) alone. The pending flag is cleared right after
-    transcribe, on every path (stop/no-engine/gated-None/exception included),
-    so a coalesced partial is always free to fire again."""
+    """Transcribe the growing utterance buffer and commit any newly-stable
+    complete sentence to the chatbox (its own message, its own id), never
+    finalizing the utterance and never resetting the segmenter buffer (that
+    would clip the next sentence's onset). The pending flag is cleared right
+    after transcribe on every path, so a coalesced partial can always fire
+    again."""
     try:
         result = p._transcribe(job.samples)
     finally:
         with p._partial_lock:
             p._partial_pending = False
     if stop.is_set():
-        return  # abandoned mid-call: discard, publish nothing
+        return
     if result is _NO_ENGINE or result is None:
-        return  # engine swapped out, or quality-gated: nothing to show
+        return
     if stop.is_set() or not p._should_caption():
-        return  # mute/captioning-off raced the transcribe: keep it off the log
+        return
     if job.utterance_id <= p._spec.last_finalized():
-        return  # finalized mid-transcribe: a late partial would restick the row
-    p._bus.publish(PhrasePartial(job.utterance_id, result.text))
+        return
+    _commit_stable_sentences(p, job.utterance_id, result)
+
+
+def _commit_stable_sentences(p: "Pipeline", utterance_id: int, result: "SttResult") -> None:
+    """Commit each complete sentence that is followed by more text AND stable
+    across two consecutive partials (CommitTracker.stable_new). Each committed
+    sentence gets its own distinct id so the chatbox does not coalesce
+    successive sentences and the log shows each as its own row. No
+    request_commit (the buffer must keep growing to preserve the next
+    sentence's onset); no finalize (the utterance is still active)."""
+    cfg = p._config.vad
+    if not cfg.sentence_inject:
+        return
+    followed = followed_complete_sentences(result.text, cfg.sentence_min_words)
+    new = p._commits.stable_new(utterance_id, followed)
+    if not new:
+        return
+    src = resolve_source_language(p, result.language)
+    if src is None:
+        return  # "auto" hit an unregistered language: let the final send it untranslated
+    for sentence in new:
+        _send_caption(p, p._next_message_id(), sentence, src, language=result.language)
 
 
 def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
