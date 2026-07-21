@@ -64,6 +64,25 @@ def test_request_commit_precedes_the_early_send():
     assert env.stt.calls == 1  # the final neither re-sent nor re-transcribed
 
 
+def test_forward_final_valid_src_publishes_enqueues_mt_and_finalizes():
+    # Pins forward_final's observable behavior across the _send_caption
+    # extraction: a normal final (valid src, MT enabled) still publishes
+    # PhraseRecognized, enqueues exactly one _MtJob owning typing, and still
+    # finalizes (bumps last_finalized) even though the helper it now calls
+    # does not itself finalize.
+    env = make_pipeline()
+    recognized = collect(env.bus, PhraseRecognized)
+    result = make_result()
+    pipeline_jobs.forward_final(env.pipeline, 1, result)
+    assert [e.text for e in recognized] == [result.text]
+    assert env.pipeline._mt_queue.qsize() == 1
+    job = env.pipeline._mt_queue.get_nowait()
+    assert isinstance(job, pipeline_jobs._MtJob)
+    assert (job.utterance_id, job.text, job.manage_typing) == (1, result.text, True)
+    assert env.pipeline._typing.is_owned_by_mt(1)
+    assert env.pipeline._spec._last_finalized >= 1
+
+
 def test_forward_final_regated_by_captioning_off_does_not_send():
     env = make_pipeline(mt=None)
     recognized = collect(env.bus, PhraseRecognized)

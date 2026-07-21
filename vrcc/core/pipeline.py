@@ -22,7 +22,7 @@ from vrcc.audio.segmenter import (
 from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_jobs import _NO_ENGINE
-from vrcc.core.pipeline_state import SpecCache, TypingTracker
+from vrcc.core.pipeline_state import CommitTracker, SpecCache, TypingTracker
 
 if TYPE_CHECKING:
     from vrcc.audio.source import AudioSource
@@ -96,8 +96,9 @@ class Pipeline:
         self._stt_thread: threading.Thread | None = None
         self._mt_thread: threading.Thread | None = None
 
-        # Speculative-reuse and typing bookkeeping (each guards its own lock).
+        # Speculative-reuse, sentence-commit and typing bookkeeping (each guards its own lock).
         self._spec = SpecCache()
+        self._commits = CommitTracker()
         self._typing = TypingTracker()
 
         # Caps in-flight partial-transcription jobs at one: set in
@@ -108,7 +109,6 @@ class Pipeline:
         self._partial_pending = False
 
         self._dropped_frames = 0
-
         self._lifecycle_lock = threading.Lock()
         # Decreasing counter for typed-submission ids: -1, -2, ... . Negative
         # so a typed id can never collide with the segmenter's non-negative
@@ -148,6 +148,7 @@ class Pipeline:
             self._stt_queue = queue.Queue(maxsize=JOB_QUEUE_MAX)
             self._mt_queue = queue.Queue(maxsize=JOB_QUEUE_MAX)
             self._spec.reset()
+            self._commits.reset()
             self._typing.reset()
             self._segmenter.reset()
             self._frame_gated = False

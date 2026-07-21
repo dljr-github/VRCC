@@ -187,6 +187,9 @@ def test_translation_disabled_sends_original_directly():
 
 # Source resolution and MT target selection (skipping a target equal to the
 # resolved source, hidden-original delivery) live in test_pipeline_targets.
+# forward_final's observable behavior on a normal (valid src, MT enabled)
+# final -- pinned across the _send_caption extraction -- lives in
+# test_pipeline_gate.py alongside its other direct forward_final tests.
 
 
 # -- behavior 6: mute + master-toggle gating --------------------------------

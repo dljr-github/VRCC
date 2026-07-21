@@ -20,6 +20,7 @@ from vrcc.core.events import (
     PhraseRecognized,
     PhraseTranslated,
 )
+from vrcc.core.pipeline_send import safe_submit, submit_to_chatbox
 from vrcc.core.pipeline_state import _MISSING
 from vrcc.core.sentences import ends_sentence
 
@@ -263,6 +264,34 @@ def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
     )
 
 
+def _send_caption(
+    p, send_id, text, src, *, language="", avg_logprob=0.0, no_speech_prob=0.0
+):
+    """Publish the recognized caption for send_id and route its text to
+    translation (owning typing-off via own_by_mt) or, MT disabled, straight to
+    the chatbox with typing resolved. Does NOT finalize: the caller owns
+    _mark_finalized. `src` is a resolved Language, never None."""
+    p._bus.publish(
+        PhraseRecognized(
+            utterance_id=send_id,
+            text=text,
+            language=language,
+            avg_logprob=avg_logprob,
+            no_speech_prob=no_speech_prob,
+        )
+    )
+    if p._mt is not None and p._config.translate.enabled:
+        # Register MT ownership of typing-off BEFORE enqueueing, so the MT
+        # worker can't resolve it before the exemption (_mark_finalized)
+        # is visible.
+        p._typing.own_by_mt(send_id)
+        _enqueue(p, p._mt_queue, _MtJob(send_id, text, src, manage_typing=True))
+    else:
+        # Translation disabled: original phrase goes straight to chatbox.
+        safe_submit(p, text, [], send_id)
+        p._resolve_typing(send_id)
+
+
 def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") -> None:
     if not p._should_caption():
         # Re-check the gate at send time: enqueue-time gating (handle_final)
@@ -278,21 +307,21 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         _mark_finalized(p, utterance_id)
         return
 
-    p._bus.publish(
-        PhraseRecognized(
-            utterance_id=utterance_id,
-            text=result.text,
-            language=result.language,
-            avg_logprob=result.avg_logprob,
-            no_speech_prob=result.no_speech_prob,
-        )
-    )
     src = resolve_source_language(p, result.language)
 
     if src is None:
         # "auto" detected a Whisper code with no registered Language: the MT
         # engine must never be told the wrong source (garbage translation
         # with no warning). Send the original untranslated instead.
+        p._bus.publish(
+            PhraseRecognized(
+                utterance_id=utterance_id,
+                text=result.text,
+                language=result.language,
+                avg_logprob=result.avg_logprob,
+                no_speech_prob=result.no_speech_prob,
+            )
+        )
         logger.warning(
             "auto-detected language %r has no registered match; sending "
             "original text without translation",
@@ -310,21 +339,15 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         _mark_finalized(p, utterance_id)
         return
 
-    if p._mt is not None and p._config.translate.enabled:
-        # Register MT ownership of typing-off BEFORE enqueueing, so the MT
-        # worker can't resolve it before the exemption (_mark_finalized)
-        # is visible.
-        p._typing.own_by_mt(utterance_id)
-        _enqueue(
-            p,
-            p._mt_queue,
-            _MtJob(utterance_id, result.text, src, manage_typing=True),
-        )
-    else:
-        # Translation disabled: original phrase goes straight to chatbox.
-        safe_submit(p, result.text, [], utterance_id)
-        p._resolve_typing(utterance_id)
-
+    _send_caption(
+        p,
+        utterance_id,
+        result.text,
+        src,
+        language=result.language,
+        avg_logprob=result.avg_logprob,
+        no_speech_prob=result.no_speech_prob,
+    )
     _mark_finalized(p, utterance_id)
 
 
@@ -414,30 +437,6 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
     safe_submit(p, job.text, submitted, job.utterance_id)
     if job.manage_typing:
         p._resolve_typing(job.utterance_id)
-
-
-# -- chatbox submit helpers ---------------------------------------------------
-
-
-def submit_to_chatbox(
-    p: "Pipeline", original: str, translations: list[tuple[str, str]], utterance_id: int
-) -> None:
-    if not p._config.osc.send_to_vrchat:
-        return
-    p._chatbox.submit_message(original, translations, utterance_id)
-
-
-def safe_submit(
-    p: "Pipeline", original: str, translations: list[tuple[str, str]], utterance_id: int
-) -> None:
-    """`submit_to_chatbox` that can't take its caller down: a failure
-    publishes ``AppError("CHATBOX_SEND_FAILED")`` instead of propagating
-    (typing still resolves, GUI-thread `submit_typed` never sees it)."""
-    try:
-        submit_to_chatbox(p, original, translations, utterance_id)
-    except Exception as exc:  # noqa: BLE001 -- a send failure is not fatal
-        logger.exception("chatbox submit failed")
-        p._bus.publish(AppError("CHATBOX_SEND_FAILED", str(exc)))
 
 
 # -- typed text ---------------------------------------------------------------
