@@ -208,15 +208,16 @@ def test_live_partials_disabled_produces_no_commit_no_pending_flag():
 
 
 def test_partial_at_or_below_last_finalized_commits_nothing():
-    # The utterance finalized while this partial was transcribing: its final
-    # already firmed or cleared the row, so a late commit would restick a row
-    # nothing will ever resolve again. Drop it.
+    # The utterance finalized between two partials that would otherwise make
+    # a sentence stable: the guard must drop the second partial outright, not
+    # just happen to see nothing new (that would pass even without the guard).
     env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="This is one. That is two. tail")))
     recognized = collect(env.bus, PhraseRecognized)
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(3, sample()), threading.Event())
+    assert recognized == []  # first sighting: not yet stable, nothing to drop yet
+
     env.pipeline._spec.mark_finalized(3)  # utterances up to 3 are finalized
-    pipeline_jobs._process_partial_job(
-        env.pipeline, _partial_job(3, sample()), threading.Event()
-    )
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(3, sample()), threading.Event())
     assert recognized == []
     assert env.chatbox.submits == []
 

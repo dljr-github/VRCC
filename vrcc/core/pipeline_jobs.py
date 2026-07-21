@@ -19,7 +19,7 @@ from vrcc.core.events import (
     PhraseRecognized,
     PhraseTranslated,
 )
-from vrcc.core.pipeline_send import safe_submit, submit_to_chatbox
+from vrcc.core.pipeline_send import safe_submit
 from vrcc.core.pipeline_state import _MISSING
 from vrcc.core.sentences import ends_sentence, followed_complete_sentences
 
