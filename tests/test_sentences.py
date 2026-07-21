@@ -1,4 +1,4 @@
-from vrcc.core.sentences import ends_sentence
+from vrcc.core.sentences import ends_sentence, split_sentences, followed_complete_sentences
 
 
 def test_terminal_punctuation_true():
@@ -65,3 +65,37 @@ def test_default_min_words_holds_a_mid_sentence_fragment():
     assert ends_sentence("Hello there.", 2)
     assert not ends_sentence("Hello there.", 3)
     assert ends_sentence("Hello there, how are you doing today?", 3)
+
+
+def test_split_sentences_basic():
+    assert split_sentences("Hello there. How are you? I am fine.") == [
+        "Hello there.", "How are you?", "I am fine."]
+
+
+def test_split_sentences_trailing_fragment():
+    assert split_sentences("Hello there. I am test") == ["Hello there.", "I am test"]
+
+
+def test_split_sentences_empty():
+    assert split_sentences("") == []
+    assert split_sentences("   ") == []
+
+
+def test_followed_complete_excludes_last_and_fragments():
+    # "How are you?" is complete but LAST -> excluded; "I am test" is a fragment.
+    assert followed_complete_sentences("Hello there. How are you?", 2) == ["Hello there."]
+    assert followed_complete_sentences("Hello there. I am test", 2) == ["Hello there."]
+    # both non-last completes returned
+    assert followed_complete_sentences("A sentence here. Another one here. Frag", 2) == [
+        "A sentence here.", "Another one here."]
+
+
+def test_followed_complete_min_words_gate():
+    # "Mr." is not a real sentence; even followed, it is not returned.
+    assert followed_complete_sentences("Mr. Smith went home.", 2) == []
+
+
+def test_followed_complete_spaceless_script():
+    # CJK: the word-count gate is waived; the first (followed) sentence returns.
+    out = followed_complete_sentences("こんにちは。元気ですか", 2)
+    assert out == ["こんにちは。"]

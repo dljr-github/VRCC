@@ -61,3 +61,38 @@ def ends_sentence(text: str, min_words: int) -> bool:
     if _is_spaceless_script(body):
         return True
     return len(body.split()) >= min_words
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split ``text`` into sentence segments. Each complete segment ends at a
+    terminal mark (with any trailing closing quotes/brackets kept); a final
+    piece with no terminal mark is the trailing fragment. Whitespace-trimmed,
+    empties dropped."""
+    out: list[str] = []
+    start = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] in _TERMINALS or (text[i] == ";" and _has_greek(text)):
+            j = i + 1
+            while j < n and text[j] in _TRAILING:
+                j += 1
+            piece = text[start:j].strip()
+            if piece:
+                out.append(piece)
+            start = j
+            i = j
+        else:
+            i += 1
+    tail = text[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def followed_complete_sentences(text: str, min_words: int) -> list[str]:
+    """Complete sentences (per ``ends_sentence``) that are NOT the last segment,
+    so more text follows and Whisper has moved past them."""
+    segs = split_sentences(text)
+    return [s for i, s in enumerate(segs)
+            if i < len(segs) - 1 and ends_sentence(s, min_words)]
