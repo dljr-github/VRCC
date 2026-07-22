@@ -109,9 +109,7 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     dlg._sensitivity.setToolTip(
         tr(
             "How easily VRCC picks up your speech. Higher catches quieter or "
-            "softer talking; lower ignores more. This changes detection, not "
-            "loudness (use Microphone boost on the Voice tab to make a quiet "
-            "mic louder)."
+            "softer talking; lower ignores more."
         )
     )
 

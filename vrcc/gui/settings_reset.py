@@ -41,9 +41,9 @@ _RESET_DEFAULTS_TIP = tr_noop(
 )
 _RESET_DEFAULTS_TITLE = tr_noop("Reset tuning to defaults?")
 _RESET_DEFAULTS_BODY = tr_noop(
-    "This puts sensitivity, microphone boost, timing and other tuning back "
-    "to their normal values. Your microphone, languages, models, chatbox "
-    "address and appearance stay as they are."
+    "This puts sensitivity, timing and other tuning back to their normal "
+    "values. Your microphone, languages, models, chatbox address and "
+    "appearance stay as they are."
 )
 
 # Tuning fields reset to AppConfig() defaults; everything else is preserved.
