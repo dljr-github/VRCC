@@ -46,6 +46,13 @@ _NO_ENGINE = object()
 # Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock.
 _PUT_POLL_S = 0.1
 
+# Early-commit confidence floor. A committed sentence is already sent, so a
+# partial must be confident to commit one early: below these a noisy partial
+# can commit a sentence the full-context final would get right (measured on
+# loud babble). Stricter than the STT's own hallucination gate, on purpose.
+_COMMIT_MAX_NO_SPEECH = 0.3
+_COMMIT_MIN_LOGPROB = -0.35
+
 
 @dataclass
 class _SttJob:
@@ -261,6 +268,9 @@ def _commit_stable_sentences(p: "Pipeline", utterance_id: int, result: "SttResul
     cfg = p._config.vad
     if not cfg.sentence_inject:
         return
+    if (result.no_speech_prob >= _COMMIT_MAX_NO_SPEECH
+            or result.avg_logprob <= _COMMIT_MIN_LOGPROB):
+        return  # low-confidence partial: let the whole-utterance final handle it
     followed = followed_complete_sentences(result.text, cfg.sentence_min_words)
     new = p._commits.stable_new(utterance_id, followed)
     if not new:

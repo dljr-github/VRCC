@@ -232,3 +232,48 @@ def test_sentence_inject_disabled_commits_nothing():
     pipeline_jobs._process_partial_job(env.pipeline, _partial_job(1, sample()), stop)
     assert recognized == []
     assert env.chatbox.submits == []
+
+
+# -- 6: confidence gate on the early commit ----------------------------------
+
+
+def test_low_no_speech_confidence_commits_nothing():
+    env = make_pipeline(mt=None, stt=FakeStt(results=[
+        make_result(text="This is one. That is two. tail", no_speech_prob=0.4),
+        make_result(text="This is one. That is two. tail end", no_speech_prob=0.4),
+    ]))
+    recognized = collect(env.bus, PhraseRecognized)
+    stop = threading.Event()
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(1, sample()), stop)
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(1, sample()), stop)
+    assert recognized == []
+    assert env.chatbox.submits == []
+
+
+def test_low_avg_logprob_commits_nothing():
+    env = make_pipeline(mt=None, stt=FakeStt(results=[
+        make_result(text="This is one. That is two. tail", avg_logprob=-0.5),
+        make_result(text="This is one. That is two. tail end", avg_logprob=-0.5),
+    ]))
+    recognized = collect(env.bus, PhraseRecognized)
+    stop = threading.Event()
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(1, sample()), stop)
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(1, sample()), stop)
+    assert recognized == []
+    assert env.chatbox.submits == []
+
+
+def test_confident_partial_just_inside_gate_still_commits():
+    # Regression guard: the gate must not be so strict it blocks the
+    # mild-noise case, only clearly reject the measured wrong-hallucination
+    # range from the brief.
+    env = make_pipeline(mt=None, stt=FakeStt(results=[
+        make_result(text="This is one. That is two. tail", no_speech_prob=0.2, avg_logprob=-0.3),
+        make_result(text="This is one. That is two. tail end", no_speech_prob=0.2, avg_logprob=-0.3),
+    ]))
+    recognized = collect(env.bus, PhraseRecognized)
+    stop = threading.Event()
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(1, sample()), stop)
+    pipeline_jobs._process_partial_job(env.pipeline, _partial_job(1, sample()), stop)
+    assert [e.text for e in recognized] == ["This is one.", "That is two."]
+    assert env.chatbox.submits == [("This is one.", recognized[0].utterance_id), ("That is two.", recognized[1].utterance_id)]
