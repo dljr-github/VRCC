@@ -1,6 +1,5 @@
 """Tests for the denoise live-apply path: Pipeline.set_source_denoise and
-LiveApply.apply_audio_denoise, mirroring the equivalent gain-path coverage in
-test_live_apply.py.
+LiveApply.apply_audio_denoise.
 """
 
 from __future__ import annotations

@@ -27,10 +27,6 @@ class AudioConfig(BaseModel):
     device: str = "auto"
     energy_gate_enabled: bool = False
     energy_threshold: int = 300
-    # Capture gain applied before VAD/STT (dB). auto_gain overrides the fixed
-    # value with a smoothed auto-level toward a target loudness.
-    gain_db: float = 0.0
-    auto_gain: bool = True
     # GTCRN noise suppression before the VAD/STT. On by default, validated on
     # real mic noise. strength is a dry/wet blend in [0,1]; full strength
     # damages short words, so the default is a gentle 0.5.

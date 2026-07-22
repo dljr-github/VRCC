@@ -16,7 +16,6 @@ import sounddevice as sd
 import soxr
 
 from vrcc.audio.denoise import Denoiser
-from vrcc.audio.gain import GainProcessor
 
 logger = logging.getLogger("vrcc.audio")
 
@@ -82,12 +81,10 @@ class MicSource:
         self,
         device: int | None = None,
         stream_factory: Callable[..., object] | None = None,
-        gain: GainProcessor | None = None,
         denoiser: Denoiser | None = None,
     ) -> None:
         self._device = device
         self._stream_factory = stream_factory if stream_factory is not None else sd.InputStream
-        self._gain = gain
         self._denoiser = denoiser
         self._stream = None
         self._on_frame: Callable[[np.ndarray], None] | None = None
@@ -163,11 +160,6 @@ class MicSource:
         stream.start()
         return stream
 
-    def set_gain(self, gain_db: float, auto: bool) -> None:
-        """Update the live gain; no stream restart. No-op if no processor."""
-        if self._gain is not None:
-            self._gain.configure(gain_db, auto)
-
     def set_denoise(self, enabled: bool, strength: float) -> None:
         """Update the live denoiser; no stream restart. No-op if no processor."""
         if self._denoiser is not None:
@@ -182,8 +174,6 @@ class MicSource:
         if self._stream is None:
             if self._denoiser is not None:
                 self._denoiser.reset()
-            if self._gain is not None:
-                self._gain.reset()
             return
         stream, self._stream = self._stream, None
         try:
@@ -193,8 +183,6 @@ class MicSource:
             logger.warning("error stopping audio stream", exc_info=True)
         if self._denoiser is not None:
             self._denoiser.reset()
-        if self._gain is not None:
-            self._gain.reset()
         self._log_suppressed_summary()
 
     def _log_suppressed_summary(self) -> None:
@@ -216,9 +204,6 @@ class MicSource:
                 "summarized on stop)",
                 status,
             )
-
-    def _apply_gain(self, mono: np.ndarray) -> np.ndarray:
-        return self._gain.process(mono) if self._gain is not None else mono
 
     def _apply_denoise(self, mono: np.ndarray) -> np.ndarray:
         return self._denoiser.process(mono) if self._denoiser is not None else mono
@@ -262,13 +247,11 @@ class MicSource:
                 )
 
     def _emit(self, frame: np.ndarray) -> None:
-        # Denoise and gain are applied here, per exact 512-sample frame,
-        # rather than in the callback: the resample-fallback callback delivers
-        # host-sized chunks (~85 ms), which would pace auto-gain far slower
-        # than the direct path's 32 ms frames. Denoise runs first so gain
-        # (fixed or auto) sees the cleaned signal.
+        # Denoise is applied here, per exact 512-sample frame, rather than in
+        # the callback, so both the direct and resample-fallback paths share
+        # one place that touches the samples before on_frame sees them.
         try:
-            self._on_frame(self._apply_gain(self._apply_denoise(frame)))
+            self._on_frame(self._apply_denoise(frame))
         except Exception:
             self._on_frame_errors += 1
             if self._on_frame_errors == 1:

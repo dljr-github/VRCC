@@ -287,8 +287,6 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
     store.config.osc.ip = "10.0.0.5"
     # Tuning to be reset away from defaults.
     store.config.vad.threshold = 0.60
-    store.config.audio.gain_db = 12.0
-    store.config.audio.auto_gain = False
     store.config.vad.sentence_inject = False
     store.config.gui.update_check_enabled = False
     store.config.stt.avg_logprob_gate = -2.5
@@ -305,8 +303,6 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         d = AppConfig()
         # Tuning reset.
         assert store.config.vad.threshold == d.vad.threshold
-        assert store.config.audio.gain_db == d.audio.gain_db
-        assert store.config.audio.auto_gain == d.audio.auto_gain
         assert store.config.vad.sentence_inject == d.vad.sentence_inject
         assert store.config.gui.update_check_enabled == d.gui.update_check_enabled
         assert store.config.audio.denoise_enabled == d.audio.denoise_enabled

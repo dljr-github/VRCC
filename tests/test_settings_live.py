@@ -21,9 +21,6 @@ class _RecordingApply:
         self.calls.append(("audio", device))
         return True
 
-    def apply_audio_gain(self, cfg):
-        self.calls.append(("audio_gain", cfg.gain_db, cfg.auto_gain))
-
     def apply_audio_denoise(self, cfg):
         self.calls.append(("audio_denoise", cfg.denoise_enabled, cfg.denoise_strength))
 
@@ -122,18 +119,6 @@ def test_gui_group_uses_theme_hook_not_the_apply_handle():
     cfg.gui.font_scale = 1.4
     _flush(cfg, apply, theme, applied)
     assert theme.count == 2
-
-
-def test_gain_edit_runs_audio_gain_hook_once_without_source_restart():
-    # The gain fields must apply in place, never through apply_audio_device
-    # (which restarts the source).
-    cfg, apply, theme, applied = _env()
-    cfg.audio.gain_db = 6.0
-    _flush(cfg, apply, theme, applied)
-    assert apply.calls == [("audio_gain", 6.0, True)]
-    # A second flush with no further change must not re-fire the hook.
-    _flush(cfg, apply, theme, applied)
-    assert apply.calls == [("audio_gain", 6.0, True)]
 
 
 def test_denoise_edit_runs_audio_denoise_hook_once_without_source_restart():

@@ -55,7 +55,7 @@ _RESET_FIELDS = {
         "partial_interval_ms",
     ),
     "audio": (
-        "gain_db", "auto_gain", "energy_gate_enabled", "energy_threshold",
+        "energy_gate_enabled", "energy_threshold",
         "denoise_enabled", "denoise_strength",
     ),
     "stt": (
@@ -305,7 +305,6 @@ def _apply_reset_defaults(dlg: "SettingsDialog") -> None:
     dlg._store.save_soon()
     if dlg._apply is not None:
         dlg._apply.apply_vad(dlg._cfg.vad)
-        dlg._apply.apply_audio_gain(dlg._cfg.audio)
         dlg._apply.apply_audio_denoise(dlg._cfg.audio)
     dlg._applied = settings_live.snapshot(dlg._specs())
 
@@ -323,16 +322,6 @@ def _resync_reset_widgets(dlg: "SettingsDialog") -> None:
     if inject is not None:
         inject.setChecked(cfg.vad.sentence_inject)
 
-    gain = getattr(dlg, "_gain_slider", None)
-    if gain is not None:
-        gain.setValue(int(round(cfg.audio.gain_db)))
-    auto = getattr(dlg, "_auto_gain_check", None)
-    if auto is not None:
-        auto.setChecked(cfg.audio.auto_gain)
-    if gain is not None:
-        # The resync runs under _loading, so auto-gain's toggled handler
-        # (which normally flips this) never fires: set it by hand.
-        gain.setEnabled(not cfg.audio.auto_gain)
     check = getattr(dlg, "_denoise_check", None)
     if check is not None:
         check.setChecked(cfg.audio.denoise_enabled)

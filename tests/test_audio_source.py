@@ -206,115 +206,35 @@ class TestMicSourceResampleFallback:
             factory.streams[0].deliver(indata)  # must not raise
 
 
-def test_fallback_path_applies_gain_per_512_frame_not_per_callback_chunk(monkeypatch):
-    # Gain must be applied inside _emit (per exact 512-sample frame), not in
-    # the fallback callback on the raw host-sized chunk: applying it before
-    # the rechunker would pace auto-gain at the host's ~85ms callback rate
-    # instead of the 32ms frame rate the direct path gets.
-    from vrcc.audio import source as source_module
-    from vrcc.audio.gain import GainProcessor
-
-    seen_sizes = []
-
-    class RecordingGain(GainProcessor):
-        def process(self, frame):
-            seen_sizes.append(frame.size)
-            return super().process(frame)
-
-    gain = RecordingGain()
-    gain.configure(0.0, auto=False)
-
-    monkeypatch.setattr(
-        source_module.sd,
-        "query_devices",
-        lambda device, kind: {"default_samplerate": 44100.0, "max_input_channels": 1},
-    )
-    monkeypatch.setattr(source_module.soxr, "resample", lambda x, i, o: x)
-
-    factory = FakeFactory(fail_when=_direct_fail)
-    mic = MicSource(device=None, stream_factory=factory, gain=gain)
-    mic.start(lambda frame: None)
-
-    # 1024 host-rate samples in one callback -> two 512-sample frames after
-    # the (identity-stubbed) resample + rechunk.
-    indata = np.arange(1024, dtype=np.float32).reshape(1024, 1)
-    factory.streams[0].deliver(indata)
-
-    assert seen_sizes == [512, 512]
-
-
-def test_mic_source_applies_gain_to_frames():
-    from vrcc.audio.gain import GainProcessor
-
-    frames = []
-    gain = GainProcessor()
-    gain.configure(6.0206, auto=False)  # ~2x
-
-    captured = {}
-
-    class FakeStream:
-        def __init__(self, **kw):
-            captured["callback"] = kw["callback"]
-        def start(self):
-            pass
-        def stop(self):
-            pass
-        def close(self):
-            pass
-
-    src = MicSource(device=None, stream_factory=FakeStream, gain=gain)
-    src.start(frames.append)
-    cb = captured["callback"]
-    block = np.full((512, 1), 0.1, dtype=np.float32)
-    cb(block, 512, None, None)
-    assert frames, "no frame emitted"
-    assert float(np.sqrt(np.mean(frames[0] ** 2))) > 0.19
-
-
-def test_denoiser_runs_before_gain_in_emit():
+def test_denoiser_runs_in_emit():
     calls = []
     d = Denoiser()
     d.configure(enabled=False, strength=0.5)  # identity, so we only test wiring
-    src = MicSource(gain=None, denoiser=d)
+    src = MicSource(denoiser=d)
     src._on_frame = lambda f: calls.append(f)
     frame = (np.random.default_rng(0).standard_normal(512) * 0.1).astype(np.float32)
     src._emit(frame)
     assert len(calls) == 1 and calls[0].shape == (512,)
 
 
-def test_gain_receives_denoised_output_not_raw_frame():
-    # test_denoiser_runs_before_gain_in_emit uses an identity denoiser and no
-    # gain, so it would pass even with the order reversed. This test uses a
-    # denoiser that applies a distinctive transform and a gain that records
-    # exactly what it was handed, so it fails if gain ever sees the raw frame.
+def test_emit_passes_denoised_output_to_on_frame():
     class FakeDenoiser:
         def process(self, x):
             return x + 1.0
 
-    class FakeGain:
-        def __init__(self):
-            self.received = None
-
-        def process(self, x):
-            self.received = x
-            return x
-
     denoiser = FakeDenoiser()
-    gain = FakeGain()
-    src = MicSource(gain=gain, denoiser=denoiser)
+    src = MicSource(denoiser=denoiser)
     outputs = []
     src._on_frame = lambda f: outputs.append(f)
     frame = np.zeros(512, dtype=np.float32)
     src._emit(frame)
 
-    assert gain.received is not None
-    np.testing.assert_array_equal(gain.received, frame + 1.0)
     np.testing.assert_array_equal(outputs[0], frame + 1.0)
 
 
 def test_set_denoise_updates_processor():
     d = Denoiser()
-    src = MicSource(gain=None, denoiser=d)
+    src = MicSource(denoiser=d)
     src.set_denoise(True, 0.3)
     assert d._enabled is True and abs(d._strength - 0.3) < 1e-9
 

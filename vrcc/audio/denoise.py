@@ -7,8 +7,8 @@ suppression damages short words. The dry copy passes through its own identical
 StreamingSTFT round-trip, so it carries the same delay as the enhanced path and
 the blend aligns with no hard-coded latency. Disabled is a zero-cost identity
 bypass. configure() runs on the GUI thread (plain attribute stores, GIL-atomic);
-process()/reset() run on the audio thread. Single audio-thread caller, same
-lock-free rationale as GainProcessor.
+process()/reset() run on the audio thread. Single audio-thread caller, so no
+lock is needed around the recurrent caches.
 """
 
 from __future__ import annotations

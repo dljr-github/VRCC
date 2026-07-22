@@ -68,14 +68,11 @@ def build_engine_stack(
     vad: StreamingVad | None = None
     if source is None:
         from vrcc.audio.denoise import Denoiser
-        from vrcc.audio.gain import GainProcessor
 
-        gain = GainProcessor()
-        gain.configure(cfg.audio.gain_db, cfg.audio.auto_gain)
         denoiser = Denoiser()
         denoiser.configure(cfg.audio.denoise_enabled, cfg.audio.denoise_strength)
         source = MicSource(
-            _resolve_audio_device(cfg.audio.device), gain=gain, denoiser=denoiser
+            _resolve_audio_device(cfg.audio.device), denoiser=denoiser
         )
 
     vad = StreamingVad(threshold=cfg.vad.threshold)

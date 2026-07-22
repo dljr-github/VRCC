@@ -45,8 +45,6 @@ def live_specs(cfg, apply, text_size_hook: Callable[[], None]) -> tuple[Spec, ..
          lambda: apply.apply_mute_sync(cfg.mute_sync.enabled)),
         ("vad", tuple(getattr(cfg.vad, f) for f in _VAD_FIELDS),
          lambda: apply.apply_vad(cfg.vad)),
-        ("audio_gain", (cfg.audio.gain_db, cfg.audio.auto_gain),
-         lambda: apply.apply_audio_gain(cfg.audio)),
         ("audio_denoise", (cfg.audio.denoise_enabled, cfg.audio.denoise_strength),
          lambda: apply.apply_audio_denoise(cfg.audio)),
         ("gui", (cfg.gui.font_scale,), text_size_hook),

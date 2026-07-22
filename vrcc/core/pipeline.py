@@ -301,10 +301,6 @@ class Pipeline:
             self._resume_pending = False
         return self._started
 
-    def set_source_gain(self, gain_db: float, auto: bool) -> None:
-        """Push a live gain change to the current source (no restart)."""
-        pipeline_source.set_source_gain(self, gain_db, auto)
-
     def set_source_denoise(self, enabled: bool, strength: float) -> None:
         """Push a live denoise change to the current source (no restart)."""
         pipeline_source.set_source_denoise(self, enabled, strength)

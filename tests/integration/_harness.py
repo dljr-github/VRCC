@@ -1,6 +1,6 @@
 """Shared helpers for the real-Whisper integration tests: fixture loading,
-word error rate, the mic-gain path and the two ways audio is fed through the
-real engine stack (segmenter-only finals, and the threaded pipeline).
+word error rate and the two ways audio is fed through the real engine stack
+(segmenter-only finals, and the threaded pipeline).
 
 Nothing here is a test itself; every ``test_*`` module in this package
 imports from it. Keeps each test module focused on one behavior instead of
@@ -19,7 +19,6 @@ from typing import Callable
 
 import numpy as np
 
-from vrcc.audio.gain import GainProcessor
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, VadConfig, default_paths
 from vrcc.core.engine_stack import build_engine_stack
@@ -93,25 +92,6 @@ def wer(ref: str, hyp: str) -> float:
             d[j] = min(d[j] + 1, d[j - 1] + 1, prev + (r[i - 1] != h[j - 1]))
             prev = cur
     return d[len(h)] / len(r)
-
-
-# -- gain path -----------------------------------------------------------------
-
-
-def gain_frames(audio: np.ndarray, auto: bool, scale: float = 1.0) -> np.ndarray:
-    """Apply ``GainProcessor`` to ``audio`` (scaled by ``scale`` first) one
-    512-sample frame at a time, exactly as ``MicSource._emit`` feeds capture
-    frames through gain before they reach the VAD/STT. A trailing partial
-    frame (shorter than 512 samples) is dropped, mirroring the rechunker's
-    remainder carry."""
-    proc = GainProcessor()
-    proc.configure(0.0, auto)
-    scaled = np.asarray(audio, dtype=np.float32) * scale
-    out = [
-        proc.process(scaled[i : i + FRAME].copy())
-        for i in range(0, len(scaled) - FRAME + 1, FRAME)
-    ]
-    return np.concatenate(out) if out else scaled[:0]
 
 
 # -- segmenter-only finals -------------------------------------------------

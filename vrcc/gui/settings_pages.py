@@ -223,7 +223,7 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     reset.clicked.connect(lambda: settings_reset.confirm_and_reset(dlg))
     form.addRow("", reset)
 
-    # A separate reset for the tuning knobs (VAD/gain/STT/MT quality gates):
+    # A separate reset for the tuning knobs (VAD/denoise/STT/MT quality gates):
     # it never touches the personal choices the recommended reset also spares.
     reset_defaults = QPushButton(settings_reset.reset_defaults_button_text())
     reset_defaults.setToolTip(settings_reset.reset_defaults_button_tooltip())
@@ -323,7 +323,6 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     dlg._noise_slider = slider
     form.addRow(tr("Background noise level"), gate_row)
 
-    settings_audio.build_gain_controls(dlg, form)
     settings_audio.build_denoise_controls(dlg, form)
 
     # Advanced fine-tuning (quality gates + prompt).
