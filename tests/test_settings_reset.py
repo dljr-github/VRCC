@@ -287,7 +287,7 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
     store.config.osc.ip = "10.0.0.5"
     # Tuning to be reset away from defaults.
     store.config.vad.threshold = 0.60
-    store.config.vad.sentence_inject = False
+    store.config.vad.sentence_inject = True
     store.config.gui.update_check_enabled = False
     store.config.stt.avg_logprob_gate = -2.5
     store.config.stt.no_speech_gate = 0.9

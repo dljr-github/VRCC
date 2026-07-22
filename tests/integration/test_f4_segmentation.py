@@ -1,10 +1,12 @@
-"""Regression guard for the F4 sentence-injection fix: at the DEFAULT VAD
-config, three sentences separated by short gaps must not get chopped into a
+"""Regression guard for the F4 sentence-injection fix: with sentence_inject
+on, three sentences separated by short gaps must not get chopped into a
 speculative fragment mid-clause (``sentence_min_words=3`` stops a comma pause
 from reading as a complete sentence on its own). Runs the real threaded
 ``Pipeline`` (not just the segmenter), since the bug this guards against was
 a timing interaction between ``sentence_inject`` and
 ``speculative_silence_ms`` that only showed up under the threaded pacing.
+sentence_inject is off by default, so this test enables it explicitly to
+keep covering that interaction.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ def _gap(seconds: float) -> np.ndarray:
     return np.zeros(int(SAMPLE_RATE * seconds), dtype=np.float32)
 
 
-def test_f4_does_not_oversegment_at_default(stt):
+def test_f4_does_not_oversegment_with_sentence_inject(stt):
     sent0 = load_fixture("sent0.wav")
     sent1 = load_fixture("sent1.wav")
     sent2 = load_fixture("sent2.wav")
@@ -50,7 +52,7 @@ def test_f4_does_not_oversegment_at_default(stt):
         audio,
         stt,
         drain_s=3.5,
-        sentence_inject=default_vad.sentence_inject,
+        sentence_inject=True,
         sentence_min_words=default_vad.sentence_min_words,
         speculative_silence_ms=default_vad.speculative_silence_ms,
     )

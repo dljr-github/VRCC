@@ -427,7 +427,7 @@ def test_new_feature_defaults():
     cfg = AppConfig()
     assert cfg.vad.threshold == 0.35
     assert cfg.vad.silence_threshold == 0.25
-    assert cfg.vad.sentence_inject is True
+    assert cfg.vad.sentence_inject is False
     assert cfg.vad.sentence_min_words == 3
     assert cfg.gui.update_check_enabled is True
     assert cfg.vad.partial_interval_ms == 300

@@ -17,7 +17,7 @@ from vrcc.audio.segmenter import (
     SegSpeechStart,
 )
 from vrcc.core import pipeline_jobs
-from vrcc.core.config import AppConfig, OscConfig
+from vrcc.core.config import AppConfig, OscConfig, VadConfig
 from vrcc.core.events import AppError, MicLevel, PhraseRecognized, PhraseTranslated, SpeechStarted
 from vrcc.core.pipeline_jobs import _SttJob
 
@@ -380,7 +380,8 @@ def _run_speculative(env, uid: int, s) -> None:
 
 
 def test_speculative_sentence_is_sent_early_and_commits():
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _CommitRecorder()
     env.pipeline._segmenter = seg
     s = sample()
@@ -390,7 +391,8 @@ def test_speculative_sentence_is_sent_early_and_commits():
 
 
 def test_final_after_early_send_does_not_duplicate():
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _CommitRecorder()
     env.pipeline._segmenter = seg
     s = sample()
@@ -409,7 +411,8 @@ def test_gated_early_inject_composes_with_final_dedupe_no_double_send():
     # before that call skips the speculative send, but the guard still ends
     # up set (mark_emitted_early runs unconditionally after), so the
     # natural final racing the commit doesn't send either.
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _CommitRecorder()
     env.pipeline._segmenter = seg
     s = sample()

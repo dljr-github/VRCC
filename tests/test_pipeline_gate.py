@@ -11,6 +11,7 @@ import threading
 
 from vrcc.audio.segmenter import SegDiscard
 from vrcc.core import pipeline_jobs
+from vrcc.core.config import AppConfig, VadConfig
 from vrcc.core.events import PhraseRecognized
 from vrcc.core.pipeline_jobs import _SttJob
 
@@ -45,7 +46,8 @@ def test_request_commit_precedes_the_early_send():
     # frame), so cutting first stops it appending the next sentence's onset to
     # the still-open buffer during that block, which would otherwise drop the
     # onset. The emitted-early guard is still set after, so the dedupe holds.
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hello there now.")))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
     seg = _OrderedCommitRecorder(env.chatbox.log)
     env.pipeline._segmenter = seg
     s = sample()
@@ -80,7 +82,8 @@ def test_should_inject_sentence_blocks_on_low_avg_logprob():
 
 
 def test_should_inject_sentence_allows_confident_result_just_inside_gate():
-    env = make_pipeline()
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(config=cfg)
     result = make_result(text="Hello there now.", no_speech_prob=0.2, avg_logprob=-0.3)
     assert pipeline_jobs._should_inject_sentence(env.pipeline, result) is True
 

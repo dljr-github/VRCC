@@ -12,6 +12,7 @@ import threading
 from types import SimpleNamespace
 
 from vrcc.core import pipeline_jobs
+from vrcc.core.config import AppConfig, VadConfig
 from vrcc.core.pipeline_jobs import _SttJob
 from vrcc.core.pipeline_state import TypingTracker
 
@@ -67,7 +68,8 @@ def test_final_after_early_send_does_not_resolve_typing_while_mt_owns():
     # Translation active (the default fixture): the natural final racing the
     # early-injected commit must not turn typing off while the MT job it
     # queued (own_by_mt, in forward_final) still owns utterance 1.
-    env = make_pipeline(stt=FakeStt(result=make_result(text="Hello there now.")))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
     env.pipeline._segmenter = SimpleNamespace(request_commit=lambda uid: None)
     s = sample()
     env.pipeline._begin_typing(1)

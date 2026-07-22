@@ -49,9 +49,12 @@ class VadConfig(BaseModel):
     min_utterance_ms: int = 500
     pre_roll_ms: int = 150
     max_utterance_s: float = 28.0
-    # Emit a sentence to the chatbox as soon as a speculative transcription
-    # ends in terminal punctuation, instead of waiting for the full stop.
-    sentence_inject: bool = True
+    # Off by default: captions come from whole-utterance finalization, and a
+    # speaker who pauses between sentences still gets one caption per sentence
+    # because each pause ends its own utterance. When True, emit a sentence to
+    # the chatbox as soon as a speculative transcription ends in terminal
+    # punctuation, instead of waiting for the full stop.
+    sentence_inject: bool = False
     # Words required before sentence_inject fires early. A gate of 2 lets a
     # mid-sentence pause (a comma, a breath) leave behind a short punctuated
     # fragment that reads as a complete sentence and gets injected too soon.

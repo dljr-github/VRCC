@@ -43,7 +43,8 @@ def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> boo
 
 
 def test_two_stable_partials_commit_two_sentences_with_distinct_ids():
-    env = make_pipeline(mt=None, stt=FakeStt(results=[
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(results=[
         make_result(text="This is one. That is two. tail"),
         make_result(text="This is one. That is two. tail end"),
     ]))
@@ -63,7 +64,8 @@ def test_two_stable_partials_commit_two_sentences_with_distinct_ids():
 
 
 def test_later_partial_does_not_recommit_already_committed_sentences():
-    env = make_pipeline(mt=None, stt=FakeStt(results=[
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(results=[
         make_result(text="This is one. That is two. tail"),
         make_result(text="This is one. That is two. tail end"),
         make_result(text="This is one. That is two. Now a third one. tail"),
@@ -85,7 +87,8 @@ def test_later_partial_does_not_recommit_already_committed_sentences():
 
 
 def test_partial_does_not_finalize_or_send_on_first_sighting():
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="hello there")))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="hello there")))
     recognized = collect(env.bus, PhraseRecognized)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
@@ -104,7 +107,8 @@ def test_captioning_off_mid_transcribe_commits_nothing():
     # captioning off while the second (now-stable) partial is blocked inside
     # transcribe. The commit must not go through even though the sentence
     # would otherwise have stabilized.
-    env = make_pipeline(mt=None, stt=FakeStt(results=[
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(results=[
         make_result(text="This is one. tail"),
         make_result(text="This is one. tail more"),
     ]))
@@ -131,7 +135,8 @@ def test_captioning_off_mid_transcribe_commits_nothing():
 
 
 def test_second_partial_while_one_pending_is_coalesced():
-    env = make_pipeline(stt=FakeStt())
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(config=cfg, stt=FakeStt())
     env.stt.gate.clear()  # block inside transcribe so the pending flag stays set
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
@@ -145,7 +150,8 @@ def test_second_partial_while_one_pending_is_coalesced():
 
 
 def test_pending_flag_clears_after_processing_so_a_later_partial_can_fire():
-    env = make_pipeline(stt=FakeStt(result=make_result(text="hello")))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(config=cfg, stt=FakeStt(result=make_result(text="hello")))
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegPartial(utterance_id=1, samples=sample()))
         assert _wait_until(lambda: env.stt.calls == 1)
@@ -159,7 +165,8 @@ def test_partial_exception_clears_pending_flag_and_later_partial_is_not_coalesce
     # First transcribe raises; the second succeeds -> proves the pending flag
     # was cleared on the exception path, so it does not wedge live captions
     # for the rest of the run (see _process_partial_job's try/finally).
-    env = make_pipeline(mt=None, stt=FakeStt(results=[RuntimeError("stt boom"), make_result(text="hi")]))
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(results=[RuntimeError("stt boom"), make_result(text="hi")]))
     errors = collect(env.bus, AppError)
     recognized = collect(env.bus, PhraseRecognized)
     with running(env.pipeline):
@@ -204,7 +211,8 @@ def test_partial_at_or_below_last_finalized_commits_nothing():
 def test_partial_for_newer_utterance_still_commits():
     # The guard is strictly <= last_finalized: a partial for a later utterance
     # (the current one) must still be free to commit a stable sentence.
-    env = make_pipeline(mt=None, stt=FakeStt(results=[
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(results=[
         make_result(text="This is one. tail"),
         make_result(text="This is one. tail more"),
     ]))
@@ -267,7 +275,8 @@ def test_confident_partial_just_inside_gate_still_commits():
     # Regression guard: the gate must not be so strict it blocks the
     # mild-noise case, only clearly reject the measured wrong-hallucination
     # range from the brief.
-    env = make_pipeline(mt=None, stt=FakeStt(results=[
+    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
+    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(results=[
         make_result(text="This is one. That is two. tail", no_speech_prob=0.2, avg_logprob=-0.3),
         make_result(text="This is one. That is two. tail end", no_speech_prob=0.2, avg_logprob=-0.3),
     ]))
