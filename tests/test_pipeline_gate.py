@@ -64,6 +64,27 @@ def test_request_commit_precedes_the_early_send():
     assert env.stt.calls == 1  # the final neither re-sent nor re-transcribed
 
 
+def test_should_inject_sentence_blocks_on_high_no_speech_prob():
+    # Measured hallucination case: a complete-looking sentence at
+    # no_speech_prob 0.562 must not commit early; the whole-utterance final
+    # is left to handle it.
+    env = make_pipeline()
+    result = make_result(text="Hello there now.", no_speech_prob=0.562)
+    assert pipeline_jobs._should_inject_sentence(env.pipeline, result) is False
+
+
+def test_should_inject_sentence_blocks_on_low_avg_logprob():
+    env = make_pipeline()
+    result = make_result(text="Hello there now.", avg_logprob=-0.5)
+    assert pipeline_jobs._should_inject_sentence(env.pipeline, result) is False
+
+
+def test_should_inject_sentence_allows_confident_result_just_inside_gate():
+    env = make_pipeline()
+    result = make_result(text="Hello there now.", no_speech_prob=0.2, avg_logprob=-0.3)
+    assert pipeline_jobs._should_inject_sentence(env.pipeline, result) is True
+
+
 def test_forward_final_valid_src_publishes_enqueues_mt_and_finalizes():
     # Pins forward_final's observable behavior across the _send_caption
     # extraction: a normal final (valid src, MT enabled) still publishes

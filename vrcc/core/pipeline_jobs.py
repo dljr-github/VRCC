@@ -284,12 +284,16 @@ def _commit_stable_sentences(p: "Pipeline", utterance_id: int, result: "SttResul
 
 def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
     """Whether a speculative result is a complete sentence worth sending now
-    (feature enabled, non-empty result, terminal punctuation past the
-    minimum word count)."""
+    (feature enabled, non-empty result, confident partial, terminal
+    punctuation past the minimum word count). A low-confidence pause
+    snapshot is left for the whole-utterance final, which is more accurate
+    in noise."""
     cfg = p._config.vad
     return (
         cfg.sentence_inject
         and result is not None
+        and result.no_speech_prob < _COMMIT_MAX_NO_SPEECH
+        and result.avg_logprob > _COMMIT_MIN_LOGPROB
         and ends_sentence(result.text, cfg.sentence_min_words)
     )
 
