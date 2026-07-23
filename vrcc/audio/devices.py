@@ -88,7 +88,7 @@ def _preferred_index(candidates: list[tuple[int, str]]) -> int | None:
 
 
 def _first_or_wasapi_index(candidates: list[tuple[int, str]]) -> int:
-    """Pre-existing selection: the WASAPI index if any, else the first seen."""
+    """WASAPI index if any, else the first seen."""
     for index, hostapi_name in candidates:
         if "WASAPI" in hostapi_name.upper():
             return index

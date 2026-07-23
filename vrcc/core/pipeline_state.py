@@ -72,13 +72,6 @@ class SpecCache:
         with self._lock:
             return self._cache.pop(key, _MISSING)
 
-    def last_finalized(self) -> int:
-        """The newest finalized utterance id (0 before any finalize). Read
-        under the lock so a partial job can drop itself when its utterance
-        finalized while it was still transcribing."""
-        with self._lock:
-            return self._last_finalized
-
     def mark_finalized(self, utterance_id: int) -> int:
         """Bound the caches: drop everything for utterances at or below the
         newest finalized one (their speculatives can never be reused now).
@@ -144,14 +137,6 @@ class TypingTracker:
         """Register MT ownership of typing-off (exempt from orphan pruning)."""
         with self._lock:
             self._owned_by_mt.add(utterance_id)
-
-    def is_owned_by_mt(self, utterance_id: int) -> bool:
-        """Whether a pending MT job currently owns this utterance's
-        typing-off (see own_by_mt): a caller about to resolve typing for a
-        different reason must skip it while true, so it doesn't turn the
-        indicator off out from under the MT job that still owns it."""
-        with self._lock:
-            return utterance_id in self._owned_by_mt
 
     def prune_orphans(self, cutoff: int) -> tuple[set[int], bool]:
         """Defense in depth: the segmenter invariant resolves every in-flight

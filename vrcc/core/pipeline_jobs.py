@@ -154,10 +154,10 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     if result is _MISSING:
         result = p._transcribe(job.samples)
         if result is _NO_ENGINE:
-            _finalize_dropped(p, job.utterance_id)  # engine swapped out: resolve typing and bound the caches
+            _finalize_dropped(p, job.utterance_id)  # engine swapped out mid-flight
             return
     if stop.is_set():
-        _finalize_dropped(p, job.utterance_id)  # abandoned: resolve typing and bound the caches
+        _finalize_dropped(p, job.utterance_id)  # abandoned mid-call
         return
     forward_final(p, job.utterance_id, result)
 

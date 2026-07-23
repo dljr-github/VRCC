@@ -36,7 +36,7 @@ def test_forward_final_valid_src_publishes_enqueues_mt_and_finalizes():
     job = env.pipeline._mt_queue.get_nowait()
     assert isinstance(job, pipeline_jobs._MtJob)
     assert (job.utterance_id, job.text, job.manage_typing) == (1, result.text, True)
-    assert env.pipeline._typing.is_owned_by_mt(1)
+    assert 1 in env.pipeline._typing._owned_by_mt
     assert env.pipeline._spec._last_finalized >= 1
 
 
