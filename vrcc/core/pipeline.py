@@ -19,9 +19,9 @@ import numpy as np
 from vrcc.audio.segmenter import (
     SegDiscard, SegFinal, SegLevel, SegSpeculative, SegSpeechStart,
 )
-from vrcc.core import languages, pipeline_frames, pipeline_jobs
-from vrcc.core.events import AppError, MicLevel, PhraseRecognized, SpeechStarted
-from vrcc.core.pipeline_jobs import _NO_ENGINE, _MtJob
+from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source, pipeline_typed
+from vrcc.core.events import AppError, MicLevel, SpeechStarted
+from vrcc.core.pipeline_jobs import _NO_ENGINE
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
 
 if TYPE_CHECKING:
@@ -41,8 +41,6 @@ FRAME_QUEUE_MAX = 100
 # STT/MT job queues: small so a slow engine backpressures up the chain.
 JOB_QUEUE_MAX = 4
 JOIN_TIMEOUT_S = 2.0
-# Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock.
-_PUT_POLL_S = 0.1
 
 
 class Pipeline:
@@ -103,8 +101,10 @@ class Pipeline:
         self._typing = TypingTracker()
 
         self._dropped_frames = 0
-
         self._lifecycle_lock = threading.Lock()
+        # Survives start()/stop() so a restart never reissues a still-live id.
+        self._message_seq = 0
+        self._message_lock = threading.Lock()
         # Current run's stop event: replaced each start() so a worker abandoned
         # by a timed-out stop() join keeps its own (set) event and can't be
         # un-stopped by a restart. Passed to workers as a thread arg.
@@ -202,6 +202,21 @@ class Pipeline:
     def captioning_enabled(self) -> bool:
         return self._captioning
 
+    @property
+    def mt_active(self) -> bool:
+        """Whether a live MT engine is installed right now. ``translate.
+        enabled`` alone can't tell a genuinely running engine from one that
+        never loaded or was swapped out mid-session; a caller that needs to
+        know whether a row will actually reach a translated state must check
+        both."""
+        return self._mt is not None
+
+    @property
+    def segmenter(self) -> "Segmenter":
+        """The run's segmenter. Exposed so pipeline_jobs can request a commit
+        (early sentence injection) without reaching for the private attribute."""
+        return self._segmenter
+
     def set_captioning(self, enabled: bool) -> None:
         """Master captioning toggle; when off, the segmenter worker drops
         frames (nothing is buffered) and STT jobs aren't created."""
@@ -259,6 +274,26 @@ class Pipeline:
             self.start()
             self._resume_pending = False
         return self._started
+
+    def reinit_audio_and_resume(self, reinit, make_source) -> bool:
+        """Stop capture, run ``reinit`` while no source stream is open, then
+        resume on a freshly built source (built AFTER reinit so it resolves
+        against the refreshed device list). Mirrors restart_source's
+        stop()/start() intent-preservation. Returns whether capture runs after."""
+        want_running = self._started or self._resume_pending
+        if self._started:
+            self.stop()
+        reinit()
+        self._source = make_source()
+        if want_running:
+            self._resume_pending = True
+            self.start()
+            self._resume_pending = False
+        return self._started
+
+    def set_source_denoise(self, enabled: bool, strength: float) -> None:
+        """Push a live denoise change to the current source (no restart)."""
+        pipeline_source.set_source_denoise(self, enabled, strength)
 
     @staticmethod
     def _spawn(target, name: str, *args) -> threading.Thread:
@@ -412,37 +447,20 @@ class Pipeline:
 
     def submit_typed(self, text: str) -> bool:
         """Send typed text straight through translation to the chatbox,
-        bypassing STT and mute/captioning gating (utterance id 0). Returns False
+        bypassing STT and mute/captioning gating (each call gets its own
+        negative utterance id; see ``_next_message_id``). Returns False
         (``PIPELINE_NOT_RUNNING``) when not started, keeping the text uncaptured."""
-        if not text or not text.strip():
-            return False
-        if not self._started:
-            self._bus.publish(
-                AppError(
-                    "PIPELINE_NOT_RUNNING",
-                    "Engines are still loading. Try again in a moment",
-                )
-            )
-            return False
-        src_cfg = self._config.stt.source_language
-        src = languages.get("English") if src_cfg == "auto" else languages.get(src_cfg)
+        return pipeline_typed.submit_typed(self, text)
 
-        self._bus.publish(
-            PhraseRecognized(
-                utterance_id=0,
-                text=text,
-                language=src.whisper,
-                avg_logprob=0.0,
-                no_speech_prob=0.0,
-            )
-        )
-        if self._mt is not None and self._config.translate.enabled:
-            self._enqueue(self._mt_queue, _MtJob(0, text, src, manage_typing=False))
-        else:
-            # Runs on the caller's (GUI) thread: never propagate a chatbox
-            # failure back into it.
-            pipeline_jobs.safe_submit(self, text, [], 0)
-        return True
+    def _next_message_id(self) -> int:
+        """A fresh negative id for a send not tied to a segmenter utterance
+        (typed text). Never collides with a positive segmenter id and never
+        repeats, so its translated()/sent() can't land on a different
+        in-flight row. Allocated under a lock so a burst of typed sends from
+        the GUI thread never reuses an id."""
+        with self._message_lock:
+            self._message_seq -= 1
+            return self._message_seq
 
     # -- typing helpers ------------------------------------------------------
 
@@ -455,35 +473,11 @@ class Pipeline:
             logger.warning("chatbox.set_typing raised; ignoring", exc_info=True)
 
     def _begin_typing(self, utterance_id: int) -> None:
-        self._typing.begin(utterance_id)
-        self._set_typing(True)
+        self._typing.begin(utterance_id, self._set_typing)  # see TypingTracker
 
     def _resolve_typing(self, utterance_id: int) -> None:
-        if self._typing.resolve(utterance_id):
-            self._set_typing(False)
+        self._typing.resolve(utterance_id, self._set_typing)
 
-    # -- shared-state helpers ----------------------------------------------
-
-    def _mark_finalized(self, utterance_id: int) -> None:
-        """Bound the speculative caches, then defensively prune typing
-        orphans below the cutoff (see TypingTracker.prune_orphans)."""
-        cutoff = self._spec.mark_finalized(utterance_id)
-        orphaned, emptied = self._typing.prune_orphans(cutoff)
-        if orphaned:
-            logger.warning(
-                "pruned orphaned typing entries %s (segmenter invariant "
-                "violated?)",
-                sorted(orphaned),
-            )
-        if emptied:
-            self._set_typing(False)
-
-    def _enqueue(self, q: queue.Queue, job) -> None:
-        """Put a job, applying backpressure (blocking) but waking to drop it if
-        stop() is requested, so a full downstream queue never deadlocks stop."""
-        while not self._stop_flag.is_set():
-            try:
-                q.put(job, timeout=_PUT_POLL_S)
-                return
-            except queue.Full:
-                continue
+    # _mark_finalized (SpecCache/TypingTracker bookkeeping) and _enqueue
+    # (backpressured queue put) live in pipeline_jobs alongside the job code
+    # that is their only caller.

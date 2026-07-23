@@ -9,15 +9,13 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
-from pathlib import Path
 
-from vrcc.audio.segmenter import Segmenter
-from vrcc.audio.source import AudioSource, MicSource
-from vrcc.audio.vad import StreamingVad
+from vrcc import __version__
+from vrcc.audio.source import MicSource
 from vrcc.core import hardware
 from vrcc.core.bus import EventBus
-from vrcc.core.config import ConfigStore, Paths, default_paths
+from vrcc.core.config import ConfigStore, default_paths
+from vrcc.core.engine_stack import build_engine_stack
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
 from vrcc.core.logs import setup_logging
@@ -28,107 +26,24 @@ from vrcc.core.startup import (
     models_ready as _models_ready,
     resolve_audio_device as _resolve_audio_device,
 )
+from vrcc.core.updates import UpdateChecker
 from vrcc.download.manager import DownloadManager
 from vrcc.i18n import tr
-from vrcc.osc.chatbox import ChatboxSender
 from vrcc.osc.mutesync import MuteSync
 from vrcc.osc.vrchat_detect import VrchatDetector
 from vrcc.stt import create_stt_engine
-from vrcc.stt.engine import SttEngine
 from vrcc.translate.engine import TranslateEngine
 from vrcc.translate.registry import MT_MODELS
 
 logger = logging.getLogger("vrcc.app")
 
-# Sentinel: "argument not supplied" vs an explicit None (mt/mute are
-# legitimately None when translation / mute sync is disabled).
-_UNSET = object()
 
+def _make_source_with_denoise(config, device_cfg: str) -> MicSource:
+    from vrcc.audio.denoise import Denoiser
 
-@dataclass
-class EngineStack:
-    """Everything :func:`run` needs to operate the app, built by
-    :func:`build_engine_stack`. A plain data holder -- it starts nothing."""
-
-    pipeline: Pipeline
-    source: AudioSource
-    segmenter: Segmenter
-    vad: StreamingVad | None
-    stt: SttEngine
-    mt: TranslateEngine | None
-    chatbox: ChatboxSender
-    mute: MuteSync | None
-
-
-def build_engine_stack(
-    config_store: ConfigStore,
-    bus: EventBus,
-    paths: Paths,
-    *,
-    stt_engine=None,
-    mt_engine=_UNSET,
-    chatbox=None,
-    mute=_UNSET,
-    source=None,
-) -> EngineStack:
-    """Assemble the full engine stack from config, or from injected fakes.
-
-    Every component is built for real unless overridden. ``mt`` is ``None``
-    when ``translate.enabled`` is False; ``mute`` is ``None`` when
-    ``mute_sync.enabled`` is False. Imports no Qt and starts no threads/servers.
-    """
-    cfg = config_store.config
-
-    vad: StreamingVad | None = None
-    if source is None:
-        source = MicSource(_resolve_audio_device(cfg.audio.device))
-
-    vad = StreamingVad(threshold=cfg.vad.threshold)
-    segmenter = Segmenter(cfg.vad, vad.prob)
-
-    if stt_engine is None:
-        stt_engine = create_stt_engine(
-            cfg.stt, paths.models_dir / "whisper" / cfg.stt.model, bus
-        )
-
-    if mt_engine is _UNSET:
-        spec = MT_MODELS.get(cfg.translate.model) if cfg.translate.enabled else None
-        if cfg.translate.enabled and spec is None:
-            logger.warning(
-                "translate.model %r is not a known MT model; disabling "
-                "translation for this session",
-                cfg.translate.model,
-            )
-        if spec is not None:
-            mt_engine = TranslateEngine(
-                spec, paths.models_dir / "mt" / spec.id, cfg.translate, bus
-            )
-        else:
-            mt_engine = None
-
-    if chatbox is None:
-        chatbox = ChatboxSender(cfg.osc, bus)
-
-    if mute is _UNSET:
-        if cfg.mute_sync.enabled:
-            mute = MuteSync(cfg.mute_sync, cfg.osc.ip, bus)
-        else:
-            mute = None
-
-    pipeline = Pipeline(
-        cfg, bus, source, segmenter, stt_engine, mt_engine, chatbox, mute
-    )
-
-    return EngineStack(
-        pipeline=pipeline,
-        source=source,
-        segmenter=segmenter,
-        vad=vad,
-        stt=stt_engine,
-        mt=mt_engine,
-        chatbox=chatbox,
-        mute=mute,
-    )
+    denoiser = Denoiser()
+    denoiser.configure(config.audio.denoise_enabled, config.audio.denoise_strength)
+    return MicSource(_resolve_audio_device(device_cfg), denoiser=denoiser)
 
 
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
@@ -150,14 +65,17 @@ def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
         return False
 
 
-def _swap_main_window(old, make_window, detector):
+def _swap_main_window(old, make_window, detector, mute):
     """Replace ``old`` with a freshly built MainWindow and carry its runtime
     state across: nothing replays bus events for a late subscriber, so the
     fresh window would otherwise sit on "Starting" and "VRChat: checking"
     until the next transition. The capture label carries verbatim; a red
     failure must stay red whether or not the pipeline ever started, and
     paused-vs-listening re-derives from the captioning toggle, which the
-    fresh window reads from the pipeline at construction."""
+    fresh window reads from the pipeline at construction. ``mute`` is the
+    live MuteSync coordinator (``None`` if mute sync was never enabled);
+    republishing it alongside the detector means a language change while
+    muted doesn't leave the rebuilt window's mute chip hidden."""
     old.disconnect_bridge()
     fresh = make_window()
     fresh.restoreGeometry(old.saveGeometry())
@@ -165,6 +83,8 @@ def _swap_main_window(old, make_window, detector):
     fresh._render_log()
     fresh.set_capture_status(old._capture_ok, old._capture_reason)
     detector.republish()
+    if mute is not None:
+        mute.republish()
     fresh.show()
     old.hide()
     old.deleteLater()
@@ -213,6 +133,10 @@ def run(portable: bool = False, verbose: bool = False) -> int:
 
     bus = EventBus()
     bridge = BusBridge(bus)
+    # One-shot daemon-thread checker; no teardown. Built before make_window
+    # so the manual "Check for updates" callback it closes over is ready by
+    # the time window = make_window() runs, below.
+    updater = UpdateChecker(bus, __version__)
     dm = DownloadManager(paths.models_dir, bus)
 
     if not _models_ready(store.config, dm):
@@ -432,6 +356,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             mt_available=stack.mt is not None,
             download_manager=dm,
             on_model_change=on_model_change,
+            on_check_updates=lambda: updater.check(announce_no_update=True),
         )
 
     # Qt-free façade for live Settings changes: the dialog pushes audio/VAD/OSC/
@@ -442,7 +367,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         chatbox=stack.chatbox,
         bus=bus,
         reload_engine=reload_engine,
-        make_source=lambda device_cfg: MicSource(_resolve_audio_device(device_cfg)),
+        make_source=lambda device_cfg: _make_source_with_denoise(store.config, device_cfg),
         make_mute=lambda: MuteSync(
             store.config.mute_sync, store.config.osc.ip, bus
         ),
@@ -454,7 +379,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     def rebuild_main_window() -> None:
         nonlocal window
         apply_ui_language(app, store.config.gui.ui_language)
-        window = _swap_main_window(window, make_window, detector)
+        window = _swap_main_window(window, make_window, detector, live_apply.mute)
 
     # Run the driver-floor check before the loader (its flag drives resolve()'s
     # CPU fallback) but after the window subscribes to the bridge, so a
@@ -471,6 +396,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     # whether the chatbox is actually reachable (OSC has no delivery ack).
     detector = VrchatDetector(bus)
     detector.start()
+
+    if store.config.gui.update_check_enabled:
+        updater.check(announce_no_update=False)
 
     exit_code = 1
     try:

@@ -216,10 +216,12 @@ speed.
 1. Start VRChat and enable OSC: **Action menu → Options → OSC → Enabled**.
 2. Start VRCC. Pick your microphone, source language and up to three
    target languages.
-3. Talk. Utterances are segmented automatically (Silero VAD), transcribed,
-   translated, and sent to the chatbox, throttled to stay inside VRChat's
-   chatbox rate limit so continuous speech never triggers the in-game
-   spam mute.
+3. Talk. Your mic is cleaned of steady background noise first (on by
+   default), then utterances are segmented automatically (Silero VAD),
+   transcribed, translated, and sent to the chatbox, throttled to stay
+   inside VRChat's chatbox rate limit so continuous speech never triggers
+   the in-game spam mute. Turn it down or off under **Settings → Voice
+   recognition → Reduce background noise**.
 4. **Typed messages:** the text box at the bottom of the main window sends
    typed text through the same translate → chatbox path (useful when you'd
    rather not speak).
@@ -328,6 +330,8 @@ downloads; check that a model's license fits your use:
 - Whisper models: **MIT** (OpenAI weights, SYSTRAN CT2 conversions).
 - **Parakeet** (`parakeet-tdt-0.6b-v3`): **CC-BY-4.0** (NVIDIA weights,
   istupakov ONNX export).
+- **GTCRN** (the *Reduce background noise* denoiser, bundled not
+  downloaded): **MIT** (Xiaobin Rong, https://github.com/Xiaobin-Rong/gtcrn).
 
 ## Troubleshooting
 

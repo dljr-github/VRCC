@@ -9,7 +9,7 @@ import pytest
 
 from vrcc.audio.segmenter import (
     FRAME,
-    HYSTERESIS_GAP,
+    MIN_GAP,
     SegDiscard,
     SegFinal,
     SegLevel,
@@ -175,9 +175,10 @@ class TestMaxUtteranceForceFinal:
     def test_force_final_reuses_pending_speculative_identity(self):
         # Behavior 8 must hold on the force-final path too: a speculative
         # fires (1 silence frame with speculative_silence_ms=32), then only
-        # dead-band frames (0.4 -- NOT speech) pad the buffer to the max;
-        # no speech frame occurred between speculative and final, so the
-        # forced SegFinal must reuse the speculative array by identity.
+        # dead-band frames (between the silence bar and the speech threshold,
+        # NOT speech) pad the buffer to the max; no speech frame occurred
+        # between speculative and final, so the forced SegFinal must reuse the
+        # speculative array by identity.
         cfg = VadConfig(
             pre_roll_ms=0,
             speculative_silence_ms=32,   # 1 frame
@@ -185,7 +186,8 @@ class TestMaxUtteranceForceFinal:
             min_utterance_ms=32,
             max_utterance_s=6 * 32 / 1000,  # 6 frames
         )
-        vad = ScriptedVad([0.9, 0.9, 0.9, 0.1, 0.4, 0.4])
+        db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
+        vad = ScriptedVad([0.9, 0.9, 0.9, 0.1, db, db])
         seg = Segmenter(cfg, vad)
 
         spec = None
@@ -267,11 +269,12 @@ class TestFrameCopySafety:
 class TestHysteresisDeadBand:
     def test_dead_band_frames_do_not_move_silence_run_while_active(self):
         cfg = VadConfig()
-        # speech start, 5 silence frames, 3 dead-band frames (0.4, between
-        # 0.35 and 0.5), then 6 more silence frames -> speculative should
-        # fire at the 11th *classified-silence* frame (5 + 6), unaffected
-        # by the 3 dead-band frames in between.
-        probs = [0.9] + [0.1] * 5 + [0.4] * 3 + [0.1] * 6
+        db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
+        # speech start, 5 silence frames, 3 dead-band frames (between the
+        # silence bar and the speech threshold), then 6 more silence frames ->
+        # speculative should fire at the 8th *classified-silence* frame (5 + 3),
+        # unaffected by the 3 dead-band frames in between.
+        probs = [0.9] + [0.1] * 5 + [db] * 3 + [0.1] * 6
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
 
@@ -290,11 +293,12 @@ class TestHysteresisDeadBand:
             events = seg.process(_frame())
             if _by_type(events, SegSpeculative):
                 spec_at = i
-        assert spec_at == 5  # 6th of these frames (0-based index 5)
+        assert spec_at == 2  # 3rd of these frames (0-based index 2)
 
     def test_dead_band_frames_do_not_trigger_speech_start_while_idle(self):
         cfg = VadConfig()
-        vad = ScriptedVad([0.4] * 4)
+        db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
+        vad = ScriptedVad([db] * 4)
         seg = Segmenter(cfg, vad)
         for _ in range(4):
             events = seg.process(_frame())
@@ -311,11 +315,12 @@ class TestHysteresisDeadBand:
         assert len(_by_type(events, SegSpeechStart)) == 1
 
     def test_vad_exactly_at_lower_bound_is_dead_band(self):
-        # Boundary: silence is STRICTLY below `threshold - 0.15`. Feed the
-        # exact same float expression the implementation computes, so the
-        # comparison is x < x == False regardless of float representation.
+        # Boundary: silence is STRICTLY below the decoupled silence bar
+        # min(silence_threshold, threshold - MIN_GAP). Feed the exact same
+        # float expression the implementation computes, so the comparison
+        # is x < x == False regardless of float representation.
         cfg = VadConfig()
-        boundary = cfg.threshold - HYSTERESIS_GAP
+        boundary = min(cfg.silence_threshold, cfg.threshold - MIN_GAP)
         vad = ScriptedVad([0.9, boundary, boundary, boundary - 1e-6])
         seg = Segmenter(cfg, vad)
         seg.process(_frame())  # speech start
@@ -329,31 +334,70 @@ class TestHysteresisDeadBand:
 class TestConfigFrameCounts:
     def test_default_config_frame_counts_match_spec(self):
         seg = Segmenter(VadConfig(), ScriptedVad([]))
-        assert seg._speculative_frames == 11
+        assert seg._speculative_frames == 8
         assert seg._finalize_frames == 19
         assert seg._min_utterance_frames == 16
         assert seg._preroll_frames == 5
         assert seg._max_utterance_frames == 875
 
 
+class TestPrerollBound:
+    def test_preroll_ring_uses_full_length(self):
+        # pre_roll 400ms (13 frames) > speculative_silence 250ms (8 frames):
+        # the idle ring must hold the full pre-roll the user asked for so a
+        # fresh onset is not clipped.
+        cfg = VadConfig(
+            pre_roll_ms=400, speculative_silence_ms=250, finalize_silence_ms=800
+        )
+        seg = Segmenter(cfg, ScriptedVad([]))
+        assert seg._speculative_frames == 8
+        assert seg._finalize_frames == 25
+        assert seg._preroll_frames == 13
+        assert seg._preroll.maxlen == 13
+
+    def test_preroll_shorter_than_speculative(self):
+        cfg = VadConfig(pre_roll_ms=150, speculative_silence_ms=250)
+        seg = Segmenter(cfg, ScriptedVad([]))
+        assert seg._preroll_frames == 5
+
+    def test_reconfigure_uses_full_preroll_length(self):
+        seg = Segmenter(VadConfig(), ScriptedVad([]))
+        seg.reconfigure(VadConfig(pre_roll_ms=400, speculative_silence_ms=250))
+        assert seg._preroll_frames == 13
+        assert seg._preroll.maxlen == 13
+
+    def test_idle_onset_seed_uses_full_preroll(self):
+        # With pre_roll 400ms (13 frames) the idle->speech buffer seed must use
+        # up to the full 13 pre-roll frames, not the speculative-window clamp.
+        cfg = VadConfig(pre_roll_ms=400, speculative_silence_ms=250)
+        vad = ScriptedVad([0.1] * 13 + [0.9])
+        seg = Segmenter(cfg, vad)
+        for _ in range(13):
+            seg.process(_frame())
+        seg.process(_frame())
+        assert seg._preroll_frames == 13
+        assert len(seg._buffer) == 14  # 13 pre-roll + the triggering frame
+
+
 class TestReconfigure:
     # frame_ms = 32 at 16 kHz/512; these ms values round to distinct frame
-    # counts so a stale threshold would be caught.
+    # counts so a stale threshold would be caught. pre_roll is kept <=
+    # speculative_silence so the clamp in _apply_config is a no-op here.
     _NEW = dict(
-        speculative_silence_ms=64,   # 2 frames
-        finalize_silence_ms=128,     # 4 frames
+        speculative_silence_ms=96,   # 3 frames
+        finalize_silence_ms=160,     # 5 frames
         min_utterance_ms=96,         # 3 frames
-        pre_roll_ms=96,              # 3 frames
+        pre_roll_ms=64,              # 2 frames
         max_utterance_s=1.6,         # 50 frames
     )
 
     def test_reconfigure_recomputes_every_frame_count(self):
         seg = Segmenter(VadConfig(), ScriptedVad([]))
         seg.reconfigure(VadConfig(**self._NEW))
-        assert seg._speculative_frames == 2
-        assert seg._finalize_frames == 4
+        assert seg._speculative_frames == 3
+        assert seg._finalize_frames == 5
         assert seg._min_utterance_frames == 3
-        assert seg._preroll_frames == 3
+        assert seg._preroll_frames == 2
         assert seg._max_utterance_frames == 50
 
     def test_reconfigure_updates_cfg_so_threshold_applies(self):

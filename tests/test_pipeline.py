@@ -184,6 +184,9 @@ def test_translation_disabled_sends_original_directly():
 
 # Source resolution and MT target selection (skipping a target equal to the
 # resolved source, hidden-original delivery) live in test_pipeline_targets.
+# forward_final's observable behavior on a normal (valid src, MT enabled)
+# final -- pinned across the _send_caption extraction -- lives in
+# test_pipeline_gate.py alongside its other direct forward_final tests.
 
 
 # -- behavior 6: mute + master-toggle gating --------------------------------
@@ -238,6 +241,10 @@ def test_captioning_starts_off_by_default():
     # the user enables captioning explicitly each launch.
     env = make_pipeline(captioning=None)
     assert env.pipeline.captioning_enabled is False
+
+
+# forward_final's send-time re-check of this same gate (catching a mute or
+# captioning-off that lands after enqueue) lives in test_pipeline_gate.py.
 
 
 def test_seg_final_before_enabling_creates_no_stt_job():

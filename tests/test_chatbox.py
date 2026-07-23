@@ -398,6 +398,31 @@ def test_set_typing_sends_immediately_and_dedupes_repeats():
     assert [e.typing for e in typing_events] == [True, False]
 
 
+def test_set_typing_publishes_while_typing_lock_still_held():
+    # The publish must happen INSIDE set_typing's `with self._typing_lock`
+    # block (mirroring the OSC send), so two threads' publish order can't
+    # invert relative to their actual send order. A non-blocking acquire
+    # from inside the subscriber proves the lock is still held at publish
+    # time (a plain Lock, not reentrant: acquire() only succeeds if free).
+    cfg = make_cfg()
+    bus = EventBus()
+    clock = FakeClock()
+    sender, _client = make_sender(cfg, bus, clock)
+
+    lock_was_held = []
+
+    def on_typing_changed(_event):
+        acquired = sender._typing_lock.acquire(blocking=False)
+        lock_was_held.append(not acquired)
+        if acquired:
+            sender._typing_lock.release()
+
+    bus.subscribe(TypingStateChanged, on_typing_changed)
+    sender.set_typing(True)
+
+    assert lock_was_held == [True]
+
+
 def test_reconfigure_swaps_client_atomically():
     cfg = make_cfg()
     bus = EventBus()

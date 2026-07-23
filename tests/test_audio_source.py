@@ -1,5 +1,6 @@
-"""Tests for microphone capture: device enumeration, the resample-fallback
-open path, and one integration-marked test exercising real audio capture.
+"""Tests for microphone capture: the resample-fallback open path, and one
+integration-marked test exercising real audio capture. Device enumeration
+lives in ``test_audio_devices.py``.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 import sounddevice as sd
 
+from vrcc.audio.denoise import Denoiser
 from vrcc.audio.source import FRAME_LEN, SAMPLE_RATE, MicSource
 
 
@@ -69,126 +71,6 @@ class FakeFactory:
 
 def _direct_fail(kwargs: dict) -> bool:
     return kwargs.get("samplerate") == SAMPLE_RATE and kwargs.get("blocksize") == FRAME_LEN
-
-
-class TestListInputDevices:
-    def test_filters_output_only_devices(self, monkeypatch):
-        from vrcc.audio import devices
-
-        fake_devices = [
-            {"index": 0, "name": "Mic A", "hostapi": 0, "max_input_channels": 2},
-            {"index": 1, "name": "Speakers", "hostapi": 0, "max_input_channels": 0},
-        ]
-        fake_hostapis = [{"name": "MME"}]
-        monkeypatch.setattr(devices.sd, "query_devices", lambda: fake_devices)
-        monkeypatch.setattr(devices.sd, "query_hostapis", lambda: fake_hostapis)
-
-        result = devices.list_input_devices()
-
-        assert result == [(0, "Mic A")]
-
-    def test_dedupes_by_name_preferring_wasapi(self, monkeypatch):
-        from vrcc.audio import devices
-
-        fake_devices = [
-            {"index": 0, "name": "Logitech Mic", "hostapi": 0, "max_input_channels": 2},
-            {"index": 1, "name": "Logitech Mic", "hostapi": 1, "max_input_channels": 2},
-            {"index": 2, "name": "Logitech Mic", "hostapi": 2, "max_input_channels": 2},
-        ]
-        fake_hostapis = [
-            {"name": "MME"},
-            {"name": "Windows DirectSound"},
-            {"name": "Windows WASAPI"},
-        ]
-        monkeypatch.setattr(devices.sd, "query_devices", lambda: fake_devices)
-        monkeypatch.setattr(devices.sd, "query_hostapis", lambda: fake_hostapis)
-
-        result = devices.list_input_devices()
-
-        assert result == [(2, "Logitech Mic")]
-
-    def test_dedupes_by_name_falls_back_to_first_seen_without_wasapi(self, monkeypatch):
-        from vrcc.audio import devices
-
-        fake_devices = [
-            {"index": 0, "name": "Some Mic", "hostapi": 0, "max_input_channels": 2},
-            {"index": 1, "name": "Some Mic", "hostapi": 1, "max_input_channels": 2},
-        ]
-        fake_hostapis = [{"name": "MME"}, {"name": "Windows DirectSound"}]
-        monkeypatch.setattr(devices.sd, "query_devices", lambda: fake_devices)
-        monkeypatch.setattr(devices.sd, "query_hostapis", lambda: fake_hostapis)
-
-        result = devices.list_input_devices()
-
-        assert result == [(0, "Some Mic")]
-
-    def test_preserves_first_seen_order_across_distinct_names(self, monkeypatch):
-        from vrcc.audio import devices
-
-        fake_devices = [
-            {"index": 0, "name": "Mic B", "hostapi": 0, "max_input_channels": 1},
-            {"index": 1, "name": "Mic A", "hostapi": 0, "max_input_channels": 1},
-        ]
-        fake_hostapis = [{"name": "MME"}]
-        monkeypatch.setattr(devices.sd, "query_devices", lambda: fake_devices)
-        monkeypatch.setattr(devices.sd, "query_hostapis", lambda: fake_hostapis)
-
-        result = devices.list_input_devices()
-
-        assert result == [(0, "Mic B"), (1, "Mic A")]
-
-    def test_never_raises_on_sounddevice_error(self, monkeypatch):
-        from vrcc.audio import devices
-
-        def boom():
-            raise OSError("PortAudio not initialized")
-
-        monkeypatch.setattr(devices.sd, "query_devices", boom)
-
-        assert devices.list_input_devices() == []
-
-    def test_never_raises_when_hostapi_lookup_fails(self, monkeypatch):
-        from vrcc.audio import devices
-
-        fake_devices = [
-            {"index": 0, "name": "Mic A", "hostapi": 0, "max_input_channels": 2},
-        ]
-        monkeypatch.setattr(devices.sd, "query_devices", lambda: fake_devices)
-
-        def boom():
-            raise OSError("no hostapis")
-
-        monkeypatch.setattr(devices.sd, "query_hostapis", boom)
-
-        assert devices.list_input_devices() == []
-
-
-class TestDefaultInputDevice:
-    def test_returns_the_input_index(self, monkeypatch):
-        from vrcc.audio import devices
-
-        monkeypatch.setattr(devices.sd.default, "device", [3, 7])
-
-        assert devices.default_input_device() == 3
-
-    def test_returns_none_when_negative(self, monkeypatch):
-        from vrcc.audio import devices
-
-        monkeypatch.setattr(devices.sd.default, "device", [-1, -1])
-
-        assert devices.default_input_device() is None
-
-    def test_never_raises_on_sounddevice_error(self, monkeypatch):
-        from vrcc.audio import devices
-
-        class ExplodingDefault:
-            @property
-            def device(self):
-                raise OSError("no default device")
-
-        monkeypatch.setattr(devices, "sd", type("SD", (), {"default": ExplodingDefault()}))
-
-        assert devices.default_input_device() is None
 
 
 class TestMicSourceResampleFallback:
@@ -322,6 +204,39 @@ class TestMicSourceResampleFallback:
         indata = np.zeros((512, 1), dtype=np.float32)
         with caplog.at_level(logging.ERROR, logger="vrcc.audio"):
             factory.streams[0].deliver(indata)  # must not raise
+
+
+def test_denoiser_runs_in_emit():
+    calls = []
+    d = Denoiser()
+    d.configure(enabled=False, strength=0.5)  # identity, so we only test wiring
+    src = MicSource(denoiser=d)
+    src._on_frame = lambda f: calls.append(f)
+    frame = (np.random.default_rng(0).standard_normal(512) * 0.1).astype(np.float32)
+    src._emit(frame)
+    assert len(calls) == 1 and calls[0].shape == (512,)
+
+
+def test_emit_passes_denoised_output_to_on_frame():
+    class FakeDenoiser:
+        def process(self, x):
+            return x + 1.0
+
+    denoiser = FakeDenoiser()
+    src = MicSource(denoiser=denoiser)
+    outputs = []
+    src._on_frame = lambda f: outputs.append(f)
+    frame = np.zeros(512, dtype=np.float32)
+    src._emit(frame)
+
+    np.testing.assert_array_equal(outputs[0], frame + 1.0)
+
+
+def test_set_denoise_updates_processor():
+    d = Denoiser()
+    src = MicSource(denoiser=d)
+    src.set_denoise(True, 0.3)
+    assert d._enabled is True and abs(d._strength - 0.3) < 1e-9
 
 
 class TestMicSourceHardware:

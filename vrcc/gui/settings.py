@@ -113,6 +113,12 @@ class SettingsDialog(QDialog):
         # the Speed/Quality presets can't tune (greedy onnx_asr decoders).
         self._update_mode_for_model = lambda: None
 
+        # No refresh_input_devices() call here: that is a full PortAudio
+        # _terminate()/_initialize() plus pipeline stop()/start(), which can
+        # freeze the GUI for seconds and start() calls segmenter.reset(),
+        # silently discarding a mid-sentence utterance. The mic combo below
+        # is already filled cheaply (list_input_devices(), no reinit); a
+        # hotplugged device appears only after the explicit Refresh button.
         self._build_ui()
         self._loading = False
 

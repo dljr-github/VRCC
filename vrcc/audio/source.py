@@ -15,6 +15,8 @@ import numpy as np
 import sounddevice as sd
 import soxr
 
+from vrcc.audio.denoise import Denoiser
+
 logger = logging.getLogger("vrcc.audio")
 
 FRAME_LEN = 512
@@ -79,9 +81,11 @@ class MicSource:
         self,
         device: int | None = None,
         stream_factory: Callable[..., object] | None = None,
+        denoiser: Denoiser | None = None,
     ) -> None:
         self._device = device
         self._stream_factory = stream_factory if stream_factory is not None else sd.InputStream
+        self._denoiser = denoiser
         self._stream = None
         self._on_frame: Callable[[np.ndarray], None] | None = None
         self._rechunker = _Rechunker(FRAME_LEN)
@@ -156,8 +160,20 @@ class MicSource:
         stream.start()
         return stream
 
+    def set_denoise(self, enabled: bool, strength: float) -> None:
+        """Update the live denoiser; no stream restart. No-op if no processor."""
+        if self._denoiser is not None:
+            self._denoiser.configure(enabled, strength)
+
     def stop(self) -> None:
+        # A restart must not inherit stale recurrent/smoothing state from the
+        # prior run's stream. stop() runs on the caller's thread while the
+        # audio callback may still be mid-flight on the audio thread, so the
+        # resets wait until the stream is fully stopped and closed; resetting
+        # earlier could interleave with a callback's in-progress cache update.
         if self._stream is None:
+            if self._denoiser is not None:
+                self._denoiser.reset()
             return
         stream, self._stream = self._stream, None
         try:
@@ -165,6 +181,8 @@ class MicSource:
             stream.close()
         except Exception:
             logger.warning("error stopping audio stream", exc_info=True)
+        if self._denoiser is not None:
+            self._denoiser.reset()
         self._log_suppressed_summary()
 
     def _log_suppressed_summary(self) -> None:
@@ -186,6 +204,9 @@ class MicSource:
                 "summarized on stop)",
                 status,
             )
+
+    def _apply_denoise(self, mono: np.ndarray) -> np.ndarray:
+        return self._denoiser.process(mono) if self._denoiser is not None else mono
 
     def _direct_callback(self, indata, frames, time, status) -> None:
         # indata is PortAudio-owned/reused; _to_mono's 2-D branch allocates
@@ -226,8 +247,11 @@ class MicSource:
                 )
 
     def _emit(self, frame: np.ndarray) -> None:
+        # Denoise is applied here, per exact 512-sample frame, rather than in
+        # the callback, so both the direct and resample-fallback paths share
+        # one place that touches the samples before on_frame sees them.
         try:
-            self._on_frame(frame)
+            self._on_frame(self._apply_denoise(frame))
         except Exception:
             self._on_frame_errors += 1
             if self._on_frame_errors == 1:

@@ -162,6 +162,58 @@ def test_language_code_for_japanese_source_language():
 
 
 # --------------------------------------------------------------------------
+# _build_kwargs(): Traditional Chinese initial_prompt bias
+# --------------------------------------------------------------------------
+
+def test_traditional_chinese_gets_nonempty_seed_initial_prompt():
+    eng = SttEngine(_cfg(source_language="Chinese Traditional"), MODEL_DIR, EventBus())
+
+    kwargs = eng._build_kwargs()
+
+    assert kwargs["initial_prompt"]
+
+
+def test_simplified_chinese_initial_prompt_left_unchanged():
+    eng = SttEngine(_cfg(source_language="Chinese Simplified"), MODEL_DIR, EventBus())
+
+    kwargs = eng._build_kwargs()
+
+    assert kwargs["initial_prompt"] is None
+
+
+def test_english_initial_prompt_left_unchanged():
+    eng = SttEngine(_cfg(source_language="English"), MODEL_DIR, EventBus())
+
+    kwargs = eng._build_kwargs()
+
+    assert kwargs["initial_prompt"] is None
+
+
+def test_traditional_seed_prompt_differs_from_simplified_and_empty():
+    trad = SttEngine(
+        _cfg(source_language="Chinese Traditional"), MODEL_DIR, EventBus()
+    )._build_kwargs()["initial_prompt"]
+    simp = SttEngine(
+        _cfg(source_language="Chinese Simplified"), MODEL_DIR, EventBus()
+    )._build_kwargs()["initial_prompt"]
+
+    assert trad not in (None, "")
+    assert trad != simp
+
+
+def test_user_initial_prompt_preserved_verbatim_for_traditional_chinese():
+    eng = SttEngine(
+        _cfg(source_language="Chinese Traditional", initial_prompt="VRChat, avatar"),
+        MODEL_DIR,
+        EventBus(),
+    )
+
+    kwargs = eng._build_kwargs()
+
+    assert kwargs["initial_prompt"] == "VRChat, avatar"
+
+
+# --------------------------------------------------------------------------
 # transcribe(): result assembly + quality gates
 # --------------------------------------------------------------------------
 

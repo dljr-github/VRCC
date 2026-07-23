@@ -39,6 +39,14 @@ _CPU_FALLBACK = ("cpu", 0, "int8")
 # warm_up() transcribes this much silence (0.5s at faster-whisper's 16kHz).
 _WARM_UP_SAMPLES = 8000
 
+# Whisper's "zh" code covers both Chinese scripts, and its output drifts
+# toward Simplified glyphs even when the source is Traditional. Seeding
+# initial_prompt with Traditional-only glyphs is the only script-bias lever
+# that adds no dependency. This is best-effort: Whisper may still emit some
+# Simplified glyphs in the output, and a proper fix would post-convert the
+# result with OpenCC.
+_TRADITIONAL_SEED_PROMPT = "以下是繁體中文的內容。"
+
 
 def _is_cuda_unusable(exc: Exception) -> bool:
     """True if ``exc`` reads like CUDA being unusable: out of VRAM, or a
@@ -180,11 +188,12 @@ class SttEngine:
 
     def _build_kwargs(self) -> dict:
         """Assemble the ``transcribe()`` kwargs per the task's exact contract."""
-        language = (
+        source = (
             None
             if self._cfg.source_language == "auto"
-            else get(self._cfg.source_language).whisper
+            else get(self._cfg.source_language)
         )
+        language = source.whisper if source is not None else None
         kwargs = {
             "language": language,
             "beam_size": self._cfg.beam_size,
@@ -193,12 +202,23 @@ class SttEngine:
             "without_timestamps": self._cfg.without_timestamps,
             "word_timestamps": False,
             "vad_filter": False,
-            "initial_prompt": self._cfg.initial_prompt or None,
+            "initial_prompt": self._cfg.initial_prompt or self._traditional_seed(source),
         }
         if self._cfg.no_repeat_ngram_size > 0:
             kwargs["no_repeat_ngram_size"] = self._cfg.no_repeat_ngram_size
         kwargs.update(self._cfg.extra_transcribe_kwargs)  # user wins, last word
         return kwargs
+
+    @staticmethod
+    def _traditional_seed(source) -> str | None:
+        """The Traditional-Chinese seed prompt when ``source`` is the
+        Traditional entry (its ``nllb`` code carries the "Hant" script
+        subtag), else ``None``. Only used as a fallback when the user has
+        not set their own ``initial_prompt``.
+        """
+        if source is not None and source.nllb.endswith("_Hant"):
+            return _TRADITIONAL_SEED_PROMPT
+        return None
 
     def _run_transcribe(self, samples: np.ndarray, kwargs: dict):
         """Call ``model.transcribe``, falling back to CPU int8 once when CUDA

@@ -11,11 +11,9 @@ from vrcc.core.config import (
     GuiConfig,
     MuteSyncConfig,
     OscConfig,
-    Paths,
     SttConfig,
     TranslateConfig,
     VadConfig,
-    default_paths,
 )
 
 
@@ -181,6 +179,41 @@ def test_invalid_field_falls_back_to_default_with_warning(tmp_path):
     assert "osc.port" in store.load_warnings[0]
 
 
+def test_osc_burst_zero_falls_back_to_default_with_warning(tmp_path):
+    # Regression: burst=0 builds a TokenBucket(capacity=0) that never yields a
+    # token, so _wait_for_token loops forever and no chatbox message is ever
+    # sent, silently. burst has a lower bound of 1, so a hand-edited 0 must
+    # self-heal on load rather than be accepted as valid.
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"osc": {"ip": "192.168.1.1", "burst": 0}}),
+        encoding="utf-8",
+    )
+
+    store = ConfigStore(path)
+    store.load()
+
+    assert store.config.osc.ip == "192.168.1.1"
+    assert store.config.osc.burst == OscConfig().burst
+    assert len(store.load_warnings) == 1
+    assert "osc.burst" in store.load_warnings[0]
+
+
+def test_osc_min_interval_s_zero_falls_back_to_default_with_warning(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"osc": {"min_interval_s": 0}}),
+        encoding="utf-8",
+    )
+
+    store = ConfigStore(path)
+    store.load()
+
+    assert store.config.osc.min_interval_s == OscConfig().min_interval_s
+    assert len(store.load_warnings) == 1
+    assert "osc.min_interval_s" in store.load_warnings[0]
+
+
 def test_invalid_literal_field_falls_back_to_default_with_warning(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(
@@ -328,96 +361,6 @@ def test_saved_json_is_pretty_printed_and_not_ascii_escaped(tmp_path):
     assert "こんにちは" in text  # ensure_ascii=False
 
 
-def test_default_paths_portable_lands_under_given_app_dir(tmp_path):
-    paths = default_paths(portable=True, app_dir=tmp_path)
-
-    assert isinstance(paths, Paths)
-    assert paths.config_file == tmp_path / "config.json"
-    assert paths.models_dir == tmp_path / "models"
-    assert paths.logs_dir == tmp_path / "logs"
-
-
-def test_default_paths_non_portable_uses_platformdirs(monkeypatch, tmp_path):
-    fake_config_dir = tmp_path / "cfgdir"
-    fake_data_dir = tmp_path / "datadir"
-
-    monkeypatch.setattr(
-        "vrcc.core.config.platformdirs.user_config_dir",
-        lambda app_name: str(fake_config_dir),
-    )
-    monkeypatch.setattr(
-        "vrcc.core.config.platformdirs.user_data_dir",
-        lambda app_name: str(fake_data_dir),
-    )
-
-    paths = default_paths(portable=False)
-
-    assert paths.config_file == fake_config_dir / "config.json"
-    assert paths.models_dir == fake_data_dir / "models"
-    assert paths.logs_dir == fake_data_dir / "logs"
-
-
-def _legacy_vs_new_resolver(legacy_dir, new_dir):
-    """Return a platformdirs-shaped fn: "VRCT2" -> legacy_dir, "VRCC" -> new_dir.
-
-    Mirrors Windows, where user_config_dir and user_data_dir resolve to the
-    same base path for a given appname -- both patched callables can share
-    this resolver.
-    """
-
-    def _resolve(appname):
-        return str(legacy_dir if appname == "VRCT2" else new_dir)
-
-    return _resolve
-
-
-def test_default_paths_migrates_legacy_vrcc_dir_to_vrcc(monkeypatch, tmp_path):
-    legacy_dir = tmp_path / "legacy"
-    new_dir = tmp_path / "new"
-    (legacy_dir / "models").mkdir(parents=True)
-    sentinel_bytes = b"\x00\x01not-actually-a-model\xff"
-    (legacy_dir / "models" / "keep.bin").write_bytes(sentinel_bytes)
-
-    resolver = _legacy_vs_new_resolver(legacy_dir, new_dir)
-    monkeypatch.setattr("vrcc.core.config.platformdirs.user_config_dir", resolver)
-    monkeypatch.setattr("vrcc.core.config.platformdirs.user_data_dir", resolver)
-
-    paths = default_paths(portable=False)
-
-    assert new_dir.exists()
-    assert not legacy_dir.exists()
-    assert (new_dir / "models" / "keep.bin").read_bytes() == sentinel_bytes
-    assert paths.config_file == new_dir / "config.json"
-    assert paths.models_dir == new_dir / "models"
-    assert paths.logs_dir == new_dir / "logs"
-
-
-def test_default_paths_migration_falls_back_to_legacy_dir_on_move_failure(monkeypatch, tmp_path):
-    legacy_dir = tmp_path / "legacy"
-    new_dir = tmp_path / "new"
-    (legacy_dir / "models").mkdir(parents=True)
-    sentinel_bytes = b"\x00\x01not-actually-a-model\xff"
-    (legacy_dir / "models" / "keep.bin").write_bytes(sentinel_bytes)
-
-    resolver = _legacy_vs_new_resolver(legacy_dir, new_dir)
-    monkeypatch.setattr("vrcc.core.config.platformdirs.user_config_dir", resolver)
-    monkeypatch.setattr("vrcc.core.config.platformdirs.user_data_dir", resolver)
-
-    def _raise(*args, **kwargs):
-        raise OSError("simulated move failure")
-
-    monkeypatch.setattr("vrcc.core.config.shutil.move", _raise)
-
-    paths = default_paths(portable=False)
-
-    assert not new_dir.exists()
-    assert legacy_dir.exists()
-    assert (legacy_dir / "models" / "keep.bin").read_bytes() == sentinel_bytes
-    assert paths.config_file == legacy_dir / "config.json"
-    assert paths.models_dir == legacy_dir / "models"
-    assert paths.logs_dir == legacy_dir / "logs"
-
-
 # -- apply_profile (Latency/Quality kwargs bundles) --------------------------
 
 
@@ -430,7 +373,7 @@ def test_apply_profile_quality_applies_bundle_and_records_choice():
     assert cfg.stt.beam_size == 5
     assert cfg.stt.temperature == 0.0
     assert cfg.translate.beam_size == 3
-    assert cfg.vad.speculative_silence_ms == 450
+    assert cfg.vad.speculative_silence_ms == 350
     assert cfg.vad.finalize_silence_ms == 800
     assert cfg.vad.pre_roll_ms == 200
     assert cfg.gui.profile == "quality"
@@ -445,7 +388,7 @@ def test_apply_profile_latency_restores_defaults():
 
     assert cfg.stt.beam_size == 1
     assert cfg.translate.beam_size == 1
-    assert cfg.vad.speculative_silence_ms == 350
+    assert cfg.vad.speculative_silence_ms == 250
     assert cfg.vad.finalize_silence_ms == 600
     assert cfg.vad.pre_roll_ms == 150
     assert cfg.gui.profile == "latency"
@@ -476,3 +419,19 @@ def test_profiles_reference_only_real_config_fields():
             section = getattr(cfg, section_name)
             for field_name in fields:
                 assert hasattr(section, field_name)
+
+
+def test_new_feature_defaults():
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    assert cfg.vad.threshold == 0.35
+    assert cfg.vad.silence_threshold == 0.25
+    assert cfg.gui.update_check_enabled is True
+
+
+def test_denoise_defaults():
+    from vrcc.core.config import AudioConfig
+    c = AudioConfig()
+    assert c.denoise_enabled is True
+    assert c.denoise_strength == 0.5

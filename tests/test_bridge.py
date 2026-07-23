@@ -25,6 +25,7 @@ from vrcc.core.events import (
     MuteChanged,
     PhraseRecognized,
     PhraseTranslated,
+    UpdateCheckResult,
 )
 from vrcc.gui.bridge import BusBridge
 
@@ -53,6 +54,7 @@ class _Collector(QObject):
         self.download: list[object] = []
         self.engine: list[object] = []
         self.error: list[object] = []
+        self.update_result: list[object] = []
         bridge.mic_level.connect(self._on_mic)
         bridge.phrase_recognized.connect(self.recognized.append)
         bridge.phrase_translated.connect(self.translated.append)
@@ -61,6 +63,7 @@ class _Collector(QObject):
         bridge.download_progress.connect(self.download.append)
         bridge.engine_state.connect(self.engine.append)
         bridge.app_error.connect(self.error.append)
+        bridge.update_result.connect(self.update_result.append)
 
     def _on_mic(self, rms: float, vad: float) -> None:
         self.mic.append((rms, vad))
@@ -195,6 +198,17 @@ def test_app_error_delivered(qapp):
     _publish_all(bus, [event])
 
     assert _pump_until(lambda: c.error == [event])
+
+
+def test_update_result_delivered(qapp):
+    bus = EventBus()
+    bridge = BusBridge(bus)
+    c = _Collector(bridge)
+    event = UpdateCheckResult(available=True, latest="1.2.0", url="https://example.com")
+
+    _publish_all(bus, [event])
+
+    assert _pump_until(lambda: c.update_result == [event])
 
 
 # -- MicLevel throttle ------------------------------------------------------

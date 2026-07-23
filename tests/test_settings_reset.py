@@ -98,7 +98,7 @@ def test_button_present_with_expected_text(qapp, tmp_path, monkeypatch):
     dlg, _ = _dialog(tmp_path, monkeypatch)
     try:
         buttons = [b.text() for b in dlg.findChildren(QPushButton)]
-        assert "Reset to recommended settings" in buttons
+        assert "Recommended setup for this PC" in buttons
     finally:
         dlg.close()
         dlg.deleteLater()
@@ -264,6 +264,62 @@ def test_headless_construction_and_reset_do_not_raise(qapp, tmp_path, monkeypatc
         settings_reset.confirm_and_reset(dlg)  # must not raise
         assert store.config.stt.device == "auto"
         assert dlg._stt_device_combo.currentData() == ("auto", 0)
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from vrcc.core.config import AppConfig, ConfigStore
+    from vrcc.gui import settings_reset
+    from vrcc.gui.settings import SettingsDialog
+
+    QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.load()
+    # Personal choices to preserve.
+    store.config.audio.device = "My USB Mic"
+    store.config.stt.source_language = "Japanese"
+    store.config.translate.targets = ["English"]
+    store.config.osc.ip = "10.0.0.5"
+    # Tuning to be reset away from defaults.
+    store.config.vad.threshold = 0.60
+    store.config.gui.update_check_enabled = False
+    store.config.stt.avg_logprob_gate = -2.5
+    store.config.stt.no_speech_gate = 0.9
+    store.config.stt.condition_on_previous_text = True
+    store.config.audio.denoise_enabled = True
+    store.config.audio.denoise_strength = 0.9
+
+    dlg = SettingsDialog(store)
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.StandardButton.Yes)
+    try:
+        settings_reset.confirm_and_reset_defaults(dlg)
+        d = AppConfig()
+        # Tuning reset.
+        assert store.config.vad.threshold == d.vad.threshold
+        assert store.config.gui.update_check_enabled == d.gui.update_check_enabled
+        assert store.config.audio.denoise_enabled == d.audio.denoise_enabled
+        assert store.config.audio.denoise_strength == d.audio.denoise_strength
+        # Personal preserved.
+        assert store.config.audio.device == "My USB Mic"
+        assert store.config.stt.source_language == "Japanese"
+        assert store.config.translate.targets == ["English"]
+        assert store.config.osc.ip == "10.0.0.5"
+        # Widgets themselves reflect the reset, not just the config: an open
+        # Advanced group must not show stale values after a reset.
+        assert dlg._stt_avg_gate_spin.value() == d.stt.avg_logprob_gate
+        assert dlg._stt_ns_gate_spin.value() == d.stt.no_speech_gate
+        assert dlg._stt_cond_check.isChecked() == d.stt.condition_on_previous_text
+        assert dlg._sensitivity.value() == 90 - round(d.vad.threshold * 100)
+        assert dlg._update_check.isChecked() == d.gui.update_check_enabled
+        assert dlg._denoise_check.isChecked() == d.audio.denoise_enabled
+        assert dlg._denoise_strength.value() == round(d.audio.denoise_strength * 100)
+        assert dlg._denoise_strength.isEnabled() == d.audio.denoise_enabled
     finally:
         dlg.close()
         dlg.deleteLater()

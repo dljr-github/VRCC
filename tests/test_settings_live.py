@@ -21,6 +21,9 @@ class _RecordingApply:
         self.calls.append(("audio", device))
         return True
 
+    def apply_audio_denoise(self, cfg):
+        self.calls.append(("audio_denoise", cfg.denoise_enabled, cfg.denoise_strength))
+
     def reload_engine(self, kind):
         self.calls.append(("reload", kind))
 
@@ -116,6 +119,18 @@ def test_gui_group_uses_theme_hook_not_the_apply_handle():
     cfg.gui.font_scale = 1.4
     _flush(cfg, apply, theme, applied)
     assert theme.count == 2
+
+
+def test_denoise_edit_runs_audio_denoise_hook_once_without_source_restart():
+    # The denoise fields must apply in place, never through apply_audio_device
+    # (which restarts the source).
+    cfg, apply, theme, applied = _env()
+    cfg.audio.denoise_strength = 0.7  # denoise is on by default; edit a field
+    _flush(cfg, apply, theme, applied)
+    assert apply.calls == [("audio_denoise", True, 0.7)]
+    # A second flush with no further change must not re-fire the hook.
+    _flush(cfg, apply, theme, applied)
+    assert apply.calls == [("audio_denoise", True, 0.7)]
 
 
 def test_ui_language_is_not_a_live_group():

@@ -69,6 +69,13 @@ class MuteSync:
 
     # -- lifecycle ---------------------------------------------------------
 
+    def set_ip(self, osc_ip: str) -> None:
+        """Update the OSC IP the localhost gate in :meth:`start` checks
+        against, e.g. after Settings changes ``osc.ip`` live. Takes effect on
+        the next :meth:`start`; an already-active session keeps running
+        against the IP it started with."""
+        self._osc_ip = osc_ip
+
     def start(self) -> None:
         """Start syncing, subject to config + localhost gating. No-op if
         disabled or active. Non-localhost OSC publishes
@@ -200,6 +207,21 @@ class MuteSync:
             with self._state_lock:
                 if gen != self._generation:
                     return  # superseded by a newer update: never publish
+            self._bus.publish(MuteChanged(value))
+
+    def republish(self) -> None:
+        """Re-emit the current :class:`MuteChanged` state without changing it.
+
+        ``_update`` only publishes on a real transition, so a subscriber that
+        starts fresh mid-session (e.g. a main window rebuilt after a UI-
+        language change) never learns the current mute state until the next
+        actual toggle. Safe to call whether or not sync is active: an unknown
+        state (never fetched, or after :meth:`stop`) re-emits ``None`` the
+        same way a stopped session's own transition does.
+        """
+        with self._publish_lock:
+            with self._state_lock:
+                value = self._muted
             self._bus.publish(MuteChanged(value))
 
     @property

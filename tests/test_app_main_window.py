@@ -43,11 +43,12 @@ def _bridge():
 class _FakePipeline:
     """Minimal pipeline surface MainWindow needs."""
 
-    def __init__(self, accept_typed: bool = True) -> None:
+    def __init__(self, accept_typed: bool = True, mt_active: bool = True) -> None:
         self.captioning_enabled = True
         self.mute_gate = False
         self.typed: list[str] = []
         self._accept_typed = accept_typed
+        self.mt_active = mt_active
 
     def submit_typed(self, text: str) -> bool:
         self.typed.append(text)
@@ -60,14 +61,14 @@ class _FakePipeline:
         return self.mute_gate
 
 
-def _main_window(store, mt_available: bool = True):
+def _main_window(store, mt_available: bool = True, mt_active: bool = True):
     from vrcc.gui.main_window import MainWindow
 
     bridge = _bridge()
     window = MainWindow(
         bridge,
         store,
-        _FakePipeline(),
+        _FakePipeline(mt_active=mt_active),
         on_open_settings=lambda: None,
         on_open_models=lambda: None,
         mt_available=mt_available,
@@ -88,14 +89,14 @@ def test_main_window_profile_toggle_applies_kwargs_bundle(qapp, tmp_path):
         window._on_profile_toggled(True)  # Quality mode ON
         assert cfg.stt.beam_size == 5
         assert cfg.translate.beam_size == 3
-        assert cfg.vad.speculative_silence_ms == 450
+        assert cfg.vad.speculative_silence_ms == 350
         assert cfg.vad.finalize_silence_ms == 800
         assert cfg.gui.profile == "quality"
 
         window._on_profile_toggled(False)  # back to Latency
         assert cfg.stt.beam_size == 1
         assert cfg.translate.beam_size == 1
-        assert cfg.vad.speculative_silence_ms == 350
+        assert cfg.vad.speculative_silence_ms == 250
         assert cfg.vad.finalize_silence_ms == 600
         assert cfg.gui.profile == "latency"
     finally:
@@ -107,12 +108,14 @@ def test_main_window_profile_toggle_applies_kwargs_bundle(qapp, tmp_path):
 def test_main_window_translation_active_reads_live_config_not_ctor_snapshot(qapp, tmp_path):
     # MT engines hot-swap in mid-session now, so ``mt_available`` at
     # construction must no longer gate `_translate_active` -- it reads live
-    # config only. Constructing with mt_available=False (as if no MT engine
-    # existed at launch) must not suppress translation once config says it's
-    # on, otherwise a row would wrongly skip the "translating…" interim state.
+    # config (and the pipeline's live engine) only. Constructing with
+    # mt_available=False (as if no MT engine existed at launch) must not
+    # suppress translation once config says it's on and a live engine has
+    # since loaded, otherwise a row would wrongly skip the "translating…"
+    # interim state.
     store = _store(tmp_path)
     store.config.translate.enabled = True
-    window, bridge = _main_window(store, mt_available=False)
+    window, bridge = _main_window(store, mt_available=False, mt_active=True)
     try:
         assert window._translate_active() is True
     finally:
@@ -125,6 +128,22 @@ def test_main_window_translation_inactive_when_toggle_off(qapp, tmp_path):
     store = _store(tmp_path)
     store.config.translate.enabled = False
     window, bridge = _main_window(store, mt_available=True)
+    try:
+        assert window._translate_active() is False
+    finally:
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_main_window_translation_inactive_without_a_live_mt_engine(qapp, tmp_path):
+    # Regression: config.translate.enabled alone used to mark rows
+    # TRANSLATING even when no MT engine was actually loaded (never loaded,
+    # or swapped out mid-session); with send-to-VRChat off, the row then had
+    # no terminal status to ever reach. A live engine must also be required.
+    store = _store(tmp_path)
+    store.config.translate.enabled = True
+    window, bridge = _main_window(store, mt_active=False)
     try:
         assert window._translate_active() is False
     finally:
@@ -264,98 +283,6 @@ def test_mute_chip_clears_on_unknown_state(qapp, tmp_path):
     finally:
         window.close()
         window.deleteLater()
-        bridge.detach()
-
-
-def _rebuild_env(tmp_path):
-    """Bridge, detector, pipeline and window factory for driving
-    app._swap_main_window (the UI-language change path) for real."""
-    from vrcc.gui.bridge import BusBridge
-    from vrcc.gui.main_window import MainWindow
-    from vrcc.osc.vrchat_detect import VrchatDetector
-
-    class _Zc:
-        def close(self) -> None:
-            pass
-
-    class _Browser:
-        def cancel(self) -> None:
-            pass
-
-    bus = EventBus()
-    bridge = BusBridge(bus)
-    detector = VrchatDetector(
-        bus, zeroconf_factory=_Zc, browser_factory=lambda zc, st, listener: _Browser()
-    )
-    store = _store(tmp_path)
-    pipeline = _FakePipeline()
-
-    def make_window():
-        return MainWindow(
-            bridge, store, pipeline,
-            on_open_settings=lambda: None, on_open_models=lambda: None,
-        )
-
-    return bridge, detector, pipeline, make_window
-
-
-def test_rebuilt_window_is_repushed_vrchat_state_and_capture_ok(qapp, tmp_path):
-    # The detector publishes VrchatDetected only on transitions, so the fresh
-    # window is told the current state via republish(); the capture label
-    # carries over from the old window, and paused-vs-listening re-derives
-    # from the captioning toggle, so a merely paused run renders amber
-    # Paused instead of red failure or gray Starting.
-    from vrcc.app import _swap_main_window
-
-    bridge, detector, pipeline, make_window = _rebuild_env(tmp_path)
-    pipeline.captioning_enabled = False  # the user paused before the rebuild
-
-    old = make_window()
-    fresh = None
-    try:
-        detector.start()
-        detector.add_service(
-            None, "_oscjson._tcp.local.", "VRChat-Client-7._oscjson._tcp.local."
-        )
-        assert "connected" in old._vrchat_label.text()
-        old.set_capture_status(True)  # the pipeline started and is healthy
-
-        fresh = _swap_main_window(old, make_window, detector)
-
-        assert "connected" in fresh._vrchat_label.text()
-        assert fresh._capture_label.text() == "Paused - not listening"
-    finally:
-        for w in (old, fresh):
-            if w is not None:
-                w.close()
-                w.deleteLater()
-        bridge.detach()
-
-
-def test_rebuilt_window_keeps_a_capture_failure_red(qapp, tmp_path):
-    # A failed engine paints red with a reason, whether from a mid-session
-    # swap (pipeline started) or before capture ever started; the rebuild
-    # must carry that verbatim rather than repaint green "Listening" over a
-    # pipeline that is not captioning, or reset to gray "Starting".
-    from vrcc.app import _swap_main_window
-
-    bridge, detector, _pipeline, make_window = _rebuild_env(tmp_path)
-
-    old = make_window()
-    fresh = None
-    try:
-        old.set_capture_status(False, "a model failed to load")
-
-        fresh = _swap_main_window(old, make_window, detector)
-
-        assert fresh._capture_label.text() == (
-            "Not listening - a model failed to load"
-        )
-    finally:
-        for w in (old, fresh):
-            if w is not None:
-                w.close()
-                w.deleteLater()
         bridge.detach()
 
 

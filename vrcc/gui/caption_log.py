@@ -38,9 +38,11 @@ class CaptionRow:
 class CaptionModel:
     """Ordered, capped set of caption rows keyed by utterance.
 
-    recognized() always starts a fresh row (so a reused utterance_id -- typed
-    messages all use id 0 -- never overwrites an older entry); translated()/sent()
-    update the most recent row for that id.
+    recognized() starts a fresh row per reused utterance_id, so an older
+    entry is never overwritten. translated()/sent() always update the most
+    recent row for the id. (Pipeline gives every typed submission its own id
+    for exactly this reason: two rows sharing an id would let a later
+    recognized() remap where an earlier one's translated()/sent() lands.)
     """
 
     def __init__(self, cap: int = 200, clock=time.monotonic, time_label=None) -> None:
@@ -55,12 +57,12 @@ class CaptionModel:
     def recognized(
         self, utterance_id: int, text: str, *, translate_enabled: bool, send_enabled: bool
     ) -> None:
-        key = self._next_key
-        self._next_key += 1
         if translate_enabled:
             status = TRANSLATING
         else:
             status = QUEUED if send_enabled else NOT_SENT
+        key = self._next_key
+        self._next_key += 1
         self._rows[key] = CaptionRow(
             key=key,
             utterance_id=utterance_id,
@@ -205,8 +207,10 @@ def render_rows_html(
         marker, color = status_markup(row, c, scale)
         trans = "".join(
             f'<div style="color:{c["muted"]}; margin-top:4px; '
-            f'border-left: 2px solid {c["border"]}; padding-left:8px;">{_esc(text)}</div>'
-            for _lang, text in row.translations
+            f'border-left: 2px solid {c["border"]}; padding-left:8px;">'
+            f'<span style="color:{c["muted"]};">{_esc(lang)}:</span> {_esc(text)}'
+            f"</div>"
+            for lang, text in row.translations
         )
         blocks.append(
             f'<div style="margin-bottom:10px;">'

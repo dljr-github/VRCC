@@ -88,3 +88,14 @@ def test_spec_version_regex_matches_the_package_init():
     match = re.search(_VERSION_RE, init_text, re.MULTILINE)
     assert match, "the spec's version regex no longer matches vrcc/__init__.py"
     assert match.group(1) == __version__
+
+
+def test_pyproject_version_matches_package_init():
+    pyproject = (
+        Path(__file__).resolve().parent.parent / "pyproject.toml"
+    ).read_text(encoding="utf-8")
+    m = re.search(r'^version = "([^"]+)"', pyproject, re.MULTILINE)
+    assert m, "pyproject.toml has no version line"
+    assert m.group(1) == __version__, (
+        f"pyproject.toml version {m.group(1)} != vrcc/__init__.py {__version__}"
+    )

@@ -17,7 +17,9 @@ import numpy as np
 from vrcc.core.config import VadConfig
 
 FRAME = 512
-HYSTERESIS_GAP = 0.15
+# Minimum gap kept between the speech and silence thresholds so a dead band
+# always exists and the silence bar can never invert past the speech bar.
+MIN_GAP = 0.05
 
 
 @dataclass(frozen=True)
@@ -154,7 +156,8 @@ class Segmenter:
         events.append(SegLevel(rms=rms, vad_prob=vad_prob))
 
         is_speech = vad_prob >= self.cfg.threshold
-        is_silence = vad_prob < (self.cfg.threshold - HYSTERESIS_GAP)
+        silence_bar = min(self.cfg.silence_threshold, self.cfg.threshold - MIN_GAP)
+        is_silence = vad_prob < silence_bar
         frame_copy = frame.copy()  # frame buffers may be reused by the caller
 
         if not self._active:

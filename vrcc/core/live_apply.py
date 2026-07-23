@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from vrcc.audio.segmenter import Segmenter
     from vrcc.audio.source import AudioSource
     from vrcc.core.bus import EventBus
-    from vrcc.core.config import OscConfig, VadConfig
+    from vrcc.core.config import AudioConfig, OscConfig, VadConfig
     from vrcc.core.pipeline import Pipeline
     from vrcc.osc.chatbox import ChatboxSender
     from vrcc.osc.mutesync import MuteSync
@@ -60,6 +60,12 @@ class LiveApply:
         self._make_mute = make_mute
         self._mute = mute
 
+    @property
+    def mute(self) -> "MuteSync | None":
+        """The live mute-sync coordinator, if one has been built (``None``
+        until the first enable when mute sync was off at launch)."""
+        return self._mute
+
     def apply_audio_device(self, device_cfg: str) -> bool:
         """Swap the mic to ``device_cfg`` live. A failed open publishes
         ``MIC_OPEN_FAILED`` (like :func:`~vrcc.app._start_pipeline_guarded`) and
@@ -79,6 +85,32 @@ class LiveApply:
             )
             return False
 
+    def refresh_input_devices(self, device_cfg: str) -> list:
+        """Re-enumerate input devices after a PortAudio host cycle, resuming
+        capture on ``device_cfg`` if it was running. A failed reopen surfaces
+        MIC_OPEN_FAILED (like apply_audio_device) rather than crashing the GUI
+        slot. Returns the fresh device list either way."""
+        from vrcc.audio.devices import list_input_devices, reinitialize_audio
+
+        try:
+            self._pipeline.reinit_audio_and_resume(
+                reinitialize_audio, lambda: self._make_source(device_cfg)
+            )
+        except Exception as exc:  # noqa: BLE001 -- surface, don't crash the slot
+            logger.exception("device refresh could not reopen the mic")
+            self._bus.publish(
+                AppError(
+                    "MIC_OPEN_FAILED",
+                    "Could not open the microphone. Check Settings > Audio",
+                    detail=str(exc),
+                )
+            )
+        return list_input_devices()
+
+    def apply_audio_denoise(self, cfg: "AudioConfig") -> None:
+        """Apply the denoise toggle/strength live (no restart)."""
+        self._pipeline.set_source_denoise(cfg.denoise_enabled, cfg.denoise_strength)
+
     def apply_vad(self, cfg: "VadConfig") -> None:
         """Apply new VAD timings/threshold; the next utterance adopts them."""
         self._segmenter.reconfigure(cfg)
@@ -90,7 +122,12 @@ class LiveApply:
         client resolves the host, so a partial address raises. That must not
         escape into the Qt timer slot and abort the rest of the flush: log,
         keep the old client, and let the next edit try again. Returns whether
-        the retarget took."""
+        the retarget took.
+
+        Also keeps an existing mute-sync coordinator's localhost gate current:
+        without this, ``MuteSync`` caches the IP it was built with, so toggling
+        mute sync off/on after an ``osc.ip`` change would re-check a stale
+        address instead of the one now configured."""
         try:
             self._chatbox.reconfigure(cfg.ip, cfg.port)
         except OSError:
@@ -100,6 +137,8 @@ class LiveApply:
             )
             return False
         self._chatbox.reconfigure_rate(cfg.burst, cfg.min_interval_s)
+        if self._mute is not None:
+            self._mute.set_ip(cfg.ip)
         return True
 
     def apply_mute_sync(self, enabled: bool) -> None:

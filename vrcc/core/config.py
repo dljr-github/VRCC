@@ -27,11 +27,24 @@ class AudioConfig(BaseModel):
     device: str = "auto"
     energy_gate_enabled: bool = False
     energy_threshold: int = 300
+    # GTCRN noise suppression before the VAD/STT. On by default, validated on
+    # real mic noise. strength is a dry/wet blend in [0,1]; full strength
+    # damages short words, so the default is a gentle 0.5.
+    denoise_enabled: bool = True
+    denoise_strength: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class VadConfig(BaseModel):
-    threshold: float = 0.5
-    speculative_silence_ms: int = 350
+    # Silero speech probability to start an utterance. Errs sensitive on
+    # purpose: a missed utterance is silent and reads as a broken app, while a
+    # false trigger is visible and easy to turn down. Clean speech sits only
+    # just above 0.5, so a lower bar also catches soft or unclear speech.
+    threshold: float = 0.35
+    # Silence bar, decoupled from the speech threshold so raising sensitivity
+    # (lowering the speech threshold) never raises the silence bar and chops
+    # words mid-utterance. Clamped below the speech threshold at use.
+    silence_threshold: float = 0.25
+    speculative_silence_ms: int = 250
     finalize_silence_ms: int = 600
     min_utterance_ms: int = 500
     pre_roll_ms: int = 150
@@ -84,8 +97,8 @@ class OscConfig(BaseModel):
     port: int = 9000
     send_to_vrchat: bool = True
     notification_sfx: bool = False
-    min_interval_s: float = 1.3
-    burst: int = 5
+    min_interval_s: float = Field(default=1.3, gt=0)
+    burst: int = Field(default=5, ge=1)
     overflow: Literal["truncate", "split", "send"] = "split"
     split_delay_s: float = 2.0
     include_original: bool = True
@@ -109,6 +122,8 @@ class GuiConfig(BaseModel):
     # schema change; unknown values resolve to English at startup.
     ui_language: str = "auto"
     window_geometry: str = ""
+    # Check GitHub releases on launch and offer a notice. Opt out here.
+    update_check_enabled: bool = True
 
 
 class AppConfig(BaseModel):
@@ -127,7 +142,7 @@ class AppConfig(BaseModel):
 PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     "latency": {
         "vad": {
-            "speculative_silence_ms": 350,
+            "speculative_silence_ms": 250,
             "finalize_silence_ms": 600,
             "min_utterance_ms": 500,
             "pre_roll_ms": 150,
@@ -138,7 +153,7 @@ PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     },
     "quality": {
         "vad": {
-            "speculative_silence_ms": 450,
+            "speculative_silence_ms": 350,
             "finalize_silence_ms": 800,
             "min_utterance_ms": 500,
             "pre_roll_ms": 200,

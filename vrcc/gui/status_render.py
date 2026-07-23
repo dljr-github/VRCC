@@ -60,12 +60,14 @@ def _mute_gate_closed(pipeline) -> bool:
     return gate is not None and bool(gate())
 
 
-def render_capture_status(w) -> None:
+def render_capture_status(w) -> bool:
     """Derive the capture label from capture health, the captioning toggle
     and the pipeline's mute gate, in that priority order. The toggle outranks
     the mute gate because the pipeline checks it first: naming the mute while
-    the toggle is off would point the user at the wrong control."""
+    the toggle is off would point the user at the wrong control. Returns
+    whether the app is actually listening (the green state)."""
     ok = getattr(w, "_capture_ok", None)
+    listening = False
     if ok is None:
         text, color = tr("Starting…"), w._p["muted"]
     elif ok is False:
@@ -81,5 +83,7 @@ def render_capture_status(w) -> None:
         text, color = tr("Paused - following your VRChat mute"), w._p["warn"]
     else:
         text, color = tr("Listening"), w._p["good"]
+        listening = True
     w._capture_label.setText(text)
     w._capture_label.setStyleSheet(f"color: {color}; padding: 2px 8px;")
+    return listening

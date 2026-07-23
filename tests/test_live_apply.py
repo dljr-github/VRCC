@@ -20,6 +20,7 @@ class _FakePipeline:
         self._boom = boom
         self.restarted_with = None
         self.mute = None
+        self.reinit_calls = []
 
     def restart_source(self, new_source):
         self.restarted_with = new_source
@@ -29,6 +30,12 @@ class _FakePipeline:
 
     def set_mute(self, mute):
         self.mute = mute
+
+    def reinit_audio_and_resume(self, reinit, make_source):
+        self.reinit_calls.append((reinit, make_source))
+        reinit()
+        source = make_source()
+        return self._running
 
 
 class _FakeSegmenter:
@@ -54,12 +61,16 @@ class _FakeChatbox:
 class _FakeMute:
     def __init__(self) -> None:
         self.events = []
+        self.ips = []
 
     def start(self) -> None:
         self.events.append("start")
 
     def stop(self) -> None:
         self.events.append("stop")
+
+    def set_ip(self, ip) -> None:
+        self.ips.append(ip)
 
 
 def _make(*, pipeline=None, mute=None, sources=None):
@@ -110,6 +121,23 @@ def test_apply_osc_reconfigures_client_and_rate():
     env.live.apply_osc(cfg)
     assert env.chatbox.client == [("10.0.0.9", 9002)]
     assert env.chatbox.rate == [(7, 0.9)]
+
+
+def test_apply_osc_retargets_an_existing_mute_coordinator():
+    # Regression: MuteSync caches the OSC IP it was built with, so after
+    # changing osc.ip a stale address kept gating the localhost check.
+    # apply_osc must push the new IP into an existing coordinator.
+    mute = _FakeMute()
+    env = _make(mute=mute)
+    cfg = OscConfig(ip="10.0.0.9", port=9002)
+    env.live.apply_osc(cfg)
+    assert mute.ips == ["10.0.0.9"]
+
+
+def test_apply_osc_without_a_mute_coordinator_does_not_raise():
+    env = _make(mute=None)
+    cfg = OscConfig(ip="10.0.0.9", port=9002)
+    assert env.live.apply_osc(cfg) is True  # no coordinator built yet: no-op
 
 
 def test_apply_audio_device_restarts_source_and_returns_running():
@@ -174,3 +202,56 @@ def test_reload_engine_delegates_to_injected_closure():
     env.live.reload_engine("stt")
     env.live.reload_engine("mt")
     assert env.reloads == ["stt", "mt"]
+
+
+def test_refresh_input_devices_reinits_and_returns_fresh_list(monkeypatch):
+    # Must go through pipeline.reinit_audio_and_resume (not touch sounddevice
+    # directly), and return whatever list_input_devices() reports afterward.
+    pipe = _FakePipeline(running=True)
+    env = _make(pipeline=pipe)
+
+    reinit_calls = []
+    monkeypatch.setattr(
+        "vrcc.audio.devices.reinitialize_audio",
+        lambda: reinit_calls.append("reinit"),
+    )
+    monkeypatch.setattr(
+        "vrcc.audio.devices.list_input_devices",
+        lambda: [(0, "Mic A"), (1, "Mic B")],
+    )
+
+    result = env.live.refresh_input_devices("Some Mic")
+
+    assert result == [(0, "Mic A"), (1, "Mic B")]
+    assert reinit_calls == ["reinit"]
+    assert len(env.pipeline.reinit_calls) == 1
+    assert env.built == ["Some Mic"]  # make_source called with device_cfg
+
+
+def test_refresh_input_devices_contains_a_failed_reopen(monkeypatch):
+    # A failed mic reopen during refresh must not raise into the GUI slot: it
+    # publishes MIC_OPEN_FAILED (like apply_audio_device) and still returns
+    # whatever list_input_devices() reports.
+    class _BoomPipeline(_FakePipeline):
+        def reinit_audio_and_resume(self, reinit, make_source):
+            raise RuntimeError("device unavailable")
+
+    pipe = _BoomPipeline(running=True)
+    env = _make(pipeline=pipe)
+    errors: list[AppError] = []
+    env.bus.subscribe(AppError, errors.append)
+
+    monkeypatch.setattr(
+        "vrcc.audio.devices.reinitialize_audio",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "vrcc.audio.devices.list_input_devices",
+        lambda: [(0, "Mic A")],
+    )
+
+    result = env.live.refresh_input_devices("Bad Mic")  # contained, not raised
+
+    assert result == [(0, "Mic A")]
+    assert [e.code for e in errors] == ["MIC_OPEN_FAILED"]
+    assert "device unavailable" in errors[0].detail
