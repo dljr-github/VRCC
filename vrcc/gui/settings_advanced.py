@@ -349,10 +349,9 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
 
     # Timing.
     for label, field, lo, hi, tip in (
-        (tr("Pause before sending a finished sentence (ms)"), "speculative_silence_ms",
+        (tr("Wait before an early caption (ms)"), "speculative_silence_ms",
          0, 5000,
-         tr("How long a quiet gap counts as the end of a sentence, so it can be "
-            "sent without waiting for a full stop. Lower reacts to quicker pauses.")),
+         tr("Pause length that triggers an early, tentative caption.")),
         (tr("Wait before finishing a caption (ms)"), "finalize_silence_ms",
          0, 5000,
          tr("How long a pause has to be to end a sentence.")),
@@ -372,16 +371,6 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     dlg._bind_float(max_utt, dlg._cfg.vad, "max_utterance_s")
     dlg._vad_spins["max_utterance_s"] = max_utt
     form.addRow(tr("Longest caption (s)"), max_utt)
-
-    inject = QCheckBox(tr("Send each sentence as soon as you finish it"))
-    inject.setChecked(dlg._cfg.vad.sentence_inject)
-    inject.setToolTip(
-        tr("Show a sentence in the chatbox at a natural pause instead of "
-           "waiting for you to stop talking.")
-    )
-    dlg._bind_checkbox(inject, dlg._cfg.vad, "sentence_inject")
-    dlg._sentence_inject_check = inject
-    form.addRow(inject)
 
     dlg._update_check = QCheckBox(tr("Tell me when a new version is available"))
     dlg._update_check.setChecked(dlg._cfg.gui.update_check_enabled)

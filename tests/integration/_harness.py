@@ -160,8 +160,8 @@ def pipeline_phrases(
     the order they were published.
 
     ``vad_overrides`` are applied to the fresh ``AppConfig``'s ``vad`` section
-    before the stack is built (e.g. ``sentence_min_words=3``). ``stt`` must
-    already be loaded; it is reused, not created from config.
+    before the stack is built (e.g. ``speculative_silence_ms=250``). ``stt``
+    must already be loaded; it is reused, not created from config.
     """
     store = ConfigStore(_scratch_config_path())
     store.load()

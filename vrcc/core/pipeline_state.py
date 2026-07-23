@@ -27,7 +27,6 @@ class SpecCache:
         self._cache: dict[tuple[int, int], "SttResult | None"] = {}
         self._stale: set[tuple[int, int]] = set()
         self._pending: dict[int, int] = {}
-        self._emitted_early: set[int] = set()
         self._last_finalized = 0
 
     def reset(self) -> None:
@@ -36,7 +35,6 @@ class SpecCache:
             self._cache.clear()
             self._stale.clear()
             self._pending.clear()
-            self._emitted_early.clear()
             self._last_finalized = 0
 
     def note_speculative(self, utterance_id: int, samples_id: int) -> None:
@@ -66,20 +64,6 @@ class SpecCache:
             self._cache[key] = result
             return True
 
-    def mark_emitted_early(self, utterance_id: int) -> None:
-        """Record that this utterance's sentence was already sent from the
-        speculative pass, so its final must not send again."""
-        with self._lock:
-            self._emitted_early.add(utterance_id)
-
-    def pop_emitted_early(self, utterance_id: int) -> bool:
-        """True (and forget it) if the utterance was already sent early."""
-        with self._lock:
-            if utterance_id in self._emitted_early:
-                self._emitted_early.discard(utterance_id)
-                return True
-            return False
-
     def pop_result(self, key: tuple[int, int]) -> "SttResult | None | object":
         """Pop the cached result for a final, or ``_MISSING`` on a miss.
         Safe without extra locking: the single STT worker drains its queue
@@ -106,7 +90,6 @@ class SpecCache:
             self._cache = {k: v for k, v in self._cache.items() if k[0] > cutoff}
             self._stale = {k for k in self._stale if k[0] > cutoff}
             self._pending = {u: s for u, s in self._pending.items() if u > cutoff}
-            self._emitted_early = {u for u in self._emitted_early if u > cutoff}
             return cutoff
 
 
@@ -185,44 +168,3 @@ class TypingTracker:
             if orphaned:
                 self._in_flight.difference_update(orphaned)
             return orphaned, bool(orphaned) and not self._in_flight
-
-
-class CommitTracker:
-    """Per-utterance record of which sentences have been committed to the
-    chatbox, plus the previous partial's followed-sentence list for the
-    two-partial stability gate. One internal lock, SpecCache style."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._committed: dict[int, list[str]] = {}
-        self._prev: dict[int, list[str]] = {}
-
-    def reset(self) -> None:
-        with self._lock:
-            self._committed.clear()
-            self._prev.clear()
-
-    def stable_new(self, utterance_id: int, followed: list[str]) -> list[str]:
-        with self._lock:
-            prev = self._prev.get(utterance_id, [])
-            done = self._committed.setdefault(utterance_id, [])
-            new = [s for s in followed if s in prev and s not in done]
-            done.extend(new)
-            self._prev[utterance_id] = list(followed)
-            return new
-
-    def uncommitted(self, utterance_id: int, sentences: list[str]) -> list[str]:
-        with self._lock:
-            done = self._committed.setdefault(utterance_id, [])
-            new = [s for s in sentences if s not in done]
-            done.extend(new)
-            return new
-
-    def committed_count(self, utterance_id: int) -> int:
-        with self._lock:
-            return len(self._committed.get(utterance_id, []))
-
-    def clear(self, utterance_id: int) -> None:
-        with self._lock:
-            self._committed.pop(utterance_id, None)
-            self._prev.pop(utterance_id, None)

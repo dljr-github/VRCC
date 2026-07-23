@@ -4,7 +4,6 @@ indicator, send-to-vrchat, and worker-exception behavior.
 
 from __future__ import annotations
 
-import threading
 import time
 
 import pytest
@@ -16,10 +15,8 @@ from vrcc.audio.segmenter import (
     SegSpeculative,
     SegSpeechStart,
 )
-from vrcc.core import pipeline_jobs
-from vrcc.core.config import AppConfig, OscConfig, VadConfig
+from vrcc.core.config import AppConfig, OscConfig
 from vrcc.core.events import AppError, MicLevel, PhraseRecognized, PhraseTranslated, SpeechStarted
-from vrcc.core.pipeline_jobs import _SttJob
 
 from .conftest import FakeChatbox, FakeMt, FakeMute, FakeStt, collect, make_pipeline, make_result, running, sample
 
@@ -341,113 +338,7 @@ def test_send_to_vrchat_false_skips_chatbox_but_publishes_events():
     assert env.chatbox.typing == []  # typing also skipped
 
 
-# Live-partial dispatch, coalescing, and the partial chatbox send live in
-# test_pipeline_partial.py (kept separate to stay under the line cap).
-
-
 # -- behavior 9: worker exceptions ------------------------------------------
-
-
-# -- behavior 10: early sentence injection at the speculative pass ----------
-
-
-class _CommitRecorder:
-    """Stand-in segmenter recording request_commit calls. The early-injection
-    tests drive process_stt_job synchronously and never run the segmenter's
-    frame loop, so request_commit is all that is exercised."""
-
-    def __init__(self) -> None:
-        self.commits: list = []
-
-    def request_commit(self, utterance_id: int) -> None:
-        self.commits.append(utterance_id)
-
-
-def _spec_job(uid: int, s) -> _SttJob:
-    return _SttJob(utterance_id=uid, samples=s, speculative=True, samples_id=id(s))
-
-
-def _final_job(uid: int, s) -> _SttJob:
-    return _SttJob(utterance_id=uid, samples=s, speculative=False, samples_id=id(s))
-
-
-def _run_speculative(env, uid: int, s) -> None:
-    # Mirror handle_speculative's bookkeeping (typing on, pending noted), then
-    # process the job in-thread so the assertions never chase a worker.
-    env.pipeline._begin_typing(uid)
-    env.pipeline._spec.note_speculative(uid, id(s))
-    pipeline_jobs.process_stt_job(env.pipeline, _spec_job(uid, s), threading.Event())
-
-
-def test_speculative_sentence_is_sent_early_and_commits():
-    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
-    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
-    seg = _CommitRecorder()
-    env.pipeline._segmenter = seg
-    s = sample()
-    _run_speculative(env, 1, s)
-    assert env.chatbox.submits == [("Hello there now.", 1)]  # sent once, now
-    assert seg.commits == [1]  # and the segmenter was told to commit
-
-
-def test_final_after_early_send_does_not_duplicate():
-    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
-    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
-    seg = _CommitRecorder()
-    env.pipeline._segmenter = seg
-    s = sample()
-    _run_speculative(env, 1, s)
-    sent_after_spec = len(env.chatbox.submits)
-    assert sent_after_spec == 1
-    # The race the dedupe guards: the natural 600 ms final for this utterance
-    # was already queued before request_commit could cut it off.
-    pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, s), threading.Event())
-    assert len(env.chatbox.submits) == sent_after_spec  # no second send
-    assert env.stt.calls == 1  # the final neither re-sent nor re-transcribed
-
-
-def test_gated_early_inject_composes_with_final_dedupe_no_double_send():
-    # forward_final runs BEFORE mark_emitted_early. A gate closing right
-    # before that call skips the speculative send, but the guard still ends
-    # up set (mark_emitted_early runs unconditionally after), so the
-    # natural final racing the commit doesn't send either.
-    cfg = AppConfig(vad=VadConfig(sentence_inject=True))
-    env = make_pipeline(mt=None, config=cfg, stt=FakeStt(result=make_result(text="Hello there now.")))
-    seg = _CommitRecorder()
-    env.pipeline._segmenter = seg
-    s = sample()
-    env.pipeline.set_captioning(False)  # closed before the speculative resolves
-    _run_speculative(env, 1, s)
-    assert env.chatbox.submits == []  # gated: the early send never happened
-    assert seg.commits == [1]  # sentence injection still cuts the utterance
-    assert 1 in env.pipeline._spec._emitted_early  # guard still set after
-    pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, s), threading.Event())
-    assert env.chatbox.submits == []  # dedupe path: still no send, no re-transcribe
-    assert env.stt.calls == 1
-
-
-def test_speculative_without_terminal_punctuation_is_not_sent_early():
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="hello world")))
-    seg = _CommitRecorder()
-    env.pipeline._segmenter = seg
-    s = sample()
-    _run_speculative(env, 1, s)
-    assert env.chatbox.submits == []
-    assert seg.commits == []
-    # Cached as before, so the eventual final still reuses the transcription.
-    assert (1, id(s)) in env.pipeline._spec._cache
-
-
-def test_one_word_sentence_is_blocked_by_the_min_word_guard():
-    # "Hi." is a terminal mark but a single word, well below sentence_min_words;
-    # an early send here would be a false positive on an abbreviation-like word.
-    env = make_pipeline(mt=None, stt=FakeStt(result=make_result(text="Hi.")))
-    seg = _CommitRecorder()
-    env.pipeline._segmenter = seg
-    s = sample()
-    _run_speculative(env, 1, s)
-    assert env.chatbox.submits == []
-    assert seg.commits == []
 
 
 def test_stt_worker_exception_publishes_apperror_and_continues():

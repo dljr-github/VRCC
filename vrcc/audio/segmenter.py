@@ -8,7 +8,6 @@ stdlib + numpy, zero Qt. Frame-math / hysteresis / reuse-identity noted inline.
 from __future__ import annotations
 
 import math
-import threading
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable
@@ -35,16 +34,6 @@ class SegSpeculative:
 
 
 @dataclass(frozen=True)
-class SegPartial:
-    """A periodic buffer snapshot while an utterance is still active. Not part
-    of the speculative/final resolve contract: additive, and never resolved by
-    a SegFinal/SegDiscard."""
-
-    utterance_id: int
-    samples: np.ndarray
-
-
-@dataclass(frozen=True)
 class SegFinal:
     utterance_id: int
     samples: np.ndarray
@@ -52,12 +41,7 @@ class SegFinal:
 
 @dataclass(frozen=True)
 class SegDiscard:
-    """``terminal`` distinguishes the utterance ending (abort, too-short
-    finalize) from a speech-resume mid-utterance: a non-terminal discard is
-    followed by more ``SegPartial``s for the same utterance."""
-
     utterance_id: int
-    terminal: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,10 +83,6 @@ class Segmenter:
         self._frames_since_start = 0
         self._silence_run = 0
         self._pending_spec_samples: np.ndarray | None = None
-        self._frames_since_partial = 0
-        self._partial_emitted = False
-        self._commit_lock = threading.Lock()
-        self._commit_requested: int | None = None
 
     def _apply_config(self, cfg: VadConfig) -> None:
         """Precompute the frame-count thresholds from ``cfg`` + the frame
@@ -120,26 +100,12 @@ class Segmenter:
         min_utterance = math.ceil(cfg.min_utterance_ms / frame_ms)
         preroll = math.ceil(cfg.pre_roll_ms / frame_ms)
         max_utterance = math.ceil(cfg.max_utterance_s * 1000.0 / frame_ms)
-        partial = math.ceil(cfg.partial_interval_ms / frame_ms)
         self.cfg = cfg
         self._speculative_frames = speculative
         self._finalize_frames = finalize
         self._min_utterance_frames = min_utterance
-        # The idle ring seeds a fresh utterance's onset, so it holds the pre-
-        # roll the user configured, capped at the finalize window: pre-roll
-        # never exceeds the trailing silence a normal finalize requires, so
-        # those frames always roll the ring clean before the next utterance
-        # seeds from it (no prior-utterance speech can survive into a normal
-        # finalize's onset). Sane configs never hit the cap (pre-roll stays
-        # well below finalize). A commit keeps the ring across the reset, so
-        # the commit path additionally trims it to the last
-        # _commit_preroll_frames (never more than the speculative window):
-        # that drops the just-committed sentence's tail and keeps only the
-        # resumed onset, so no stale word prepends onto the next utterance.
-        self._preroll_frames = min(preroll, finalize)
-        self._commit_preroll_frames = min(self._preroll_frames, speculative)
+        self._preroll_frames = preroll
         self._max_utterance_frames = max_utterance
-        self._partial_frames = partial
 
     def reconfigure(self, cfg: VadConfig) -> None:
         """Apply new VAD timings/threshold live (GUI thread) without dropping an
@@ -170,8 +136,8 @@ class Segmenter:
         contract as :meth:`reset`: call only from the thread that feeds
         :meth:`process`."""
         events: list[object] = []
-        if self._pending_spec_samples is not None or self._partial_emitted:
-            events.append(SegDiscard(utterance_id=self._utterance_id, terminal=True))
+        if self._pending_spec_samples is not None:
+            events.append(SegDiscard(utterance_id=self._utterance_id))
         self.reset()
         return events
 
@@ -181,14 +147,6 @@ class Segmenter:
         it only blocks utterance *starts*, never frames already in flight."""
         return self._active
 
-    def request_commit(self, utterance_id: int) -> None:
-        """Ask the segmenter to end the current utterance and start a fresh one
-        on the next frame (the STT worker detected a finished sentence and has
-        already sent it). Thread-safe: called from the STT worker while the
-        audio thread runs process(); a plain flag store under a short lock."""
-        with self._commit_lock:
-            self._commit_requested = utterance_id
-
     def process(self, frame: np.ndarray) -> list[object]:
         events: list[object] = []
 
@@ -196,29 +154,11 @@ class Segmenter:
         vad_prob = float(self._vad_fn(frame))
         rms = float(np.sqrt(np.mean(frame**2)))
         events.append(SegLevel(rms=rms, vad_prob=vad_prob))
-        frame_copy = frame.copy()  # frame buffers may be reused by the caller
-
-        with self._commit_lock:
-            commit_id = self._commit_requested
-            self._commit_requested = None
-        if commit_id is not None and self._active and commit_id == self._utterance_id:
-            # STT already emitted this sentence; drop the buffer and start a
-            # fresh utterance. No SegFinal (would double-send). This exact
-            # frame is not fed into the state machine (so it can't both close
-            # the old utterance and open a new one in one call); instead it
-            # seeds the ring as the contiguous first frame of the next onset.
-            # Trim the retained ring to the commit window so only the resumed
-            # onset, not the committed sentence's tail, prepends to the next
-            # utterance.
-            self._reset_to_idle()
-            self._preroll.append(frame_copy)
-            while len(self._preroll) > self._commit_preroll_frames:
-                self._preroll.popleft()
-            return events
 
         is_speech = vad_prob >= self.cfg.threshold
         silence_bar = min(self.cfg.silence_threshold, self.cfg.threshold - MIN_GAP)
         is_silence = vad_prob < silence_bar
+        frame_copy = frame.copy()  # frame buffers may be reused by the caller
 
         if not self._active:
             if is_speech:
@@ -229,8 +169,6 @@ class Segmenter:
                 self._frames_since_start = 1
                 self._silence_run = 0
                 self._pending_spec_samples = None
-                self._frames_since_partial = 0
-                self._partial_emitted = False
                 events.append(SegSpeechStart(utterance_id=self._utterance_id))
                 # Degenerate configs (pre-roll >= max cap) can hit the cap on
                 # this very transition frame; force the final here, not late.
@@ -251,31 +189,10 @@ class Segmenter:
         self._buffer.append(frame_copy)
         self._frames_since_start += 1
 
-        # The periodic partial snapshot is additive: a buffer snapshot while the
-        # utterance is active, independent of the speculative/final resolve
-        # contract below. Counted in real frames, not silence, so it fires
-        # throughout continuous speech, not just once silence starts.
-        self._frames_since_partial += 1
-        if (
-            self.cfg.sentence_inject
-            and self._frames_since_partial >= self._partial_frames
-            and len(self._buffer) > self._preroll_frames
-        ):
-            events.append(
-                SegPartial(
-                    utterance_id=self._utterance_id,
-                    samples=_concat(self._buffer),
-                )
-            )
-            self._frames_since_partial = 0
-            self._partial_emitted = True
-
         if is_speech:
             self._silence_run = 0
             if self._pending_spec_samples is not None:
                 self._pending_spec_samples = None
-                # Speech resumed: the utterance CONTINUES (not terminal), so
-                # the default terminal=False stands.
                 events.append(SegDiscard(utterance_id=self._utterance_id))
         elif is_silence:
             self._silence_run += 1
@@ -319,14 +236,10 @@ class Segmenter:
                 events.append(
                     SegFinal(utterance_id=self._utterance_id, samples=samples)
                 )
-            elif self._pending_spec_samples is not None or self._partial_emitted:
-                # Too short for a final but a speculative or a live partial is
-                # in flight: discard so the STT worker drops the job
-                # (resolve-every invariant). The utterance ends here, so this
-                # discard is terminal.
-                events.append(
-                    SegDiscard(utterance_id=self._utterance_id, terminal=True)
-                )
+            elif self._pending_spec_samples is not None:
+                # Too short for a final but a speculative is in flight: discard
+                # it so the STT worker drops the job (resolve-every invariant).
+                events.append(SegDiscard(utterance_id=self._utterance_id))
             self._reset_to_idle()
 
         return events
@@ -337,6 +250,4 @@ class Segmenter:
         self._frames_since_start = 0
         self._silence_run = 0
         self._pending_spec_samples = None
-        self._frames_since_partial = 0
-        self._partial_emitted = False
         self._utterance_id += 1

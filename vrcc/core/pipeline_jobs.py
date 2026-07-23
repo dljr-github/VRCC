@@ -20,18 +20,13 @@ from vrcc.core.events import (
 )
 from vrcc.core.pipeline_send import safe_submit
 from vrcc.core.pipeline_state import _MISSING
-from vrcc.core.sentences import (
-    ends_sentence,
-    followed_complete_sentences,
-    split_sentences,
-)
 
 if TYPE_CHECKING:
     import threading
 
     import numpy as np
 
-    from vrcc.audio.segmenter import SegDiscard, SegFinal, SegPartial, SegSpeculative
+    from vrcc.audio.segmenter import SegDiscard, SegFinal, SegSpeculative
     from vrcc.core.languages import Language
     from vrcc.core.pipeline import Pipeline
     from vrcc.stt.engine import SttResult
@@ -46,13 +41,6 @@ _NO_ENGINE = object()
 # Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock.
 _PUT_POLL_S = 0.1
 
-# Early-commit confidence floor. A committed sentence is already sent, so a
-# partial must be confident to commit one early: below these a noisy partial
-# can commit a sentence the full-context final would get right (measured on
-# loud babble). Stricter than the STT's own hallucination gate, on purpose.
-_COMMIT_MAX_NO_SPEECH = 0.3
-_COMMIT_MIN_LOGPROB = -0.35
-
 
 @dataclass
 class _SttJob:
@@ -60,9 +48,6 @@ class _SttJob:
     samples: "np.ndarray"
     speculative: bool
     samples_id: int
-    # A live partial: transcribe-and-publish only, never stored/forwarded/
-    # finalized (see the top-of-function branch in process_stt_job).
-    partial: bool = False
 
 
 @dataclass
@@ -90,7 +75,6 @@ def _mark_finalized(p: "Pipeline", utterance_id: int) -> None:
         )
     if emptied:
         p._set_typing(False)
-    p._commits.clear(utterance_id)
 
 
 def _finalize_dropped(p: "Pipeline", utterance_id: int) -> None:
@@ -143,43 +127,13 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
 
 def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._spec.drop_discarded(event.utterance_id)
-    p._commits.clear(event.utterance_id)
     p._resolve_typing(event.utterance_id)
-
-
-def handle_partial(p: "Pipeline", event: "SegPartial") -> None:
-    """Queue at most one in-flight partial transcription. Additive to the
-    speculative/final flow: never touches SpecCache or typing, never begins
-    typing (the speculative pass already owns that indicator)."""
-    if not p._config.vad.sentence_inject:
-        return
-    if not p._should_caption():
-        return
-    with p._partial_lock:
-        if p._partial_pending:
-            return  # one already in flight: this snapshot is coalesced away
-        p._partial_pending = True
-    _enqueue(
-        p,
-        p._stt_queue,
-        _SttJob(
-            event.utterance_id,
-            event.samples,
-            speculative=False,
-            samples_id=id(event.samples),
-            partial=True,
-        ),
-    )
 
 
 # -- STT job processing ------------------------------------------------------
 
 
 def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
-    if job.partial:
-        _process_partial_job(p, job, stop)
-        return
-
     key = (job.utterance_id, job.samples_id)
 
     if job.speculative:
@@ -190,34 +144,7 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
             # Stopped (maybe restarted) mid-transcribe: this result belongs
             # to an abandoned run, must not touch a new run's shared state.
             return
-        stored = p._spec.store_result(key, result)
-        if stored and _should_inject_sentence(p, result):
-            # A finished sentence: cut the utterance FIRST, then send it.
-            # forward_final enqueues the MT job through the blocking _enqueue;
-            # request_commit only sets the segmenter's commit flag (read on its
-            # next frame), so cutting first stops the segmenter appending the
-            # next sentence's onset to the still-open buffer during that block.
-            # mark_emitted_early stays AFTER forward_final: its _mark_finalized
-            # prunes _emitted_early at cutoff==uid, so marking earlier would
-            # erase the guard that dedupes a natural final racing the commit.
-            # The single FIFO STT worker sets that guard before it could dequeue
-            # the racing final, so pop_emitted_early still holds.
-            p.segmenter.request_commit(job.utterance_id)
-            forward_final(p, job.utterance_id, result)
-            p._spec.mark_emitted_early(job.utterance_id)
-        return
-
-    # Final: a sentence already emitted early from the speculative pass must
-    # not send twice. This only fires in the race where the natural final was
-    # queued before request_commit cut the utterance; the common commit path
-    # emits no final at all.
-    if p._spec.pop_emitted_early(job.utterance_id):
-        # The early send's forward_final may have handed typing-off to a
-        # still-running MT job (own_by_mt): resolving it here as well would
-        # turn the indicator off while that job is still translating.
-        if not p._typing.is_owned_by_mt(job.utterance_id):
-            p._resolve_typing(job.utterance_id)
-        _mark_finalized(p, job.utterance_id)
+        p._spec.store_result(key, result)
         return
 
     # Reuse the speculative's cached result on identical samples, else
@@ -233,69 +160,6 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
         _finalize_dropped(p, job.utterance_id)  # abandoned: resolve typing and bound the caches
         return
     forward_final(p, job.utterance_id, result)
-
-
-def _process_partial_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
-    """Transcribe the growing utterance buffer and commit any newly-stable
-    complete sentence to the chatbox (its own message, its own id), never
-    finalizing the utterance and never resetting the segmenter buffer (that
-    would clip the next sentence's onset). The pending flag is cleared right
-    after transcribe on every path, so a coalesced partial can always fire
-    again."""
-    try:
-        result = p._transcribe(job.samples)
-    finally:
-        with p._partial_lock:
-            p._partial_pending = False
-    if stop.is_set():
-        return
-    if result is _NO_ENGINE or result is None:
-        return
-    if stop.is_set() or not p._should_caption():
-        return
-    if job.utterance_id <= p._spec.last_finalized():
-        return
-    _commit_stable_sentences(p, job.utterance_id, result)
-
-
-def _commit_stable_sentences(p: "Pipeline", utterance_id: int, result: "SttResult") -> None:
-    """Commit each complete sentence that is followed by more text AND stable
-    across two consecutive partials (CommitTracker.stable_new). Each committed
-    sentence gets its own distinct id so the chatbox does not coalesce
-    successive sentences and the log shows each as its own row. No
-    request_commit (the buffer must keep growing to preserve the next
-    sentence's onset); no finalize (the utterance is still active)."""
-    cfg = p._config.vad
-    if not cfg.sentence_inject:
-        return
-    if (result.no_speech_prob >= _COMMIT_MAX_NO_SPEECH
-            or result.avg_logprob <= _COMMIT_MIN_LOGPROB):
-        return  # low-confidence partial: let the whole-utterance final handle it
-    followed = followed_complete_sentences(result.text, cfg.sentence_min_words)
-    new = p._commits.stable_new(utterance_id, followed)
-    if not new:
-        return
-    src = resolve_source_language(p, result.language)
-    if src is None:
-        return  # "auto" hit an unregistered language: let the final send it untranslated
-    for sentence in new:
-        _send_caption(p, p._next_message_id(), sentence, src, language=result.language)
-
-
-def _should_inject_sentence(p: "Pipeline", result: "SttResult | None") -> bool:
-    """Whether a speculative result is a complete sentence worth sending now
-    (feature enabled, non-empty result, confident partial, terminal
-    punctuation past the minimum word count). A low-confidence pause
-    snapshot is left for the whole-utterance final, which is more accurate
-    in noise."""
-    cfg = p._config.vad
-    return (
-        cfg.sentence_inject
-        and result is not None
-        and result.no_speech_prob < _COMMIT_MAX_NO_SPEECH
-        and result.avg_logprob > _COMMIT_MIN_LOGPROB
-        and ends_sentence(result.text, cfg.sentence_min_words)
-    )
 
 
 def _send_caption(
@@ -373,37 +237,11 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         _mark_finalized(p, utterance_id)
         return
 
-    sentences = split_sentences(result.text)
-    remaining = p._commits.uncommitted(utterance_id, sentences)
-    if sentences and not remaining:
-        # Every sentence already streamed out by the partials or the pause,
-        # so there is nothing new to send.
-        p._resolve_typing(utterance_id)
-        _mark_finalized(p, utterance_id)
-        return
-    if len(remaining) == len(sentences):
-        # No sentence streamed early (or the text has no sentence boundary):
-        # the whole transcription goes out as one caption under the utterance id.
-        _send_caption(
-            p,
-            utterance_id,
-            result.text,
-            src,
-            language=result.language,
-            avg_logprob=result.avg_logprob,
-            no_speech_prob=result.no_speech_prob,
-        )
-        _mark_finalized(p, utterance_id)
-        return
-    # Some sentences streamed early. Send the rest one caption each, in text
-    # order, so a short sentence the partials skipped is never merged with a
-    # non-adjacent tail. Each gets its own id, like the partial commits; the
-    # per-caption sends own their typing-off, and the utterance's own typing
-    # (begun only at a pause) is resolved here so _mark_finalized does not
-    # prune it as an orphan.
-    for sentence in remaining:
-        _send_caption(p, p._next_message_id(), sentence, src, language=result.language)
-    p._resolve_typing(utterance_id)
+    _send_caption(
+        p, utterance_id, result.text, src,
+        language=result.language, avg_logprob=result.avg_logprob,
+        no_speech_prob=result.no_speech_prob,
+    )
     _mark_finalized(p, utterance_id)
 
 

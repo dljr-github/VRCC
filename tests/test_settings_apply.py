@@ -135,19 +135,6 @@ def test_sensitivity_slider_applies_vad(qapp, tmp_path):
         dlg.deleteLater()
 
 
-def test_sentence_inject_toggle_writes_config(qapp, tmp_path):
-    # Not a live-apply field (read at use time), so this only checks the
-    # config write, not apply.calls.
-    store = _store(tmp_path)
-    dlg = SettingsDialog(store)
-    try:
-        check = dlg._sentence_inject_check
-        check.setChecked(not check.isChecked())
-        assert store.config.vad.sentence_inject == check.isChecked()
-    finally:
-        dlg.deleteLater()
-
-
 def test_update_check_toggle_writes_config(qapp, tmp_path):
     # Not a live-apply field (read at next launch), so this only checks the
     # config write, not apply.calls.

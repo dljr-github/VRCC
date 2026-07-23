@@ -51,8 +51,7 @@ _RESET_FIELDS = {
     "vad": (
         "threshold", "silence_threshold", "speculative_silence_ms",
         "finalize_silence_ms", "min_utterance_ms", "pre_roll_ms",
-        "max_utterance_s", "sentence_inject", "sentence_min_words",
-        "partial_interval_ms",
+        "max_utterance_s",
     ),
     "audio": (
         "energy_gate_enabled", "energy_threshold",
@@ -318,9 +317,6 @@ def _resync_reset_widgets(dlg: "SettingsDialog") -> None:
         sens.setValue(90 - int(round(cfg.vad.threshold * 100)))
     for field, spin in dlg._vad_spins.items():
         spin.setValue(getattr(cfg.vad, field))
-    inject = getattr(dlg, "_sentence_inject_check", None)
-    if inject is not None:
-        inject.setChecked(cfg.vad.sentence_inject)
 
     check = getattr(dlg, "_denoise_check", None)
     if check is not None:
