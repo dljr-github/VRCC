@@ -59,6 +59,12 @@ class SttConfig(BaseModel):
     cpu_threads: int = 0
     num_workers: int = 1
     source_language: str = "English"  # display name; "auto" = detect
+    # Display names of every language the user says they speak, from the
+    # first-run wizard. Purely a recommendation input -- transcription still
+    # runs off `source_language` (which the wizard derives from this: the one
+    # entry, or "auto" when there are several). Empty means never asked, and
+    # the recommender falls back to `source_language`.
+    spoken_languages: list[str] = Field(default_factory=list)
     beam_size: int = 1
     temperature: float = 0.0
     condition_on_previous_text: bool = False

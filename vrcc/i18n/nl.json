@@ -296,6 +296,7 @@
   "Where captions are sent. Most people never change this.": "Waar ondertitels naartoe worden gestuurd. De meeste mensen hoeven dit nooit aan te passen.",
   "Which microphone to listen to.": "Naar welke microfoon er wordt geluisterd.",
   "You speak": "Jij spreekt",
+  "You speak (tick every language you use)": "Jij spreekt (vink elke taal aan die je gebruikt)",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "Je NVIDIA-driver is te oud voor GPU-modus; er wordt nu op de CPU gedraaid. Update naar driver 570+.",
   "Your spoken language could not be matched, sending your words without translation.": "Je gesproken taal kon niet worden herkend, je woorden worden zonder vertaling verzonden.",
   "a model failed to load": "een model kon niet worden geladen",

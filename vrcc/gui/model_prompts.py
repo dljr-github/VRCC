@@ -116,7 +116,7 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
         if spec is None or spec.reports_language or not cfg.translate.enabled:
             return None
         candidate, _ = recommend.best_downloaded(
-            dm, translate=False, tier=recommend.tier_for_config(cfg), language=None
+            dm, translate=False, tier=recommend.tier_for_config(cfg), languages=None
         )
         if candidate is None or candidate == cfg.stt.model:
             return None
@@ -131,7 +131,7 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
         dm,
         translate=False,
         tier=recommend.tier_for_config(cfg),
-        language=lang.whisper,
+        languages=(lang.whisper,),
     )
     if candidate is None or candidate == cfg.stt.model:
         return None

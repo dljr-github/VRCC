@@ -296,6 +296,7 @@
   "Where captions are sent. Most people never change this.": "Куди надсилаються субтитри. Більшість людей ніколи цього не змінює.",
   "Which microphone to listen to.": "Який мікрофон слухати.",
   "You speak": "Ви говорите",
+  "You speak (tick every language you use)": "Ви говорите (позначте всі мови, якими користуєтеся)",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "Ваш драйвер NVIDIA надто старий для режиму GPU; працюємо на CPU. Оновіть драйвер до версії 570 або новішої.",
   "Your spoken language could not be matched, sending your words without translation.": "Не вдалося визначити мову, якою ви говорите, ваші слова надсилаються без перекладу.",
   "a model failed to load": "не вдалося завантажити модель",

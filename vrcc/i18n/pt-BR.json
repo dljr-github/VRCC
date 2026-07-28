@@ -296,6 +296,7 @@
   "Where captions are sent. Most people never change this.": "Para onde as legendas são enviadas. A maioria das pessoas nunca muda isso.",
   "Which microphone to listen to.": "Qual microfone usar.",
   "You speak": "Você fala",
+  "You speak (tick every language you use)": "Você fala (marque todos os idiomas que usa)",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "Seu driver NVIDIA é antigo demais para o modo GPU; executando na CPU. Atualize para o driver 570+.",
   "Your spoken language could not be matched, sending your words without translation.": "Não foi possível identificar o idioma falado, suas palavras estão sendo enviadas sem tradução.",
   "a model failed to load": "um modelo falhou ao carregar",

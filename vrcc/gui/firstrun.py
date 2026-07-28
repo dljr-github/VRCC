@@ -1,9 +1,10 @@
 """First-run wizard: pick a hardware-appropriate model preset and download it.
 
-Shown by app.run when the configured models are missing. Proposes the
-recommend-tier STT+MT preset plus a "You speak"/"They read" language picker,
-then downloads both models on a background thread. DownloadManager is injected
-so tests drive the flow without a network.
+Shown by app.run when the configured models are missing. Asks which languages
+the user speaks (:mod:`vrcc.gui.firstrun_languages`) and who reads the
+translation, proposes the recommend-tier STT+MT preset for that answer, then
+downloads both models on a background thread. DownloadManager is injected so
+tests drive the flow without a network.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 from vrcc.core import hardware, recommend
 from vrcc.core.config import ConfigStore
 from vrcc.core.languages import LANGUAGES
+from vrcc.gui import firstrun_languages
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.model_labels import fmt_size, mt_display_name, whisper_display_name
 from vrcc.gui.models_dialog import ModelsDialog
@@ -35,8 +37,6 @@ from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
 logger = logging.getLogger("vrcc.gui.firstrun")
-
-_AUTO = "auto"
 
 _DEVICE_TOOLTIP = tr_noop(
     "GPU gives near-instant captions but uses video memory (VRAM) that "
@@ -73,7 +73,7 @@ class FirstRunWizard(QDialog):
         # (user decision); _refresh_plan re-derives this pair on change.
         self._default_choice = recommend.default_device_choice()
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
-            self._default_choice, tier=self.tier, language=self._source_whisper_code()
+            self._default_choice, tier=self.tier, languages=self._spoken_codes()
         )
         # Resolved once at construction (theme + text size are restart-applied).
         self._p = PALETTE[resolve_theme(self._store.config.gui.theme)]
@@ -96,11 +96,11 @@ class FirstRunWizard(QDialog):
     def _translation_enabled(self) -> bool:
         return self._store.config.translate.enabled
 
-    def _source_whisper_code(self) -> str | None:
-        """Whisper code for the configured spoken language; ``None`` for
-        "auto" (or an unknown name), keeping the recommendation language-blind."""
-        lang = LANGUAGES.get(self._store.config.stt.source_language)
-        return None if lang is None else lang.whisper
+    def _spoken_codes(self) -> tuple[str, ...]:
+        """Whisper codes for the ticked spoken languages. Empty when nothing is
+        ticked, which keeps the recommendation language-blind rather than
+        guessing -- the same plan the wizard showed before it asked."""
+        return recommend.spoken_whisper_codes(self._store.config)
 
     def _total_mb(self) -> int:
         total = WHISPER_MODELS[self.recommended_whisper].size_mb
@@ -142,15 +142,15 @@ class FirstRunWizard(QDialog):
         # -- language picker ("You speak" / "They read") -----------------------
         root.addWidget(self._section_label(tr("Pick your languages")))
 
+        speak_label = QLabel(tr("You speak (tick every language you use)"))
+        speak_label.setStyleSheet(f"color: {self._p['muted']};")
+        root.addWidget(speak_label)
+
+        self._spoken_list = firstrun_languages.build_spoken_picker(self)
+        root.addWidget(self._spoken_list)
+
         lang_row = QHBoxLayout()
         lang_row.setSpacing(8)
-        lang_row.addWidget(QLabel(tr("You speak")))
-        self._source_combo = no_wheel(QComboBox())
-        self._source_combo.addItems([_AUTO, *LANGUAGES.keys()])
-        self._set_combo_text(self._source_combo, self._store.config.stt.source_language)
-        self._source_combo.currentTextChanged.connect(self._on_source_changed)
-        lang_row.addWidget(self._source_combo)
-
         lang_row.addWidget(
             icon_label(arrow_svg(self._p["muted"]), 16, colors=self._p, fallback_text="->")
         )
@@ -269,12 +269,12 @@ class FirstRunWizard(QDialog):
 
     def _refresh_plan(self) -> None:
         """Recompute the recommended preset for the device choice + spoken
-        language and rewrite the Detected/Speech/Translation/Total lines in
+        languages and rewrite the Detected/Speech/Translation/Total lines in
         place."""
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
             "cpu" if self._cpu_chosen() else "gpu",
             tier=self.tier,
-            language=self._source_whisper_code(),
+            languages=self._spoken_codes(),
         )
         whisper = WHISPER_MODELS[self.recommended_whisper]
         tier_label = {
@@ -315,15 +315,6 @@ class FirstRunWizard(QDialog):
         if idx >= 0:
             combo.setCurrentIndex(idx)
 
-    def _on_source_changed(self, text: str) -> None:
-        # The combo's initial selection is set before this signal is connected in
-        # _build_ui, so this only fires on a real user edit -- no _loading guard needed.
-        self._store.config.stt.source_language = text
-        self._store.save_soon()
-        # The recommendation is language-aware (a restricted model can lead
-        # only when it covers the spoken language), so re-plan on change.
-        self._refresh_plan()
-
     def _on_target_changed(self, text: str) -> None:
         self._store.config.translate.targets = [text]
         self._store.save_soon()
@@ -338,8 +329,16 @@ class FirstRunWizard(QDialog):
         self._store.save_soon()
 
     def _apply_recommendation(self) -> None:
-        """Point config at the recommended models + chosen device, persist soon."""
+        """Point config at the recommended models + chosen device, persist soon.
+
+        Also commits the spoken-language ticks, which a user who accepted the
+        pre-ticked default never edited -- without this the answer the wizard
+        visibly acted on would not be the one written down, and a later
+        re-recommend would disagree with the models it just downloaded.
+        """
         cfg = self._store.config
+        cfg.stt.spoken_languages = firstrun_languages.checked_spoken(self)
+        firstrun_languages.apply_source_language(self)
         cfg.stt.model = self.recommended_whisper
         if self._translation_enabled():
             cfg.translate.model = self.recommended_mt
@@ -445,7 +444,7 @@ class FirstRunWizard(QDialog):
         whisper, mt = recommend.best_downloaded(
             self._dm, translate=cfg.translate.enabled,
             tier="cpu" if self._cpu_chosen() else self.tier,
-            language=self._source_whisper_code(),
+            languages=self._spoken_codes(),
         )
         if whisper and (mt or not cfg.translate.enabled):
             cfg.stt.model = whisper

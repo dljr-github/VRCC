@@ -296,6 +296,7 @@
   "Where captions are sent. Most people never change this.": "Altyazıların gönderildiği yer. Çoğu kişi bunu hiç değiştirmez.",
   "Which microphone to listen to.": "Hangi mikrofonun dinleneceği.",
   "You speak": "Konuştuğun dil",
+  "You speak (tick every language you use)": "Konuştuğun dil (kullandığın her dili işaretle)",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "NVIDIA sürücün GPU modu için çok eski; CPU üzerinde çalışılıyor. Sürücüyü 570+ sürümüne güncelle.",
   "Your spoken language could not be matched, sending your words without translation.": "Konuştuğun dil eşleştirilemedi, sözlerin çeviri yapılmadan gönderiliyor.",
   "a model failed to load": "bir model yüklenemedi",

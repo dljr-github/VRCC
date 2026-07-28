@@ -296,6 +296,7 @@
   "Where captions are sent. Most people never change this.": "Où les sous-titres sont envoyés. La plupart des gens n'y touchent jamais.",
   "Which microphone to listen to.": "Le microphone à écouter.",
   "You speak": "Tu parles",
+  "You speak (tick every language you use)": "Tu parles (coche toutes les langues que tu utilises)",
   "Your NVIDIA driver is too old for GPU mode; running on CPU. Update to driver 570+.": "Ton pilote NVIDIA est trop ancien pour le mode GPU ; exécution sur CPU. Installe le pilote 570 ou plus récent.",
   "Your spoken language could not be matched, sending your words without translation.": "Votre langue parlée n'a pas pu être identifiée, vos mots sont envoyés sans traduction.",
   "a model failed to load": "un modèle n'a pas pu se charger",
