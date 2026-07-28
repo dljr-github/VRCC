@@ -34,6 +34,15 @@ _WHISPER_LABEL_MARKERS = (
     tr_noop("Distil-Large v3.5 (English)"),
     tr_noop("Distil-Small (English)"),
     tr_noop("Parakeet v3 (European languages)"),
+    tr_noop("SenseVoice (Chinese/Japanese/Korean/English)"),
+)
+
+# Same deal for WhisperSpec.language_note: the registry holds the English
+# source text, these markers put it in the catalog. Keep in sync with
+# vrcc/stt/registry.py.
+_LANGUAGE_NOTE_MARKERS = (
+    tr_noop("European languages only"),
+    tr_noop("Chinese, Japanese, Korean and English only"),
 )
 
 
@@ -71,6 +80,7 @@ _WHISPER_LEAD_INS: dict[str, str] = {
     "distil-large-v3.5": tr_noop("Near-most accurate, fast"),
     "distil-small.en": tr_noop("Fast, small download"),
     "parakeet-tdt-0.6b-v3": tr_noop("Very accurate and fast"),
+    "sense-voice-small": tr_noop("Fast and accurate, small download"),
 }
 
 _MT_LEAD_INS: dict[str, str] = {
@@ -97,8 +107,9 @@ def model_blurb(kind: str, model_id: str) -> str:
 
     ``kind`` is ``"whisper"`` or ``"mt"``. Includes "· non-commercial use"
     for MT specs whose ``license`` contains "NC"; includes "· English only"
-    for voice specs with ``english_only`` True and "· European languages only"
-    for other language-restricted voice specs. Unknown ids return ``""``.
+    for voice specs with ``english_only`` True and the spec's own
+    ``language_note`` for other language-restricted voice specs. Unknown ids
+    return ``""``.
     """
     if kind == "whisper":
         spec = WHISPER_MODELS.get(model_id)
@@ -110,11 +121,8 @@ def model_blurb(kind: str, model_id: str) -> str:
         blurb = " · ".join(parts)
         if spec.english_only:
             blurb += " · " + tr("English only")
-        elif spec.languages is not None:
-            # Today every language-restricted non-English model (Parakeet)
-            # covers the same 25 European languages; revisit the wording if
-            # that changes.
-            blurb += " · " + tr("European languages only")
+        elif spec.language_note is not None:
+            blurb += " · " + tr(spec.language_note)
         return blurb
     if kind == "mt":
         spec = MT_MODELS.get(model_id)

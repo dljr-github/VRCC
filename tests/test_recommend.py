@@ -38,18 +38,26 @@ def test_presets_cover_all_tiers():
 # reference machine recorded in benchmarks/rtx-5090-ryzen-9950x3d.json): a
 # registry or benchmark change that reorders a tier must show up here as a
 # conscious diff, not silently reshuffle the recommendations.
+#
+# sense-voice-small trails every tier because it has no STT_BENCH row yet: it
+# is offered in Settings but never auto-recommended until someone runs
+# tools/bench_stt.py on the reference machine and adds its row. Note the
+# harness scores WER on English LibriSpeech, so a CJK-relevant accuracy figure
+# needs a CJK set on top of that; the latency columns transfer as they are.
 _EXPECTED_WHISPER_PREFERENCE = {
     # parakeet is language-restricted, so a language-blind walk trails it
     # behind every unrestricted model, accurate and in-budget though it is.
     "gpu_high": [
         "large-v3-turbo", "large-v3", "medium", "small", "base", "tiny",
         "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
+        "sense-voice-small",
     ],
     # large-v3 (3090 MB) fails the gpu_low VRAM cap and drops to the
     # unrestricted tail.
     "gpu_low": [
         "large-v3-turbo", "medium", "small", "base", "tiny", "large-v3",
         "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
+        "sense-voice-small",
     ],
     # On CPU parakeet stays inside the 1.0 s budget and beats every
     # unrestricted model on accuracy, but it is language-restricted, so a
@@ -58,6 +66,7 @@ _EXPECTED_WHISPER_PREFERENCE = {
         "small", "base", "tiny", "medium", "large-v3-turbo", "large-v3",
         "parakeet-tdt-0.6b-v3",
         "distil-small.en", "distil-large-v3.5",
+        "sense-voice-small",
     ],
 }
 
@@ -136,28 +145,38 @@ def test_rank_whisper_language_none_is_byte_identical_to_blind_lists(tier):
 
 def test_rank_whisper_cpu_english_puts_parakeet_first():
     # Once "en" is known, parakeet beats every whisper model on CPU: 2.3
-    # percent at 0.13 s, against small's 3.7 percent at 0.75 s.
+    # percent at 0.13 s, against small's 3.7 percent at 0.75 s. Every model
+    # here serves "en", so there is no trailing partition and unmeasured
+    # sense-voice-small closes the list.
     assert recommend._rank_whisper("cpu", language="en") == [
         "parakeet-tdt-0.6b-v3",
         "small", "distil-small.en", "base", "tiny",
         "medium", "distil-large-v3.5", "large-v3-turbo", "large-v3",
+        "sense-voice-small",
     ]
 
 
-def test_rank_whisper_cpu_japanese_matches_language_blind_order():
-    # No restricted model covers "ja", so every specialist trails and the
-    # list is identical to the language-blind cpu ordering.
-    assert recommend._rank_whisper("cpu", language="ja") == _EXPECTED_WHISPER_PREFERENCE["cpu"]
+def test_rank_whisper_cpu_japanese_leads_with_measured_whisper_models():
+    # sense-voice-small is the only restricted model that covers "ja", so it
+    # joins the leading partition -- but with no STT_BENCH row it sorts to the
+    # back of that partition, still ahead of the specialists that cannot serve
+    # Japanese at all. Adding its benchmark row is what moves it up.
+    assert recommend._rank_whisper("cpu", language="ja") == [
+        "small", "base", "tiny", "medium", "large-v3-turbo", "large-v3",
+        "sense-voice-small",
+        "parakeet-tdt-0.6b-v3", "distil-small.en", "distil-large-v3.5",
+    ]
 
 
 def test_rank_whisper_gpu_high_german_keeps_turbo_first():
     # GPU WER bands: turbo/large-v3 band 5, parakeet band 7, medium band 9,
     # so parakeet slots after large-v3 and before medium. The english-only
-    # distil pair cannot serve "de", so it trails.
+    # distil pair cannot serve "de", so it trails, and sense-voice-small
+    # (no German, no benchmark row) trails behind them.
     assert recommend._rank_whisper("gpu_high", language="de") == [
         "large-v3-turbo", "large-v3", "parakeet-tdt-0.6b-v3",
         "medium", "small", "base", "tiny",
-        "distil-large-v3.5", "distil-small.en",
+        "distil-large-v3.5", "distil-small.en", "sense-voice-small",
     ]
 
 

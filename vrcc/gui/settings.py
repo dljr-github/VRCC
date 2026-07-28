@@ -429,8 +429,8 @@ class SettingsDialog(QDialog):
         language. "auto" keeps models that detect the language within their
         set enabled, but greys those that can't detect at all (distil, which
         would transcribe as English regardless) and, while translation is on,
-        the onnx-asr models: they detect but tag every result "en", which
-        would mislabel the translator's source."""
+        those that detect but cannot report which language they heard: they
+        tag every result "en", which would mislabel the translator's source."""
         if self._model_combo is None:
             return
         source = self._source_combo.currentText()
@@ -438,7 +438,7 @@ class SettingsDialog(QDialog):
         for i, spec in self._limited_model_indices:
             if source == _AUTO:
                 enabled = spec.auto_language and not (
-                    spec.backend == "onnx_asr" and self._cfg.translate.enabled
+                    not spec.reports_language and self._cfg.translate.enabled
                 )
             else:
                 enabled = (

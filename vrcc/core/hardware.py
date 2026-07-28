@@ -375,11 +375,12 @@ def resolve(
 
 
 def _is_onnx_asr(model_id: str | None) -> bool:
-    """Whether ``model_id`` names an onnx-asr-backed registry spec (Parakeet)."""
+    """Whether ``model_id`` names an onnxruntime-backed registry spec
+    (Parakeet, SenseVoice)."""
     if model_id is None:
         return False
     spec = WHISPER_MODELS.get(model_id)
-    return spec is not None and spec.backend == "onnx_asr"
+    return spec is not None and spec.runs_on_onnxruntime
 
 
 def resolved_device(

@@ -1,8 +1,9 @@
-"""Offscreen GUI tests for the Speed/Quality Mode greying: onnx-asr voice
-models (Parakeet) decode greedily, so the profile's beam/temperature presets
-can't tune their captions -- the Mode control must grey out with an
-explanatory tooltip (and its visible description label must swap to the same
-explanation) while such a model is active, and recover on a switch.
+"""Offscreen GUI tests for the Speed/Quality Mode greying: the
+onnxruntime-backed voice models (Parakeet, SenseVoice) decode greedily, so the
+profile's beam/temperature presets can't tune their captions -- the Mode
+control must grey out with an explanatory tooltip naming the model (and its
+visible description label must swap to the same explanation) while such a
+model is active, and recover on a switch.
 """
 
 import os
@@ -15,7 +16,12 @@ from PySide6.QtWidgets import QApplication
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.gui import settings as settings_mod
 from vrcc.gui.settings import SettingsDialog
+from vrcc.gui.model_labels import whisper_display_name
 from vrcc.gui.settings_pages import _MODE_DESC, _MODE_LOCKED_TOOLTIP, _MODE_TOOLTIP
+
+
+def _locked_text(model_id):
+    return _MODE_LOCKED_TOOLTIP.format(name=whisper_display_name(model_id))
 
 
 @pytest.fixture(scope="module")
@@ -29,15 +35,15 @@ def _dialog(tmp_path, model_id):
     return SettingsDialog(store), store  # headless: all models offered
 
 
-@pytest.mark.parametrize("model_id", ["parakeet-tdt-0.6b-v3"])
+@pytest.mark.parametrize("model_id", ["parakeet-tdt-0.6b-v3", "sense-voice-small"])
 def test_mode_disabled_with_tooltip_for_greedy_models(qapp, tmp_path, model_id):
     dlg, store = _dialog(tmp_path, model_id)
     try:
         assert not dlg._mode.isEnabled()
-        assert dlg._mode.toolTip() == _MODE_LOCKED_TOOLTIP
+        assert dlg._mode.toolTip() == _locked_text(model_id)
         # The visible description must not advertise a Speed/Quality trade-off
         # the locked control can't deliver.
-        assert dlg._mode_desc.text() == _MODE_LOCKED_TOOLTIP
+        assert dlg._mode_desc.text() == _locked_text(model_id)
         # The segments grey with the control, and the stored profile stays
         # put: its VAD/translation parts still apply at the current position.
         assert not dlg._mode._buttons["Quality"].isEnabled()
@@ -70,8 +76,8 @@ def test_mode_reacts_to_model_switch_in_dialog(qapp, tmp_path, monkeypatch):
         combo.setCurrentIndex(combo.findData("parakeet-tdt-0.6b-v3"))
         assert store.config.stt.model == "parakeet-tdt-0.6b-v3"
         assert not dlg._mode.isEnabled()
-        assert dlg._mode.toolTip() == _MODE_LOCKED_TOOLTIP
-        assert dlg._mode_desc.text() == _MODE_LOCKED_TOOLTIP
+        assert dlg._mode.toolTip() == _locked_text("parakeet-tdt-0.6b-v3")
+        assert dlg._mode_desc.text() == _locked_text("parakeet-tdt-0.6b-v3")
         assert store.config.gui.profile == "latency"  # position untouched
 
         combo.setCurrentIndex(combo.findData("small"))

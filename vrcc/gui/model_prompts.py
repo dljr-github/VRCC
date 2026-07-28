@@ -23,7 +23,7 @@ _AUTO = "auto"
 # Hedged on purpose ("usually"): relative CPU/GPU speed varies by machine; on
 # the reference box the int8 exports measured no faster on CUDA than CPU.
 _CPU_OFFER = tr_noop(
-    "Parakeet usually runs about as fast on the CPU as on the GPU, "
+    "{name} usually runs about as fast on the CPU as on the GPU, "
     "and GPU mode takes VRAM away from VRChat. Use the CPU for this model?"
 )
 
@@ -51,16 +51,17 @@ _AUTO_LOCKED_TIP = tr_noop(
 
 def cpu_offer_needed(cfg, model_id: str) -> bool:
     """Only an EXPLICIT ``cuda`` device warrants the CPU offer: "auto" already
-    runs onnx-asr models on the CPU (OnnxAsrEngine's deliberate resolution)."""
+    runs the onnxruntime-backed models on the CPU (their engines' deliberate
+    resolution)."""
     spec = WHISPER_MODELS.get(model_id)
     return (
-        spec is not None and spec.backend == "onnx_asr" and cfg.stt.device == "cuda"
+        spec is not None and spec.runs_on_onnxruntime and cfg.stt.device == "cuda"
     )
 
 
 def maybe_prefer_cpu(dlg, model_id: str) -> None:
-    """Settings hook for both explicit-CUDA triggers (an onnx-asr model picked
-    while on cuda; the device switched to cuda under an onnx-asr model): ask,
+    """Settings hook for both explicit-CUDA triggers (an onnxruntime-backed
+    model picked while on cuda; the device switched to cuda under one): ask,
     and on Yes flip ``stt.device`` to "cpu" and re-point the Advanced device
     combo without re-firing its handler."""
     if not cpu_offer_needed(dlg._cfg, model_id):
@@ -70,7 +71,7 @@ def maybe_prefer_cpu(dlg, model_id: str) -> None:
     answer = QMessageBox.question(
         dlg,
         tr("Use the CPU?"),
-        tr(_CPU_OFFER),
+        tr(_CPU_OFFER, name=whisper_display_name(model_id)),
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.Yes,
     )
@@ -104,15 +105,15 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
     """A downloaded voice model suited to ``source_display`` when the active
     one cannot serve it, else ``None`` (an unknown name / no download manager
     / nothing compatible downloaded). "auto" proposes only in the translation
-    mislabel case: an onnx-asr model detects the spoken language but tags the
-    result "en", so while translation is on the offer targets a whisper model
-    with detection (it detects AND reports); every other "auto" case (distil
-    models, which cannot detect at all) returns ``None``. Qt-free."""
+    mislabel case: a model that detects the spoken language but cannot report
+    which one it heard tags every result "en", so while translation is on the
+    offer targets a model that detects AND reports; every other "auto" case
+    (distil models, which cannot detect at all) returns ``None``. Qt-free."""
     if dm is None:
         return None
     spec = WHISPER_MODELS.get(cfg.stt.model)
     if source_display == _AUTO:
-        if spec is None or spec.backend != "onnx_asr" or not cfg.translate.enabled:
+        if spec is None or spec.reports_language or not cfg.translate.enabled:
             return None
         candidate, _ = recommend.best_downloaded(
             dm, translate=False, tier=recommend.tier_for_config(cfg), language=None
@@ -120,7 +121,7 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
         if candidate is None or candidate == cfg.stt.model:
             return None
         target = WHISPER_MODELS[candidate]
-        if target.backend != "whisper" or not target.auto_language:
+        if not target.reports_language or not target.auto_language:
             return None
         return candidate
     lang = LANGUAGES.get(source_display)
@@ -143,17 +144,17 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
 def unsupported_stored_language(cfg) -> bool:
     """Whether the stored spoken language is outside what the active voice
     model can serve (the greying predicate): "auto" is unsupported when the
-    model cannot detect the language itself, or (onnx-asr backend) detects
-    it but tags every result "en" while translation is on, mislabeling the
-    translator's source; an unknown model or language (a hand-edited config)
-    restricts nothing. Qt-free."""
+    model cannot detect the language itself, or detects it but cannot report
+    which one it heard while translation is on, mislabeling the translator's
+    source; an unknown model or language (a hand-edited config) restricts
+    nothing. Qt-free."""
     spec = WHISPER_MODELS.get(cfg.stt.model)
     if spec is None:
         return False
     if cfg.stt.source_language == _AUTO:
         if not spec.auto_language:
             return True
-        return spec.backend == "onnx_asr" and cfg.translate.enabled
+        return not spec.reports_language and cfg.translate.enabled
     lang = LANGUAGES.get(cfg.stt.source_language)
     return lang is not None and not _covers(spec, lang.whisper)
 
@@ -232,8 +233,8 @@ def grey_unsupported_languages(combo, model_id: str, *, translating: bool = Fals
     """Disable the spoken-language entries the active voice model can't
     serve, each with a tooltip naming the model. "auto" needs the model to
     detect the spoken language itself and, under ``translating``, to report
-    what it detected: the onnx-asr backend tags every auto result "en",
-    which would hand the translator the wrong source, so its tooltip names
+    what it detected: such a model tags every auto result "en", which would
+    hand the translator the wrong source, so its tooltip names
     the ways out (a concrete language, or translation off). An unknown model
     id (hand-edited config) restricts nothing. Symmetric to the model-combo
     greying: the user switches the voice model first (or turns translation
@@ -249,7 +250,7 @@ def grey_unsupported_languages(combo, model_id: str, *, translating: bool = Fals
         if text == _AUTO:
             detects = spec is None or spec.auto_language
             reports = not (
-                spec is not None and spec.backend == "onnx_asr" and translating
+                spec is not None and not spec.reports_language and translating
             )
             item.setEnabled(detects and reports)
             if detects and not reports:

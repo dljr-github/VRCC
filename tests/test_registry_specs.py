@@ -77,7 +77,14 @@ def test_whisper_spec_is_frozen():
 
 def test_backends_are_known():
     for spec in WHISPER_MODELS.values():
-        assert spec.backend in {"whisper", "onnx_asr"}, f"{spec.id}: {spec.backend!r}"
+        assert spec.backend in {"whisper", "onnx_asr", "sensevoice"}, (
+            f"{spec.id}: {spec.backend!r}"
+        )
+
+
+def test_runs_on_onnxruntime_matches_backend():
+    for spec in WHISPER_MODELS.values():
+        assert spec.runs_on_onnxruntime == (spec.backend != "whisper")
 
 
 def test_whisper_backed_specs_have_no_onnx_asr_fields():
@@ -86,6 +93,7 @@ def test_whisper_backed_specs_have_no_onnx_asr_fields():
             assert spec.repo is None
             assert spec.quantization is None
             assert spec.asr_type is None
+            assert spec.archive_url is None
 
 
 def test_onnx_asr_backed_specs_are_fully_described():
@@ -121,7 +129,30 @@ def test_parakeet_spec_fields():
     assert spec.asr_type == "nemo-conformer-tdt"
     assert spec.english_only is False
     assert spec.auto_language is True  # detects the language within its set
+    assert spec.reports_language is False  # ...but tags every result "en"
     _assert_european_25(spec.languages)
+
+
+def test_sense_voice_spec_fields():
+    spec = WHISPER_MODELS["sense-voice-small"]
+    assert spec.backend == "sensevoice"
+    assert spec.asr_type is None  # not an onnx-asr model type
+    assert spec.quantization == "int8"
+    assert spec.archive_url and spec.archive_url.endswith(".tar.bz2")
+    assert spec.english_only is False
+    # Detects the language AND reports which one, so a translating "auto"
+    # source stays correct -- the one thing parakeet cannot do.
+    assert spec.auto_language is True
+    assert spec.reports_language is True
+    assert spec.languages == ("en", "ja", "ko", "zh")
+
+
+def test_language_restricted_specs_carry_a_note():
+    """A restricted set the user cannot infer from the blurb is a trap; the
+    english_only pair has its own wording, everything else must say so."""
+    for spec in WHISPER_MODELS.values():
+        if spec.languages is not None and not spec.english_only:
+            assert spec.language_note, f"{spec.id} needs a language_note"
 
 
 # --------------------------------------------------------------------------

@@ -1,10 +1,11 @@
 """Download, presence-check and delete STT/MT model files.
 
 Lays models out as ``<models_dir>/{mt,whisper}/<id>`` (``whisper/`` holds
-every voice model -- the directory name is historical, the onnx-asr backed
-NeMo exports land there too), delegating to ``snapshot_download`` (MT +
-onnx-asr) / ``download_model`` (faster-whisper) and reporting
-:class:`DownloadProgress` on the bus. Downloader errors propagate.
+every voice model -- the directory name is historical, the ONNX exports land
+there too), delegating to ``snapshot_download`` (MT + onnx-asr) /
+``download_model`` (faster-whisper) / a plain archive fetch (specs carrying an
+``archive_url``) and reporting :class:`DownloadProgress` on the bus. Downloader
+errors propagate.
 """
 
 from __future__ import annotations
@@ -13,7 +14,9 @@ import contextlib
 import logging
 import os
 import shutil
-from pathlib import Path
+import tarfile
+import urllib.request
+from pathlib import Path, PurePosixPath
 from typing import Callable, TypeVar
 
 import huggingface_hub
@@ -29,6 +32,12 @@ from vrcc.translate.registry import MtModelSpec
 _MODEL_BIN = "model.bin"
 _KINDS = ("mt", "whisper")
 _HF_MIRROR = "https://hf-mirror.com"
+# Connect/read timeout for the archive fetch. Generous: this is a multi-hundred
+# MB download over whatever connection the user has, and the read timeout
+# applies per chunk, not to the whole transfer.
+_ARCHIVE_TIMEOUT_S = 60
+# Coalesce archive progress to this granularity (see _ProgressReader).
+_PROGRESS_STEP_BYTES = 1024 * 1024
 
 _log = logging.getLogger(__name__)
 _T = TypeVar("_T")
@@ -76,17 +85,61 @@ def _with_mirror_fallback(primary: Callable[[], _T]) -> _T:
             raise mirror_err from primary_err
 
 
-def _onnx_asr_files(spec: WhisperSpec) -> list[str]:
-    """The exact files onnx-asr needs to run ``spec`` offline (doubles as the
-    snapshot allow_patterns, so nothing else is fetched). The transducer
-    exports split into encoder + decoder_joint."""
+def _required_files(spec: WhisperSpec) -> list[str]:
+    """The exact files ``spec`` needs to load offline.
+
+    Triple duty: the snapshot allow_patterns (so nothing else is fetched), the
+    archive member allow-list, and the "is it downloaded?" completeness check.
+    Layouts differ per backend, so this must branch rather than assume the
+    transducer shape -- a spec whose files it gets wrong downloads the wrong
+    set and then reports as never-downloaded forever.
+    """
     suffix = f".{spec.quantization}" if spec.quantization else ""
+    if spec.backend == "sensevoice":
+        return [f"model{suffix}.onnx", "tokens.txt"]
+    # onnx_asr: the NeMo transducer exports split into encoder + decoder_joint.
     return [
         "config.json",
         "vocab.txt",
         f"encoder-model{suffix}.onnx",
         f"decoder_joint-model{suffix}.onnx",
     ]
+
+
+class _ProgressReader:
+    """Read-only file wrapper that publishes :class:`DownloadProgress` as bytes
+    go by.
+
+    ``tarfile``'s stream mode only ever calls ``read()`` on the object it is
+    given, so that is the one method that has to work; the byte counter lives
+    here because a streamed response has no reliable position of its own.
+    Updates are coalesced to :data:`_PROGRESS_STEP_BYTES` -- tarfile reads in
+    small blocks, and publishing every one of them would put tens of thousands
+    of events on the bus for a single download.
+    """
+
+    def __init__(self, stream, bus: EventBus, model_id: str, total: int) -> None:
+        self._stream = stream
+        self._bus = bus
+        self._model_id = model_id
+        self._total = total
+        self._seen = 0
+        self._published = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._stream.read(size)
+        if chunk:
+            self._seen += len(chunk)
+            crossed = self._seen - self._published >= _PROGRESS_STEP_BYTES
+            if self._total and (crossed or self._seen >= self._total):
+                self._published = self._seen
+                self._bus.publish(
+                    DownloadProgress(self._model_id, self._seen, self._total)
+                )
+        return chunk
+
+    def close(self) -> None:
+        self._stream.close()
 
 
 class DownloadManager:
@@ -115,8 +168,8 @@ class DownloadManager:
     def is_whisper_downloaded(self, model_id: str) -> bool:
         d = self.whisper_model_dir(model_id)
         spec = WHISPER_MODELS.get(model_id)
-        if spec is not None and spec.backend == "onnx_asr":
-            return all((d / name).is_file() for name in _onnx_asr_files(spec))
+        if spec is not None and spec.backend != "whisper":
+            return all((d / name).is_file() for name in _required_files(spec))
         return (d / _MODEL_BIN).is_file()
 
     # -- downloads ---------------------------------------------------------
@@ -148,7 +201,8 @@ class DownloadManager:
     def ensure_whisper(self, model_id: str) -> Path:
         """Download the voice model unless already present.
 
-        onnx-asr models (Parakeet) come from their HF repo via
+        Specs carrying an ``archive_url`` (SenseVoice) fetch and unpack that
+        archive; onnx-asr models (Parakeet) come from their HF repo via
         ``snapshot_download`` (with byte progress, restricted to the files
         onnx-asr needs); faster-whisper models via ``download_model`` (no
         byte-level progress hook, so only the terminal ``done=True`` is
@@ -160,12 +214,14 @@ class DownloadManager:
             return target
 
         spec = WHISPER_MODELS.get(model_id)
-        if spec is not None and spec.backend == "onnx_asr":
+        if spec is not None and spec.archive_url:
+            self._download_archive(spec, target)
+        elif spec is not None and spec.backend == "onnx_asr":
             _with_mirror_fallback(
                 lambda: snapshot_download(
                     repo_id=spec.repo,
                     local_dir=str(target),
-                    allow_patterns=_onnx_asr_files(spec),
+                    allow_patterns=_required_files(spec),
                     tqdm_class=self._progress_tqdm(model_id),
                 )
             )
@@ -173,6 +229,45 @@ class DownloadManager:
             _with_mirror_fallback(lambda: download_model(model_id, output_dir=str(target)))
         self._publish_done(model_id)
         return target
+
+    def _download_archive(self, spec: WhisperSpec, target: Path) -> None:
+        """Fetch ``spec.archive_url`` and unpack the files ``spec`` needs.
+
+        Streams the response straight into the tar decoder, so the archive is
+        never written to disk and the download needs no scratch space beyond
+        the files themselves. Members are matched on their *basename* against
+        :func:`_required_files` and written flat into ``target``: no path out
+        of the archive is ever used, so a member naming ``../`` or an absolute
+        path cannot escape. A member set that does not cover everything the
+        spec needs raises rather than leaving a half-installed model that the
+        presence check would keep re-downloading.
+        """
+        wanted = set(_required_files(spec))
+        target.mkdir(parents=True, exist_ok=True)
+        extracted: set[str] = set()
+
+        url = spec.archive_url
+        with urllib.request.urlopen(url, timeout=_ARCHIVE_TIMEOUT_S) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            stream = _ProgressReader(response, self._bus, spec.id, total)
+            with tarfile.open(fileobj=stream, mode="r|bz2") as archive:
+                for member in archive:
+                    name = PurePosixPath(member.name).name
+                    if not member.isfile() or name not in wanted or name in extracted:
+                        continue
+                    source = archive.extractfile(member)
+                    if source is None:
+                        continue
+                    with open(target / name, "wb") as out:
+                        shutil.copyfileobj(source, out)
+                    extracted.add(name)
+
+        missing = sorted(wanted - extracted)
+        if missing:
+            raise RuntimeError(
+                f"{spec.archive_url} did not contain the files {spec.id!r} needs: "
+                f"{', '.join(missing)}"
+            )
 
     # -- delete ------------------------------------------------------------
 
