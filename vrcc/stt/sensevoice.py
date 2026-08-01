@@ -178,9 +178,12 @@ class SenseVoiceEngine:
     def warm_up(self) -> None:
         """Transcribe 0.5s of silence to prime the session/allocations (result
         discarded). Errors are not swallowed -- a failed warm-up means the
-        engine is unhealthy.
+        engine is unhealthy. Re-checks the provider state afterward, because
+        onnxruntime's CUDA->CPU fallback is a run-time event a build-time
+        check cannot see.
         """
         self.transcribe(np.zeros(_WARM_UP_SAMPLES, dtype=np.float32))
+        self._recheck_device_after_run()
 
     def unload(self) -> None:
         """Drop the session reference. Safe to call when not loaded."""
@@ -337,6 +340,32 @@ class SenseVoiceEngine:
         logger.warning("%s: %s", self._spec.id, detail)
         self._bus.publish(EngineStateChanged("stt", "fallback_cpu", detail))
         self._device = "cpu"
+
+    def _recheck_device_after_run(self) -> None:
+        """Downgrade ``_device`` to cpu when the session dropped CUDA during
+        its first run. onnxruntime performs the CUDA->CPU fallback (a missing
+        cuDNN kernel, for instance) at run time, not at build, and only then
+        removes CUDAExecutionProvider from get_providers() -- the build-time
+        ``_check_cuda_session`` runs before any op has executed, so it cannot
+        see this. Publishing the corrected ``ready`` after ``fallback_cpu``
+        restores the event invariant (fallback_cpu always immediately
+        precedes a ready) and stops ``_device``/the UI from claiming cuda for
+        a session that actually ran on CPU."""
+        if self._device != "cuda" or self._session is None:
+            return
+        try:
+            providers = set(self._session.get_providers())
+        except Exception:  # noqa: BLE001 -- session-like fakes may misbehave
+            return
+        if not providers or "CUDAExecutionProvider" in providers:
+            return
+        detail = "onnxruntime fell back to CPU at first run (CUDA kernel unavailable)"
+        logger.warning("%s: %s", self._spec.id, detail)
+        self._device = "cpu"
+        self._bus.publish(EngineStateChanged("stt", "fallback_cpu", detail))
+        self._bus.publish(
+            EngineStateChanged("stt", "ready", f"cpu:{self._spec.quantization or 'fp32'}")
+        )
 
     def _providers(self, device: str, index: int) -> tuple:
         """onnxruntime providers for the resolved device: CUDA (pinned to the

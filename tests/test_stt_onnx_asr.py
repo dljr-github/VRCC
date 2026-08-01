@@ -24,16 +24,25 @@ PARAKEET = WHISPER_MODELS[PARAKEET_ID]
 
 
 class _FakeModel:
-    """Records recognize() calls; returns a canned text."""
+    """Records recognize() calls; returns a canned text.
 
-    def __init__(self, text: str = "hello there") -> None:
+    ``providers_after_run`` mirrors onnxruntime's CUDA->CPU fallback, which
+    only shows up on the encoder session's get_providers() after the first
+    run: when set, the first recognize() call flips the encoder's reported
+    providers.
+    """
+
+    def __init__(self, text: str = "hello there", providers_after_run=None) -> None:
         self.text = text
         self.calls: list[SimpleNamespace] = []
+        self._providers_after_run = providers_after_run
 
     def recognize(self, samples, sample_rate=16000, **kwargs):
         self.calls.append(
             SimpleNamespace(samples=samples, sample_rate=sample_rate, kwargs=kwargs)
         )
+        if self._providers_after_run is not None:
+            self.asr._encoder._providers = list(self._providers_after_run)
         return self.text
 
 
@@ -56,13 +65,15 @@ class _RecordingFactory:
     """
 
     def __init__(
-        self, text: str = "hello there", fail_at=(), session_providers=None
+        self, text: str = "hello there", fail_at=(), session_providers=None,
+        providers_after_run=None,
     ) -> None:
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeModel] = []
         self._text = text
         self._fail_at = set(fail_at)
         self._session_providers = session_providers
+        self._providers_after_run = providers_after_run
 
     def __call__(self, model, path, *, quantization, providers):
         idx = len(self.calls)
@@ -73,7 +84,7 @@ class _RecordingFactory:
         )
         if idx in self._fail_at:
             raise RuntimeError("CUDA provider unavailable")
-        m = _FakeModel(self._text)
+        m = _FakeModel(self._text, providers_after_run=self._providers_after_run)
         if self._session_providers is not None:
             m.asr = SimpleNamespace(
                 _encoder=_FakeSession(self._session_providers)
@@ -277,6 +288,64 @@ def test_load_cuda_sessions_with_cuda_provider_stay_cuda(model_dir, monkeypatch)
         ("stt", "loading"), ("stt", "ready")
     ]
     assert events[-1].detail == "cuda:int8"
+
+
+def test_runtime_fallback_after_warm_up_is_reported(model_dir, monkeypatch):
+    # onnxruntime's CUDA->CPU fallback happens at the first run, not at
+    # build: the encoder session still reports CUDA right after load() and
+    # only drops it once warm_up() has actually run the graph.
+    import onnxruntime
+
+    monkeypatch.setattr(
+        onnxruntime,
+        "get_available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    bus = EventBus()
+    events = _collect(bus)
+    factory = _RecordingFactory(
+        session_providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        providers_after_run=["CPUExecutionProvider"],
+    )
+    eng = OnnxAsrEngine(
+        _cfg(device="cuda"), PARAKEET, model_dir, bus, model_factory=factory
+    )
+
+    eng.load()
+
+    assert eng._device == "cuda"
+    assert [e.state for e in events] == ["loading", "ready"]
+    assert events[-1].detail == "cuda:int8"
+
+    eng.warm_up()
+
+    assert eng._device == "cpu"
+    assert [e.state for e in events] == ["loading", "ready", "fallback_cpu", "ready"]
+    assert events[-1].detail == "cpu:int8"
+
+
+def test_healthy_gpu_run_keeps_cuda_and_fires_no_extra_events(model_dir, monkeypatch):
+    import onnxruntime
+
+    monkeypatch.setattr(
+        onnxruntime,
+        "get_available_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    bus = EventBus()
+    events = _collect(bus)
+    factory = _RecordingFactory(
+        session_providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    eng = OnnxAsrEngine(
+        _cfg(device="cuda"), PARAKEET, model_dir, bus, model_factory=factory
+    )
+
+    eng.load()
+    eng.warm_up()
+
+    assert eng._device == "cuda"
+    assert [e.state for e in events] == ["loading", "ready"]
 
 
 def test_load_cpu_build_failure_publishes_failed_and_raises(model_dir):

@@ -50,14 +50,22 @@ _META = {
 class _FakeSession:
     """Quacks like onnxruntime.InferenceSession over a scripted token path."""
 
-    def __init__(self, token_ids, providers=("CPUExecutionProvider",), meta=None):
+    def __init__(
+        self, token_ids, providers=("CPUExecutionProvider",), meta=None,
+        providers_after_run=None,
+    ):
         self._token_ids = list(token_ids)
         self._providers = list(providers)
         self._meta = dict(_META if meta is None else meta)
+        self._providers_after_run = providers_after_run
         self.runs: list[dict] = []
 
     def run(self, outputs, feeds):
         self.runs.append(feeds)
+        if self._providers_after_run is not None:
+            # Mirrors onnxruntime: the CUDA->CPU fallback is a run-time event,
+            # so get_providers() only reflects it after the first run.
+            self._providers = list(self._providers_after_run)
         vocab = len(_VOCAB)
         logits = np.zeros((1, len(self._token_ids), vocab), dtype=np.float32)
         for step, token_id in enumerate(self._token_ids):
@@ -75,7 +83,8 @@ class _RecordingFactory:
     """Fake ``onnxruntime.InferenceSession`` recording every construction."""
 
     def __init__(
-        self, token_ids=(1, 3, 4, 5, 6, 7), fail_at=(), session_providers=None, meta=None
+        self, token_ids=(1, 3, 4, 5, 6, 7), fail_at=(), session_providers=None, meta=None,
+        providers_after_run=None,
     ):
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeSession] = []
@@ -83,6 +92,7 @@ class _RecordingFactory:
         self._fail_at = set(fail_at)
         self._session_providers = session_providers
         self._meta = meta
+        self._providers_after_run = providers_after_run
 
     def __call__(self, path, sess_options=None, providers=None):
         idx = len(self.calls)
@@ -93,7 +103,8 @@ class _RecordingFactory:
             raise RuntimeError("CUDA provider unavailable")
         reported = self._session_providers or providers or ["CPUExecutionProvider"]
         session = _FakeSession(
-            self._token_ids, providers=_names(reported), meta=self._meta
+            self._token_ids, providers=_names(reported), meta=self._meta,
+            providers_after_run=self._providers_after_run,
         )
         self.built.append(session)
         return session
