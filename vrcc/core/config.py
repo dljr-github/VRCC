@@ -27,10 +27,13 @@ class AudioConfig(BaseModel):
     device: str = "auto"
     energy_gate_enabled: bool = False
     energy_threshold: int = 300
-    # GTCRN noise suppression before the VAD/STT. On by default, validated on
-    # real mic noise. strength is a dry/wet blend in [0,1]; full strength
-    # damages short words, so the default is a gentle 0.5.
-    denoise_enabled: bool = True
+    # GTCRN noise suppression before the VAD/STT. Off by default: it corrupts
+    # short words on quiet clean speech (SenseVoice decodes "testing" as
+    # "Investesting" at 0.5) and clean-clip accuracy drops as strength rises,
+    # while its win is only on genuinely noisy input, so a noisy-room user opts
+    # in rather than every user paying the cost. strength is a dry/wet blend in
+    # [0,1], kept at 0.5 for when it is enabled.
+    denoise_enabled: bool = False
     denoise_strength: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
