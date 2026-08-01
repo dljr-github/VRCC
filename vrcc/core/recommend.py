@@ -276,9 +276,7 @@ def preset_for_choice(
         if tier is None:
             tier = detect_tier()
         resolved = "gpu_low" if tier == "cpu" else tier
-    if not languages:
-        return PRESETS[resolved]
-    return _rank_whisper(resolved, languages=languages)[0], _MT_PRESET[resolved]
+    return preset_for_tier(resolved, languages or ())
 
 
 def preset_for_tier(tier: str, languages: tuple[str, ...] = ()) -> tuple[str, str]:

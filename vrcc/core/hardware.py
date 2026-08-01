@@ -144,10 +144,7 @@ def _load_cudnn_sublibraries() -> None:
     if sys.platform != "win32":
         return
     try:
-        spec = importlib.util.find_spec("nvidia")
-        if spec is None or not spec.submodule_search_locations:
-            return
-        for base in spec.submodule_search_locations:
+        for base in _nvidia_search_locations():
             bin_dir = Path(base) / "cudnn" / "bin"
             if not bin_dir.is_dir():
                 continue
@@ -160,13 +157,18 @@ def _load_cudnn_sublibraries() -> None:
         logger.debug("_load_cudnn_sublibraries failed; continuing", exc_info=True)
 
 
-def _add_nvidia_dll_dirs() -> bool:
+def _nvidia_search_locations() -> list[str]:
+    """Base dirs of the installed ``nvidia`` namespace package (one per wheel),
+    empty when no nvidia-* wheel is present."""
     spec = importlib.util.find_spec("nvidia")
     if spec is None or not spec.submodule_search_locations:
-        return False
+        return []
+    return list(spec.submodule_search_locations)
 
+
+def _add_nvidia_dll_dirs() -> bool:
     added = False
-    for base in spec.submodule_search_locations:
+    for base in _nvidia_search_locations():
         base_path = Path(base)
         if not base_path.is_dir():
             continue

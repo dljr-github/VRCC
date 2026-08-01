@@ -364,7 +364,7 @@ class SenseVoiceEngine:
         self._device = "cpu"
         self._bus.publish(EngineStateChanged("stt", "fallback_cpu", detail))
         self._bus.publish(
-            EngineStateChanged("stt", "ready", f"cpu:{self._spec.quantization or 'fp32'}")
+            EngineStateChanged("stt", "ready", f"{self._device}:{self._spec.quantization or 'fp32'}")
         )
 
     def _providers(self, device: str, index: int) -> tuple:

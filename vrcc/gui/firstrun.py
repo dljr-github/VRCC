@@ -208,7 +208,6 @@ class FirstRunWizard(QDialog):
         self._summary_label = QLabel()
         self._summary_label.setWordWrap(True)
         root.addWidget(self._summary_label)
-        self._refresh_plan()
 
         if self._translation_enabled():
             mt = MT_MODELS[self.recommended_mt]
@@ -257,7 +256,7 @@ class FirstRunWizard(QDialog):
         self._cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(self._cancel_btn)
         root.addLayout(buttons)
-        self._update_proceed_enabled()
+        self._refresh_plan()
 
     # -- device choice + plan refresh ----------------------------------------
 
@@ -303,9 +302,8 @@ class FirstRunWizard(QDialog):
         self._update_proceed_enabled()
 
     def _update_proceed_enabled(self) -> None:
-        """Proceed needs a spoken-language pick and no download in flight."""
-        if not hasattr(self, "_download_btn"):
-            return  # buttons not built yet: _build_ui's first _refresh_plan call
+        """Proceed needs a spoken-language pick and no download in flight. The
+        first call is the last line of _build_ui, so the buttons always exist."""
         ready = bool(firstrun_languages.checked_spoken(self)) and not self._downloading
         self._download_btn.setEnabled(ready)
         self._manual_btn.setEnabled(ready)
