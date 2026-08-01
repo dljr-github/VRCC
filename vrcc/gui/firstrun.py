@@ -97,10 +97,10 @@ class FirstRunWizard(QDialog):
         return self._store.config.translate.enabled
 
     def _spoken_codes(self) -> tuple[str, ...]:
-        """Whisper codes for the ticked spoken languages. Empty when nothing is
-        ticked, which keeps the recommendation language-blind rather than
-        guessing one from the config's default source language."""
-        return recommend.spoken_whisper_codes(self._store.config) if self._store.config.stt.spoken_languages else ()
+        """Whisper codes for the stored spoken answer, or the OS-locale source
+        language behind it. The picker still shows the question and a pick is
+        required; the locale seed only pre-fills a default the user can change."""
+        return recommend.spoken_whisper_codes(self._store.config)
 
     def _total_mb(self) -> int:
         total = WHISPER_MODELS[self.recommended_whisper].size_mb
