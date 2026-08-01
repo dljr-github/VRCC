@@ -179,6 +179,7 @@
   "Pause or resume captioning without closing VRCC.": "无需关闭 VRCC 即可暂停或恢复字幕。",
   "Paused - following your VRChat mute": "已暂停，跟随你在 VRChat 中的静音状态",
   "Paused - not listening": "已暂停，未在聆听",
+  "Pick at least one language you speak to continue.": "请至少选择一种你会说的语言以继续。",
   "Pick the languages you'll use, then download the voice and translation models VRCC needs to caption (and translate) your speech.": "选好你要使用的语言，然后下载 VRCC 所需的语音模型和翻译模型，用来为你说的话生成字幕（并翻译）。",
   "Pick the models and settings that suit this machine.": "选择适合这台电脑的模型和设置。",
   "Pick your languages": "选择你的语言",

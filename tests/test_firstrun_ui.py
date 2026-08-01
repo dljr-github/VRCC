@@ -72,17 +72,30 @@ def _bridge():
 def _tick(wiz, *displays: str, only: bool = False) -> None:
     """Tick ``displays`` in the wizard's spoken-language picker, optionally
     clearing everything else first. Each change fires the real itemChanged
-    handler, so this drives the same path a user's click does."""
+    handler, so this drives the same path a user's click does.
+
+    Under ``only=True``, calling this again with the exact set already ticked
+    toggles it off instead, mirroring a user re-clicking their one pick.
+    """
     from PySide6.QtCore import Qt
 
     picker = wiz._spoken_list
     wanted = set(displays)
+    current = {
+        picker.item(i).text()
+        for i in range(picker.count())
+        if picker.item(i).checkState() == Qt.CheckState.Checked
+    }
+    toggle_off = only and bool(wanted) and current == wanted
     for i in range(picker.count()):
         item = picker.item(i)
         checked = item.checkState() == Qt.CheckState.Checked
         if item.text() in wanted:
-            if not checked:
-                item.setCheckState(Qt.CheckState.Checked)
+            target_checked = not toggle_off
+            if checked != target_checked:
+                item.setCheckState(
+                    Qt.CheckState.Checked if target_checked else Qt.CheckState.Unchecked
+                )
         elif only and checked:
             item.setCheckState(Qt.CheckState.Unchecked)
 

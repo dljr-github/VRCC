@@ -179,6 +179,7 @@
   "Pause or resume captioning without closing VRCC.": "VRCC を閉じずに字幕を一時停止・再開します。",
   "Paused - following your VRChat mute": "一時停止中（VRChat のミュートに連動）",
   "Paused - not listening": "一時停止中（聞き取り停止）",
+  "Pick at least one language you speak to continue.": "続けるには、話す言語を1つ以上選んでください。",
   "Pick the languages you'll use, then download the voice and translation models VRCC needs to caption (and translate) your speech.": "使用する言語を選び、VRCC が音声を字幕化（および翻訳）するために必要な音声モデルと翻訳モデルをダウンロードしてください。",
   "Pick the models and settings that suit this machine.": "このパソコンに合ったモデルと設定を選びます。",
   "Pick your languages": "言語を選択",

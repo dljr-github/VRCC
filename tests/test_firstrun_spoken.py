@@ -53,3 +53,27 @@ def test_stored_spoken_answer_still_preticks(qapp, tmp_path):
         assert firstrun_languages.checked_spoken(wiz) == ["Japanese"]
     finally:
         wiz.close(); wiz.deleteLater(); bridge.detach()
+
+
+def test_proceed_disabled_until_a_language_is_picked(qapp, tmp_path):
+    wiz, _store_, bridge = _wizard(tmp_path)
+    try:
+        assert not wiz._download_btn.isEnabled()
+        assert not wiz._manual_btn.isEnabled()
+        assert wiz._cancel_btn.isEnabled()
+        _tick(wiz, "Japanese", only=True)
+        assert wiz._download_btn.isEnabled()
+        assert wiz._manual_btn.isEnabled()
+    finally:
+        wiz.close(); wiz.deleteLater(); bridge.detach()
+
+
+def test_unticking_the_last_language_disables_proceed(qapp, tmp_path):
+    wiz, _store_, bridge = _wizard(tmp_path)
+    try:
+        _tick(wiz, "Japanese", only=True)
+        assert wiz._download_btn.isEnabled()
+        _tick(wiz, "Japanese", only=True)  # toggles Japanese back off
+        assert not wiz._download_btn.isEnabled()
+    finally:
+        wiz.close(); wiz.deleteLater(); bridge.detach()

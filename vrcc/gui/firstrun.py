@@ -149,6 +149,10 @@ class FirstRunWizard(QDialog):
         self._spoken_list = firstrun_languages.build_spoken_picker(self)
         root.addWidget(self._spoken_list)
 
+        speak_hint = QLabel(tr("Pick at least one language you speak to continue."))
+        speak_hint.setStyleSheet(f"color: {self._p['muted']};")
+        root.addWidget(speak_hint)
+
         lang_row = QHBoxLayout()
         lang_row.setSpacing(8)
         lang_row.addWidget(
@@ -253,6 +257,7 @@ class FirstRunWizard(QDialog):
         self._cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(self._cancel_btn)
         root.addLayout(buttons)
+        self._update_proceed_enabled()
 
     # -- device choice + plan refresh ----------------------------------------
 
@@ -295,6 +300,15 @@ class FirstRunWizard(QDialog):
         lines.append("")
         lines.append(tr("Total download: {size}", size=fmt_size(self._total_mb())))
         self._summary_label.setText("\n".join(lines))
+        self._update_proceed_enabled()
+
+    def _update_proceed_enabled(self) -> None:
+        """Proceed needs a spoken-language pick and no download in flight."""
+        if not hasattr(self, "_download_btn"):
+            return  # buttons not built yet: _build_ui's first _refresh_plan call
+        ready = bool(firstrun_languages.checked_spoken(self)) and not self._downloading
+        self._download_btn.setEnabled(ready)
+        self._manual_btn.setEnabled(ready)
 
     @staticmethod
     def _cpu_tier_label() -> str:
@@ -408,7 +422,8 @@ class FirstRunWizard(QDialog):
         if success:
             self.accept()
             return
-        self._set_buttons_enabled(True)
+        self._cancel_btn.setEnabled(True)
+        self._update_proceed_enabled()
         from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.warning(
