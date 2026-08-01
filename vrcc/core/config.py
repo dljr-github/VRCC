@@ -27,11 +27,15 @@ class AudioConfig(BaseModel):
     device: str = "auto"
     energy_gate_enabled: bool = False
     energy_threshold: int = 300
-    # GTCRN noise suppression before the VAD/STT. On by default, validated on
-    # real mic noise. strength is a dry/wet blend in [0,1]; full strength
-    # damages short words, so the default is a gentle 0.5.
-    denoise_enabled: bool = True
-    denoise_strength: float = Field(default=0.5, ge=0.0, le=1.0)
+    # GTCRN noise suppression before the VAD/STT. Off by default: it corrupts
+    # short words on quiet clean speech (SenseVoice decodes "testing" as
+    # "Investesting" at 0.5) and clean-clip accuracy drops as strength rises,
+    # while its win is only on genuinely noisy input, so a noisy-room user opts
+    # in rather than every user paying the cost. strength is a dry/wet blend in
+    # [0,1]; a gentle 0.25 when enabled, since 0.5 was where the short-word
+    # damage set in.
+    denoise_enabled: bool = False
+    denoise_strength: float = Field(default=0.25, ge=0.0, le=1.0)
 
 
 class VadConfig(BaseModel):
@@ -59,6 +63,12 @@ class SttConfig(BaseModel):
     cpu_threads: int = 0
     num_workers: int = 1
     source_language: str = "English"  # display name; "auto" = detect
+    # Display names of every language the user says they speak, from the
+    # first-run wizard. Purely a recommendation input -- transcription still
+    # runs off `source_language` (which the wizard derives from this: the one
+    # entry, or "auto" when there are several). Empty means never asked, and
+    # the recommender falls back to `source_language`.
+    spoken_languages: list[str] = Field(default_factory=list)
     beam_size: int = 1
     temperature: float = 0.0
     condition_on_previous_text: bool = False

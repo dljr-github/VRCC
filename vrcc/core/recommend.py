@@ -4,8 +4,9 @@ Tiers: ``gpu_high`` (usable CUDA, >= 8 GB), ``gpu_low`` (< 8 GB / unknown),
 ``cpu`` (no CUDA the install can actually drive).
 ``WHISPER_PREFERENCE`` and the whisper half of ``PRESETS`` are derived at
 import time from the measured ``STT_BENCH`` table via :func:`_rank_whisper`,
-language-blind; :func:`preset_for_choice` and :func:`best_downloaded` take an
-optional Whisper language code to rerank for a known spoken language.
+language-blind; :func:`preset_for_choice` and :func:`best_downloaded` take
+optional Whisper language codes to rerank for the languages the user says they
+speak (:func:`spoken_whisper_codes` reads them off a config).
 ``MT_PREFERENCE`` stays hand-ordered (no MT measurements yet). Both feed the
 per-tier best-first walk in :func:`best_downloaded`.
 """
@@ -79,32 +80,63 @@ _GPU_LOW_MAX_MODEL_MB = 2000
 
 
 def _rank_whisper(
-    tier: str, specs=WHISPER_MODELS, bench=STT_BENCH, language: str | None = None
+    tier: str,
+    specs=WHISPER_MODELS,
+    bench=STT_BENCH,
+    languages: tuple[str, ...] | None = None,
 ) -> list[str]:
     """Best-first STT ids for ``tier``, derived from the benchmark table.
 
-    Without ``language``, unrestricted models (``spec.languages is None``)
+    Without ``languages``, unrestricted models (``spec.languages is None``)
     precede restricted ones: tier recommendation cannot know the user's
-    spoken language, so a model that may not cover it is only ever a
-    fallback. With ``language`` (a Whisper code), every model that can serve
-    it -- unrestricted, or restricted with the code in its ``languages`` --
-    competes in the leading partition, and models that cannot serve it
-    (english_only mismatch, code outside ``languages``) always trail.
+    spoken languages, so a model that may not cover them is only ever a
+    fallback. With ``languages`` (Whisper codes -- more than one when the
+    user speaks several), every model that can serve *all* of them competes
+    in the leading partition, and models that cannot (english_only mismatch,
+    a code outside ``languages``) always trail.
+
     Within each partition, models inside the tier's latency budget (and, on
     ``gpu_low``, inside the VRAM size cap) rank by (WER band, latency): WER
     differences under ~0.3 percentage points are ties and the faster model
     wins. Over-budget models follow, fastest first (least-bad fallback),
     then unmeasured ids by size.
+
+    One exception, for the case the benchmark cannot speak to: STT_BENCH's
+    WER is LibriSpeech *English*, so for any other spoken language it ranks
+    models on evidence about a language the user is not speaking. There, an
+    unmeasured model whose ``languages`` names what they speak is a better
+    prior than a measured generalist that merely does not exclude it, so it
+    leads its partition instead of trailing it for want of a row. English
+    keeps ranking purely on its measurements, and a restricted model that
+    *has* been measured competes on its numbers like anything else.
     """
     on_gpu = tier != "cpu"
     gate = _LATENCY_GATE_S["gpu" if on_gpu else "cpu"]
+    unmeasured_specialists_lead = bool(languages) and set(languages) != {"en"}
+
+    def specializes(mid: str) -> bool:
+        """Unmeasured, and explicitly names every language being asked for.
+
+        The coverage check is load-bearing, not decoration: ``order`` runs over
+        the trailing partition too, where a restricted model is precisely one
+        that *cannot* serve these languages and must not be promoted.
+        """
+        covered = specs[mid].languages
+        return (
+            bench.get(mid) is None
+            and covered is not None
+            and set(languages) <= set(covered)
+        )
 
     def order(ids: list[str]) -> list[str]:
-        usable, over_budget, unmeasured = [], [], []
+        usable, over_budget, unmeasured, specialists = [], [], [], []
         for mid in ids:
             row = bench.get(mid)
             if row is None:
-                unmeasured.append(mid)
+                if unmeasured_specialists_lead and specializes(mid):
+                    specialists.append(mid)
+                else:
+                    unmeasured.append(mid)
                 continue
             wer, latency = (row[0], row[2]) if on_gpu else (row[1], row[3])
             fits = tier != "gpu_low" or specs[mid].size_mb <= _GPU_LOW_MAX_MODEL_MB
@@ -114,17 +146,23 @@ def _rank_whisper(
                 over_budget.append((latency, mid))
         usable.sort()
         over_budget.sort()
-        unmeasured.sort(key=lambda m: specs[m].size_mb)
-        return [t[-1] for t in usable] + [t[-1] for t in over_budget] + unmeasured
+        for group in (specialists, unmeasured):
+            group.sort(key=lambda m: specs[m].size_mb)
+        return (
+            specialists
+            + [t[-1] for t in usable]
+            + [t[-1] for t in over_budget]
+            + unmeasured
+        )
 
     def competes(spec) -> bool:
-        if language is None:
+        if not languages:
             return spec.languages is None
         # english_only is checked on top of languages so a spec carrying the
         # flag without a languages tuple still trails non-English picks.
-        if spec.english_only and language != "en":
+        if spec.english_only and set(languages) != {"en"}:
             return False
-        return spec.languages is None or language in spec.languages
+        return spec.languages is None or set(languages) <= set(spec.languages)
 
     leading = [m for m, s in specs.items() if competes(s)]
     trailing = [m for m, s in specs.items() if not competes(s)]
@@ -218,19 +256,19 @@ def default_device_choice() -> str:
 
 
 def preset_for_choice(
-    device_choice: str, tier: str | None = None, language: str | None = None
+    device_choice: str, tier: str | None = None, languages: tuple[str, ...] | None = None
 ) -> tuple[str, str]:
     """Preset (whisper id, mt id) for an explicit run-device choice.
 
     ``"cpu"`` always maps to the CPU preset regardless of hardware; ``"gpu"``
     maps to the detected (or given) GPU tier, with a CPU-only tier falling
     back to the smallest GPU preset so the choice still gets GPU-sized models.
-    ``language`` (a Whisper code) reranks the whisper half for a known spoken
-    language; the MT half is language-blind. A model that cannot detect the
+    ``languages`` (Whisper codes) reranks the whisper half for known spoken
+    languages; the MT half is language-blind. A model that cannot detect the
     spoken language itself (the distil English pair) can still be chosen here:
-    it is only reached with a concrete ``language``, which the caller has
-    already written to the config as the spoken language. A ``None`` language
-    falls back to the language-blind presets, where such models never lead.
+    it is only reached with concrete ``languages``, which the caller has
+    already written to the config. Empty/``None`` languages fall back to the
+    language-blind presets, where such models never lead.
     """
     if device_choice == "cpu":
         resolved = "cpu"
@@ -238,9 +276,17 @@ def preset_for_choice(
         if tier is None:
             tier = detect_tier()
         resolved = "gpu_low" if tier == "cpu" else tier
-    if language is None:
-        return PRESETS[resolved]
-    return _rank_whisper(resolved, language=language)[0], _MT_PRESET[resolved]
+    return preset_for_tier(resolved, languages or ())
+
+
+def preset_for_tier(tier: str, languages: tuple[str, ...] = ()) -> tuple[str, str]:
+    """(whisper id, mt id) for an already-resolved tier, reranked for the
+    spoken languages. ``PRESETS[tier]`` is the language-blind case; a surface
+    that holds the user's languages (the Models window) uses this so its
+    recommendation matches the wizard's for the same tier and languages."""
+    if not languages:
+        return PRESETS[tier]
+    return _rank_whisper(tier, languages=languages)[0], _MT_PRESET[tier]
 
 
 def tier_for_config(cfg) -> str:
@@ -292,21 +338,22 @@ def recommended_profile(model_id: str, device: str) -> str | None:
 
 
 def best_downloaded(
-    dm, *, translate: bool, tier: str | None = None, language: str | None = None
+    dm, *, translate: bool, tier: str | None = None,
+    languages: tuple[str, ...] | None = None,
 ) -> tuple[str | None, str | None]:
     """Best already-downloaded (whisper id, mt id) for ``tier``.
 
     Walks each tier preference best-first, returning the first id the download
     manager reports present (``None`` if none). MT is skipped when ``translate``
-    is False; ``tier=None`` resolves via :func:`detect_tier`. ``language`` (a
-    Whisper code) reranks the whisper walk for a known spoken language.
+    is False; ``tier=None`` resolves via :func:`detect_tier`. ``languages``
+    (Whisper codes) reranks the whisper walk for known spoken languages.
     """
     if tier is None:
         tier = detect_tier()
     pref = (
         WHISPER_PREFERENCE[tier]
-        if language is None
-        else _rank_whisper(tier, language=language)
+        if not languages
+        else _rank_whisper(tier, languages=languages)
     )
     whisper = next((mid for mid in pref if dm.is_whisper_downloaded(mid)), None)
     mt = None
@@ -347,8 +394,7 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
         for field, value in fields.items():
             setattr(section, field, value)
 
-    source = cfg.stt.source_language
-    language = None if source == "auto" else _whisper_code(source)
+    languages = spoken_whisper_codes(cfg)
     choice = default_device_choice()
     tier = "cpu" if choice == "cpu" else detect_tier()
     if tier == "cpu" and choice != "cpu":
@@ -362,12 +408,12 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
         cfg.stt.device = "cpu"
         cfg.translate.device = "cpu"
 
-    whisper, mt = preset_for_choice(choice, tier=tier, language=language)
+    whisper, mt = preset_for_choice(choice, tier=tier, languages=languages)
     if dm is not None:
         # A recommended model that is not downloaded would leave the app
         # unable to caption until it is; prefer what is already on disk.
         have_whisper, have_mt = best_downloaded(
-            dm, translate=cfg.translate.enabled, tier=tier, language=language
+            dm, translate=cfg.translate.enabled, tier=tier, languages=languages
         )
         whisper = have_whisper or whisper
         mt = have_mt or mt
@@ -391,3 +437,25 @@ def _whisper_code(display_name: str) -> str | None:
 
     lang = LANGUAGES.get(display_name)
     return lang.whisper if lang is not None else None
+
+
+def spoken_whisper_codes(cfg) -> tuple[str, ...]:
+    """Whisper codes for the languages the user says they speak, deduplicated.
+
+    Prefers the wizard's explicit answer (``stt.spoken_languages``) and falls
+    back to the single stored source language, so a config written before that
+    question existed still reranks the way it always did. "auto" and unknown
+    names contribute nothing: an empty result keeps the recommendation
+    language-blind rather than guessing at one.
+
+    Deduplication matters -- Chinese Simplified and Traditional are separate
+    display languages sharing the Whisper code "zh", and a model covering
+    "zh" covers both as far as ranking is concerned.
+    """
+    names = cfg.stt.spoken_languages or [cfg.stt.source_language]
+    codes: list[str] = []
+    for name in names:
+        code = _whisper_code(name)
+        if code is not None and code not in codes:
+            codes.append(code)
+    return tuple(codes)

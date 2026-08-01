@@ -47,10 +47,10 @@ _MODE_DESC = tr_noop(
     "clips fewer words, but each caption takes a little longer."
 )
 # Replaces _MODE_TOOLTIP while the active voice model decodes greedily (the
-# onnx_asr backend ignores beam size and temperature, the profile's headline
+# onnxruntime backends ignore beam size and temperature, the profile's headline
 # caption-quality effect).
 _MODE_LOCKED_TOOLTIP = tr_noop(
-    "Parakeet always decodes at full accuracy, so Speed / Quality "
+    "{name} always decodes at full accuracy, so Speed / Quality "
     "does not change its captions."
 )
 # Appended to _MODE_DESC for a whisper model the benchmarks have an opinion on
@@ -137,19 +137,23 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     form.addRow("", dlg._mode_desc)
 
     def update_mode_for_model():
-        # onnx_asr models decode greedily, so the profile's beam/temperature
-        # presets can't tune their captions: grey the control in place. The
-        # stored profile is untouched (its VAD/translation parts still apply,
-        # and the Advanced knobs stay usable). The visible description must
-        # not advertise a trade-off the locked control can't deliver, so it
-        # swaps to the locked explanation and back.
+        # The onnxruntime-backed models decode greedily, so the profile's
+        # beam/temperature presets can't tune their captions: grey the control
+        # in place. The stored profile is untouched (its VAD/translation parts
+        # still apply, and the Advanced knobs stay usable). The visible
+        # description must not advertise a trade-off the locked control can't
+        # deliver, so it swaps to the locked explanation and back.
         spec = WHISPER_MODELS.get(dlg._cfg.stt.model)
-        locked = spec is not None and spec.backend == "onnx_asr"
+        locked = spec is not None and spec.runs_on_onnxruntime
         dlg._mode.setEnabled(not locked)
-        dlg._mode.setToolTip(tr(_MODE_LOCKED_TOOLTIP if locked else _MODE_TOOLTIP))
         if locked:
-            dlg._mode_desc.setText(tr(_MODE_LOCKED_TOOLTIP))
+            locked_text = tr(
+                _MODE_LOCKED_TOOLTIP, name=whisper_display_name(spec.id)
+            )
+            dlg._mode.setToolTip(locked_text)
+            dlg._mode_desc.setText(locked_text)
             return
+        dlg._mode.setToolTip(tr(_MODE_TOOLTIP))
         text = tr(_MODE_DESC)
         recommendation = _mode_recommendation(dlg)
         if recommendation:
@@ -246,9 +250,10 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     for spec in voice_specs:
         i = dlg._model_combo.count()
         dlg._model_combo.addItem(whisper_display_name(spec.id), spec.id)
-        # onnx-asr models join even without a language restriction: the
-        # auto-plus-translation greying keys on the backend, not the set.
-        if spec.languages is not None or spec.backend == "onnx_asr":
+        # Models that cannot report the language they heard join even without a
+        # language restriction: the auto-plus-translation greying keys on that,
+        # not on the set.
+        if spec.languages is not None or not spec.reports_language:
             dlg._limited_model_indices.append((i, spec))
     mi = dlg._model_combo.findData(dlg._cfg.stt.model)
     if mi >= 0:

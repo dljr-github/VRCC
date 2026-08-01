@@ -3,10 +3,12 @@
 Speak into your microphone and your words appear in the VRChat chatbox as
 live captions, with translations into up to three languages underneath.
 Everything runs locally: speech recognition via
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper) or NVIDIA's
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper), NVIDIA's
 [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
 (run as an ONNX export via [onnx-asr](https://github.com/istupakov/onnx-asr))
-and machine translation via
+for European languages, or
+[SenseVoice-Small](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
+for Chinese, Japanese, Korean and English; and machine translation via
 [CTranslate2](https://github.com/OpenNMT/CTranslate2)
 (NLLB / M2M100 / MADLAD models). No cloud services, no API keys.
 

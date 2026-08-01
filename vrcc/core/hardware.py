@@ -106,36 +106,69 @@ def _preload_onnxruntime_cuda_dlls() -> None:
     CUDA/cuDNN DLLs from the installed nvidia-* wheels into the process so the
     CUDA execution provider (Parakeet on GPU) can build sessions in the
     packaged app. A no-op on older or CPU-only onnxruntime builds. Anything
-    the preload prints is captured and demoted to a debug log entry."""
+    the preload prints is captured and demoted to a debug log entry. Also
+    forces the cuDNN sublibraries preload_dlls omits (see
+    _load_cudnn_sublibraries) resident, since SenseVoice needs one of them."""
     try:
         import onnxruntime
 
         preload = getattr(onnxruntime, "preload_dlls", None)
-        if preload is None:
-            return
-        # preload_dlls() prints "Failed to load ..." per CUDA DLL the wheels
-        # don't ship; VRCC bundles only cuBLAS + cuDNN, so those misses are
-        # expected and belong in the debug log, not on the console. Fresh
-        # StringIO buffers (rather than wrapping the live streams) also keep
-        # the preload's writes safe in the windowed exe, where sys.stdout and
-        # sys.stderr are None.
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            preload()
-        captured = (out.getvalue() + err.getvalue()).strip()
-        if captured:
-            logger.debug("onnxruntime.preload_dlls output:\n%s", captured)
+        if preload is not None:
+            # preload_dlls() prints "Failed to load ..." per CUDA DLL the
+            # wheels don't ship; VRCC bundles only cuBLAS + cuDNN, so those
+            # misses are expected and belong in the debug log, not on the
+            # console. Fresh StringIO buffers (rather than wrapping the live
+            # streams) also keep the preload's writes safe in the windowed
+            # exe, where sys.stdout and sys.stderr are None.
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                preload()
+            captured = (out.getvalue() + err.getvalue()).strip()
+            if captured:
+                logger.debug("onnxruntime.preload_dlls output:\n%s", captured)
     except Exception:
         logger.debug("onnxruntime.preload_dlls failed; continuing", exc_info=True)
+    _load_cudnn_sublibraries()
+
+
+def _load_cudnn_sublibraries() -> None:
+    """Force every cuDNN DLL in the nvidia-cudnn-cu* wheel resident.
+
+    onnxruntime.preload_dlls() omits cudnn_engines_tensor_ir64_9.dll (and a
+    couple of other cuDNN sublibraries); cuDNN loads that one lazily, by bare
+    name, the first time an op needs it (SenseVoice's FSMN-block Conv does).
+    That lazy LoadLibrary does not consult os.add_dll_directory dirs, so it
+    fails even though the DLL sits in the wheel's bin dir. Pre-loading every
+    cudnn*.dll here makes each one already resident, which is where cuDNN's
+    lazy loader finds it. Never raises."""
+    if sys.platform != "win32":
+        return
+    try:
+        for base in _nvidia_search_locations():
+            bin_dir = Path(base) / "cudnn" / "bin"
+            if not bin_dir.is_dir():
+                continue
+            for dll in sorted(bin_dir.glob("cudnn*.dll")):
+                try:
+                    ctypes.WinDLL(str(dll))
+                except OSError:
+                    logger.debug("could not preload %s", dll.name, exc_info=True)
+    except Exception:
+        logger.debug("_load_cudnn_sublibraries failed; continuing", exc_info=True)
+
+
+def _nvidia_search_locations() -> list[str]:
+    """Base dirs of the installed ``nvidia`` namespace package (one per wheel),
+    empty when no nvidia-* wheel is present."""
+    spec = importlib.util.find_spec("nvidia")
+    if spec is None or not spec.submodule_search_locations:
+        return []
+    return list(spec.submodule_search_locations)
 
 
 def _add_nvidia_dll_dirs() -> bool:
-    spec = importlib.util.find_spec("nvidia")
-    if spec is None or not spec.submodule_search_locations:
-        return False
-
     added = False
-    for base in spec.submodule_search_locations:
+    for base in _nvidia_search_locations():
         base_path = Path(base)
         if not base_path.is_dir():
             continue
@@ -375,11 +408,12 @@ def resolve(
 
 
 def _is_onnx_asr(model_id: str | None) -> bool:
-    """Whether ``model_id`` names an onnx-asr-backed registry spec (Parakeet)."""
+    """Whether ``model_id`` names an onnxruntime-backed registry spec
+    (Parakeet, SenseVoice)."""
     if model_id is None:
         return False
     spec = WHISPER_MODELS.get(model_id)
-    return spec is not None and spec.backend == "onnx_asr"
+    return spec is not None and spec.runs_on_onnxruntime
 
 
 def resolved_device(

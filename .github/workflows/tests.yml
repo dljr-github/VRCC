@@ -17,12 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu is the cheap fast leg: the Python floor and a current one.
-          - os: ubuntu-latest
-            python: "3.10"
-          - os: ubuntu-latest
-            python: "3.12"
-          # Windows is the platform VRCC actually ships on.
+          # Windows is the only platform VRCC ships on, so it is the only leg.
           - os: windows-latest
             python: "3.12"
     env:
@@ -36,14 +31,6 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: pyproject.toml
-
-      - name: Install system libraries (Qt offscreen + PortAudio)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 \
-            libportaudio2
 
       - name: Install VRCC + pytest
         run: |

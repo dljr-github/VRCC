@@ -71,10 +71,10 @@ def test_firstrun_cpu_choice_shows_cpu_preset_despite_gpu_tier(
         # The fresh-config source language is English, so the plan is the
         # language-aware CPU pick, never the gpu_high one.
         cpu_label = WHISPER_MODELS[
-            recommend.preset_for_choice("cpu", tier="gpu_high", language="en")[0]
+            recommend.preset_for_choice("cpu", tier="gpu_high", languages=("en",))[0]
         ].label
         gpu_label = WHISPER_MODELS[
-            recommend.preset_for_choice("gpu", tier="gpu_high", language="en")[0]
+            recommend.preset_for_choice("gpu", tier="gpu_high", languages=("en",))[0]
         ].label
         text = wiz._summary_label.text()
         assert f"Speech: {cpu_label}" in text
@@ -288,6 +288,24 @@ def test_firstrun_defaults_to_gpu_on_16gb_card(qapp, tmp_path, monkeypatch):
 # -- language-aware recommendation -------------------------------------------
 
 
+def _tick(wiz, *displays: str, only: bool = False) -> None:
+    """Tick ``displays`` in the wizard's spoken-language picker, clearing the
+    rest when ``only``. Goes through the real itemChanged handler, so this
+    drives the same path a user's click does."""
+    from PySide6.QtCore import Qt
+
+    picker = wiz._spoken_list
+    wanted = set(displays)
+    for i in range(picker.count()):
+        item = picker.item(i)
+        checked = item.checkState() == Qt.CheckState.Checked
+        if item.text() in wanted:
+            if not checked:
+                item.setCheckState(Qt.CheckState.Checked)
+        elif only and checked:
+            item.setCheckState(Qt.CheckState.Unchecked)
+
+
 def _wizard_with_language(tmp_path, monkeypatch, tier, language, default_choice="cpu"):
     from vrcc.gui.firstrun import FirstRunWizard
 
@@ -333,11 +351,66 @@ def test_firstrun_source_change_refreshes_recommendation(qapp, tmp_path, monkeyp
     )
     try:
         assert wiz.recommended_whisper == "parakeet-tdt-0.6b-v3"
-        # Japanese is outside Parakeet's set: the plan must re-rank live.
-        wiz._source_combo.setCurrentText("Japanese")
+        # Japanese is outside Parakeet's set: the plan must re-rank live, and
+        # to the model that actually covers Japanese.
+        _tick(wiz, "Japanese", only=True)
         assert store.config.stt.source_language == "Japanese"
-        assert wiz.recommended_whisper == "small"
+        assert wiz.recommended_whisper == "sense-voice-small"
         assert "Parakeet" not in wiz._summary_label.text()
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_firstrun_multiple_spoken_languages_need_one_model_for_all(
+    qapp, tmp_path, monkeypatch
+):
+    """The point of asking for several: the plan must cover every one of them,
+    not just the first."""
+    wiz, store, _dm, bridge = _wizard_with_language(
+        tmp_path, monkeypatch, "cpu", "English"
+    )
+    try:
+        _tick(wiz, "English", "Japanese", "Korean", only=True)
+        assert store.config.stt.spoken_languages == ["English", "Japanese", "Korean"]
+        assert wiz.recommended_whisper == "sense-voice-small"
+        # Several languages means no single source to pin, and SenseVoice
+        # reports what it heard, so "auto" is safe for the translator.
+        assert store.config.stt.source_language == "auto"
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_firstrun_multi_language_source_avoids_auto_on_a_silent_model(
+    qapp, tmp_path, monkeypatch
+):
+    """German + French lands on Parakeet, which detects the language but tags
+    every result "en". Settings greys "auto" out for exactly that reason while
+    translation is on, so the wizard must not store it."""
+    wiz, store, _dm, bridge = _wizard_with_language(
+        tmp_path, monkeypatch, "cpu", "German"
+    )
+    try:
+        _tick(wiz, "German", "French", only=True)
+        assert wiz.recommended_whisper == "parakeet-tdt-0.6b-v3"
+        assert store.config.translate.enabled is True
+        assert store.config.stt.source_language == "German"
+    finally:
+        _teardown(wiz, bridge)
+
+
+def test_firstrun_untouched_picker_persists_the_seeded_language_on_accept(
+    qapp, tmp_path, monkeypatch
+):
+    """A user who accepts the pre-ticked default never fires itemChanged; the
+    answer the wizard acted on still has to be the one written down."""
+    wiz, store, _dm, bridge = _wizard_with_language(
+        tmp_path, monkeypatch, "cpu", "Japanese"
+    )
+    try:
+        assert store.config.stt.spoken_languages == []  # never edited
+        wiz._apply_recommendation()
+        assert store.config.stt.spoken_languages == ["Japanese"]
+        assert store.config.stt.source_language == "Japanese"
     finally:
         _teardown(wiz, bridge)
 
