@@ -27,9 +27,8 @@ class _FakeModel:
     """Records recognize() calls; returns a canned text.
 
     ``providers_after_run`` mirrors onnxruntime's CUDA->CPU fallback, which
-    only shows up on the encoder session's get_providers() after the first
-    run: when set, the first recognize() call flips the encoder's reported
-    providers.
+    only shows up on the encoder session's get_providers() after a run: when
+    set, each recognize() call flips the encoder's reported providers to it.
     """
 
     def __init__(self, text: str = "hello there", providers_after_run=None) -> None:
