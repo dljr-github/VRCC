@@ -106,7 +106,9 @@ def _preload_onnxruntime_cuda_dlls() -> None:
     CUDA/cuDNN DLLs from the installed nvidia-* wheels into the process so the
     CUDA execution provider (Parakeet on GPU) can build sessions in the
     packaged app. A no-op on older or CPU-only onnxruntime builds. Anything
-    the preload prints is captured and demoted to a debug log entry."""
+    the preload prints is captured and demoted to a debug log entry. Also
+    forces the cuDNN sublibraries preload_dlls omits (see
+    _load_cudnn_sublibraries) resident, since SenseVoice needs one of them."""
     try:
         import onnxruntime
 
@@ -127,6 +129,36 @@ def _preload_onnxruntime_cuda_dlls() -> None:
             logger.debug("onnxruntime.preload_dlls output:\n%s", captured)
     except Exception:
         logger.debug("onnxruntime.preload_dlls failed; continuing", exc_info=True)
+    _load_cudnn_sublibraries()
+
+
+def _load_cudnn_sublibraries() -> None:
+    """Force every cuDNN DLL in the nvidia-cudnn-cu* wheel resident.
+
+    onnxruntime.preload_dlls() omits cudnn_engines_tensor_ir64_9.dll (and a
+    couple of other cuDNN sublibraries); cuDNN loads that one lazily, by bare
+    name, the first time an op needs it (SenseVoice's FSMN-block Conv does).
+    That lazy LoadLibrary does not consult os.add_dll_directory dirs, so it
+    fails even though the DLL sits in the wheel's bin dir. Pre-loading every
+    cudnn*.dll here makes each one already resident, which is where cuDNN's
+    lazy loader finds it. Never raises."""
+    if sys.platform != "win32":
+        return
+    try:
+        spec = importlib.util.find_spec("nvidia")
+        if spec is None or not spec.submodule_search_locations:
+            return
+        for base in spec.submodule_search_locations:
+            bin_dir = Path(base) / "cudnn" / "bin"
+            if not bin_dir.is_dir():
+                continue
+            for dll in sorted(bin_dir.glob("cudnn*.dll")):
+                try:
+                    ctypes.WinDLL(str(dll))
+                except OSError:
+                    logger.debug("could not preload %s", dll.name, exc_info=True)
+    except Exception:
+        logger.debug("_load_cudnn_sublibraries failed; continuing", exc_info=True)
 
 
 def _add_nvidia_dll_dirs() -> bool:
