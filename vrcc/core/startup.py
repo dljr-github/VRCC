@@ -13,7 +13,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from vrcc.audio.devices import list_input_devices
-from vrcc.core.languages import match_caption_language
 from vrcc.translate.registry import MT_MODELS
 
 if TYPE_CHECKING:
