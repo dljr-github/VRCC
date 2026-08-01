@@ -30,6 +30,9 @@ def _dlg(tmp_path, dm=None):
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.models_dialog import ModelsDialog
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    # "auto" keeps spoken_whisper_codes() blind: these tests exercise tier and
+    # device selection, not language reranking (covered separately below).
+    store.config.stt.source_language = "auto"
     bridge = BusBridge(EventBus())
     dm = dm or _FakeDM(tmp_path / "models")
     return ModelsDialog(dm, bridge, config_store=store), store, bridge, dm
@@ -201,6 +204,7 @@ def test_recommended_badge_follows_config_device_over_detected_tier(qapp, tmp_pa
     monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     store.config.stt.device = "cpu"
+    store.config.stt.source_language = "auto"  # keep this device test language-blind
     bridge = BusBridge(EventBus())
     dlg = ModelsDialog(_FakeDM(tmp_path / "models"), bridge, config_store=store)
     try:
@@ -233,6 +237,41 @@ def test_delete_active_model_warns_captions_stop_until_reassigned(qapp, tmp_path
             "you choose another in Settings." in asked[0]
         )
         assert "next start" not in asked[0]
+    finally:
+        dlg.close(); dlg.deleteLater(); bridge.detach()
+
+
+def test_models_dialog_recommends_sensevoice_for_cjk_speaker(qapp, tmp_path, monkeypatch):
+    from vrcc.core import recommend
+    from vrcc.gui.bridge import BusBridge
+    from vrcc.gui.models_dialog import ModelsDialog
+
+    monkeypatch.setattr(recommend, "tier_for_config", lambda cfg: "cpu")
+    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    store.config.stt.spoken_languages = ["Japanese"]
+    bridge = BusBridge(EventBus())
+    dlg = ModelsDialog(_FakeDM(tmp_path / "models"), bridge, config_store=store)
+    try:
+        assert dlg._recommended_ids[0] == "sense-voice-small"
+    finally:
+        dlg.close(); dlg.deleteLater(); bridge.detach()
+
+
+def test_models_dialog_blind_recommendation_without_spoken_languages(qapp, tmp_path, monkeypatch):
+    from vrcc.core import recommend
+    from vrcc.gui.bridge import BusBridge
+    from vrcc.gui.models_dialog import ModelsDialog
+
+    monkeypatch.setattr(recommend, "tier_for_config", lambda cfg: "cpu")
+    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    # "auto" (unresolvable to a Whisper code) plus no spoken_languages answer
+    # is the genuinely blind case; the field default ("English") is itself a
+    # spoken-language answer and would rerank, not stay blind.
+    store.config.stt.source_language = "auto"
+    bridge = BusBridge(EventBus())
+    dlg = ModelsDialog(_FakeDM(tmp_path / "models"), bridge, config_store=store)
+    try:
+        assert dlg._recommended_ids[0] == "small"
     finally:
         dlg.close(); dlg.deleteLater(); bridge.detach()
 

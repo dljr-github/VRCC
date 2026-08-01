@@ -209,13 +209,20 @@ class ModelsDialog(QDialog):
         self._scale = max(0.5, min(2.0, scale))
         # Tier resolved once here, following the configured device (a forced-CPU
         # config badges CPU picks even on a GPU machine); the badge tracks this
-        # preset, not the active model.
+        # preset, not the active model. Also reranked by spoken_languages, so
+        # this agrees with the wizard's recommendation for the same tier and
+        # languages instead of only the tier.
         tier = (
             recommend.tier_for_config(config_store.config)
             if config_store is not None
             else recommend.detect_tier()
         )
-        self._recommended_ids = recommend.PRESETS[tier]
+        codes = (
+            recommend.spoken_whisper_codes(config_store.config)
+            if config_store is not None
+            else ()
+        )
+        self._recommended_ids = recommend.preset_for_tier(tier, codes)
 
         self.setWindowTitle(tr("Models"))
         self.resize(660, 620)
