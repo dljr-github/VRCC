@@ -113,20 +113,19 @@ def _preload_onnxruntime_cuda_dlls() -> None:
         import onnxruntime
 
         preload = getattr(onnxruntime, "preload_dlls", None)
-        if preload is None:
-            return
-        # preload_dlls() prints "Failed to load ..." per CUDA DLL the wheels
-        # don't ship; VRCC bundles only cuBLAS + cuDNN, so those misses are
-        # expected and belong in the debug log, not on the console. Fresh
-        # StringIO buffers (rather than wrapping the live streams) also keep
-        # the preload's writes safe in the windowed exe, where sys.stdout and
-        # sys.stderr are None.
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            preload()
-        captured = (out.getvalue() + err.getvalue()).strip()
-        if captured:
-            logger.debug("onnxruntime.preload_dlls output:\n%s", captured)
+        if preload is not None:
+            # preload_dlls() prints "Failed to load ..." per CUDA DLL the
+            # wheels don't ship; VRCC bundles only cuBLAS + cuDNN, so those
+            # misses are expected and belong in the debug log, not on the
+            # console. Fresh StringIO buffers (rather than wrapping the live
+            # streams) also keep the preload's writes safe in the windowed
+            # exe, where sys.stdout and sys.stderr are None.
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                preload()
+            captured = (out.getvalue() + err.getvalue()).strip()
+            if captured:
+                logger.debug("onnxruntime.preload_dlls output:\n%s", captured)
     except Exception:
         logger.debug("onnxruntime.preload_dlls failed; continuing", exc_info=True)
     _load_cudnn_sublibraries()

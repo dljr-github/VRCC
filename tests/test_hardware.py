@@ -396,6 +396,22 @@ class TestGracefulDegradation:
         monkeypatch.delattr(onnxruntime, "preload_dlls", raising=False)
         hardware._preload_onnxruntime_cuda_dlls()  # must not raise
 
+    def test_preload_onnxruntime_still_loads_cudnn_without_preload_dlls(
+        self, monkeypatch
+    ):
+        # The cuDNN sublibrary preload must run even on an onnxruntime build
+        # that predates preload_dlls (older or CPU-only builds), not just
+        # not-raise: this is the branch that regressed by returning early.
+        import onnxruntime
+
+        monkeypatch.delattr(onnxruntime, "preload_dlls", raising=False)
+        calls = []
+        monkeypatch.setattr(
+            hardware, "_load_cudnn_sublibraries", lambda: calls.append(True)
+        )
+        hardware._preload_onnxruntime_cuda_dlls()
+        assert calls == [True]
+
     def test_device_names_fallback_without_pynvml(self, monkeypatch):
         monkeypatch.setattr(hardware, "_pynvml", lambda: None)
         monkeypatch.setattr(hardware, "cuda_device_count", lambda: 2)
