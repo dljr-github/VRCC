@@ -11,7 +11,6 @@ from vrcc.stt.registry import WHISPER_MODELS, WhisperSpec
 from vrcc.translate.registry import MT_MODELS, MtModelSpec, lang_token
 
 KNOWN_FAMILIES = {"nllb", "m2m100", "madlad"}
-WHISPER_TIERS = {"fast", "balanced", "accurate"}
 
 
 # --------------------------------------------------------------------------
@@ -27,11 +26,6 @@ def test_whisper_key_equals_spec_id():
 def test_whisper_sizes_are_positive():
     for spec in WHISPER_MODELS.values():
         assert spec.size_mb > 0, f"{spec.id} has non-positive size"
-
-
-def test_whisper_tiers_are_known():
-    for spec in WHISPER_MODELS.values():
-        assert spec.tier in WHISPER_TIERS, f"{spec.id} has unknown tier {spec.tier!r}"
 
 
 def test_whisper_labels_non_empty():

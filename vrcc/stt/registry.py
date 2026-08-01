@@ -33,7 +33,6 @@ class WhisperSpec:
     id: str
     label: str
     size_mb: int
-    tier: str            # "fast" | "balanced" | "accurate"
     english_only: bool
     # Supported source languages as Whisper codes; None = unrestricted.
     languages: tuple[str, ...] | None = None
@@ -76,23 +75,23 @@ _SENSEVOICE_LANGUAGES = ("en", "ja", "ko", "zh")
 WHISPER_MODELS: dict[str, WhisperSpec] = {
     spec.id: spec
     for spec in (
-        WhisperSpec("tiny", "Tiny", 75, "fast", False),
-        WhisperSpec("base", "Base", 145, "fast", False),
-        WhisperSpec("small", "Small", 484, "balanced", False),
-        WhisperSpec("medium", "Medium", 1530, "balanced", False),
-        WhisperSpec("large-v3", "Large v3", 3090, "accurate", False),
-        WhisperSpec("large-v3-turbo", "Large v3 Turbo", 1620, "accurate", False),
+        WhisperSpec("tiny", "Tiny", 75, False),
+        WhisperSpec("base", "Base", 145, False),
+        WhisperSpec("small", "Small", 484, False),
+        WhisperSpec("medium", "Medium", 1530, False),
+        WhisperSpec("large-v3", "Large v3", 3090, False),
+        WhisperSpec("large-v3-turbo", "Large v3 Turbo", 1620, False),
         WhisperSpec(
-            "distil-large-v3.5", "Distil-Large v3.5 (English)", 1510, "accurate",
+            "distil-large-v3.5", "Distil-Large v3.5 (English)", 1510,
             True, languages=("en",), auto_language=False,
         ),
         WhisperSpec(
-            "distil-small.en", "Distil-Small (English)", 332, "fast",
+            "distil-small.en", "Distil-Small (English)", 332,
             True, languages=("en",), auto_language=False,
         ),
         WhisperSpec(
             "parakeet-tdt-0.6b-v3", "Parakeet v3 (European languages)", 690,
-            "accurate", False,
+            False,
             languages=_EUROPEAN_25_LANGUAGES,
             language_note="European languages only",
             # Detects within its set but tags every result "en".
@@ -104,7 +103,7 @@ WHISPER_MODELS: dict[str, WhisperSpec] = {
         ),
         WhisperSpec(
             "sense-voice-small", "SenseVoice (Chinese/Japanese/Korean/English)",
-            240, "accurate", False,
+            240, False,
             languages=_SENSEVOICE_LANGUAGES,
             language_note="Chinese, Japanese, Korean and English only",
             backend="sensevoice",
