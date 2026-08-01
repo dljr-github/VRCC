@@ -472,9 +472,9 @@ def test_new_feature_defaults():
 def test_denoise_defaults():
     # Off by default: GTCRN corrupts short words on quiet clean speech
     # ("testing" decodes as "Investesting" at 0.5), so a noisy-room user opts in
-    # rather than every user paying the accuracy cost. Strength stays 0.5 for
-    # when it is enabled.
+    # rather than every user paying the accuracy cost. When enabled it starts at
+    # a gentle 0.25, below where the short-word damage set in.
     from vrcc.core.config import AudioConfig
     c = AudioConfig()
     assert c.denoise_enabled is False
-    assert c.denoise_strength == 0.5
+    assert c.denoise_strength == 0.25

@@ -32,9 +32,10 @@ class AudioConfig(BaseModel):
     # "Investesting" at 0.5) and clean-clip accuracy drops as strength rises,
     # while its win is only on genuinely noisy input, so a noisy-room user opts
     # in rather than every user paying the cost. strength is a dry/wet blend in
-    # [0,1], kept at 0.5 for when it is enabled.
+    # [0,1]; a gentle 0.25 when enabled, since 0.5 was where the short-word
+    # damage set in.
     denoise_enabled: bool = False
-    denoise_strength: float = Field(default=0.5, ge=0.0, le=1.0)
+    denoise_strength: float = Field(default=0.25, ge=0.0, le=1.0)
 
 
 class VadConfig(BaseModel):
