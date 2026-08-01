@@ -1,11 +1,10 @@
-"""Qt-free startup helpers: resolve the configured audio device, default the
-caption language on first launch, and check whether the configured models are
-already downloaded.
+"""Qt-free startup helpers: resolve the configured audio device, and check
+whether the configured models are already downloaded.
 
 Extracted from :mod:`vrcc.app` so the composition root stays under the source
 cap. :func:`vrcc.app.run` re-imports these under their private names, so the
-monkeypatch targets (``vrcc.app._models_ready``, ``vrcc.app._resolve_audio_device``,
-``vrcc.app._default_source_language``) keep resolving.
+monkeypatch targets (``vrcc.app._models_ready``, ``vrcc.app._resolve_audio_device``)
+keep resolving.
 """
 
 from __future__ import annotations
@@ -40,18 +39,6 @@ def resolve_audio_device(device_cfg: str) -> int | None:
         device_cfg,
     )
     return None
-
-
-def default_source_language(cfg, locales: list[str]) -> None:
-    """Default ``stt.source_language`` to the first OS display language the
-    caption registry covers; an unmatched preference list keeps the "English"
-    default. Callers gate on ``ConfigStore.missing_on_load`` so an existing
-    config is never rewritten."""
-    for name in locales:
-        matched = match_caption_language(name)
-        if matched is not None:
-            cfg.stt.source_language = matched
-            return
 
 
 def models_ready(cfg, dm: "DownloadManager") -> bool:

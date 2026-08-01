@@ -22,7 +22,6 @@ from vrcc.core.logs import setup_logging
 from vrcc.core.pipeline import Pipeline
 from vrcc.core.reloading import _FAILED, EngineLoader, _Reloader, _status_after_swap
 from vrcc.core.startup import (
-    default_source_language as _default_source_language,
     models_ready as _models_ready,
     resolve_audio_device as _resolve_audio_device,
 )
@@ -112,14 +111,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     # The UI language must apply before any GUI module builds a widget
     # (translated strings are read at construction).
-    from vrcc.i18n.qt import apply_ui_language, system_locale_preference
+    from vrcc.i18n.qt import apply_ui_language
 
     apply_ui_language(app, store.config.gui.ui_language)
-
-    if store.missing_on_load:
-        # First launch only: pre-select the OS display language as the caption
-        # language (the wizard shows it). Never fires for an existing config.
-        _default_source_language(store.config, system_locale_preference())
 
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.firstrun import FirstRunWizard
