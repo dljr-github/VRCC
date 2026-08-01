@@ -281,6 +281,16 @@ def preset_for_choice(
     return _rank_whisper(resolved, languages=languages)[0], _MT_PRESET[resolved]
 
 
+def preset_for_tier(tier: str, languages: tuple[str, ...] = ()) -> tuple[str, str]:
+    """(whisper id, mt id) for an already-resolved tier, reranked for the
+    spoken languages. ``PRESETS[tier]`` is the language-blind case; a surface
+    that holds the user's languages (the Models window) uses this so its
+    recommendation matches the wizard's for the same tier and languages."""
+    if not languages:
+        return PRESETS[tier]
+    return _rank_whisper(tier, languages=languages)[0], _MT_PRESET[tier]
+
+
 def tier_for_config(cfg) -> str:
     """Tier implied by the config's device choice: a forced-CPU config pins
     the ``"cpu"`` tier; anything else follows the detected hardware."""

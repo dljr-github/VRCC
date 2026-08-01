@@ -184,3 +184,24 @@ def test_best_downloaded_language_prefers_covering_specialist():
     # a language parakeet does not cover keeps the blind pick
     got = recommend.best_downloaded(dm, translate=False, tier="cpu", languages=("ja",))
     assert got[0] == "small"
+
+
+def test_preset_for_tier_blind_matches_presets():
+    for tier in ("cpu", "gpu_low", "gpu_high"):
+        assert recommend.preset_for_tier(tier) == recommend.PRESETS[tier]
+
+
+def test_preset_for_tier_promotes_sensevoice_for_cjk():
+    for tier in ("cpu", "gpu_low", "gpu_high"):
+        whisper, mt = recommend.preset_for_tier(tier, ("ja",))
+        assert whisper == "sense-voice-small"
+        assert mt == recommend._MT_PRESET[tier]
+
+
+def test_preset_for_tier_english_and_european_pick_generalist():
+    assert recommend.preset_for_tier("cpu", ("en",))[0] == "parakeet-tdt-0.6b-v3"
+    assert recommend.preset_for_tier("cpu", ("de", "fr"))[0] == "parakeet-tdt-0.6b-v3"
+
+
+def test_preset_for_tier_uncovered_mix_falls_back_to_generalist():
+    assert recommend.preset_for_tier("cpu", ("ja", "de"))[0] == "small"
