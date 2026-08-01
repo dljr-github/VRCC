@@ -30,9 +30,13 @@ class TestLoadCudnnSublibraries:
         (bin_dir / "cudnn_engines_tensor_ir64_9.dll").touch()
         (bin_dir / "other.dll").touch()
         self._patch_find_spec(monkeypatch, tmp_path / "nvidia")
+        # WinDLL exists only on Windows; drive the win32 branch on any CI OS.
+        monkeypatch.setattr(hardware.sys, "platform", "win32")
 
         calls = []
-        monkeypatch.setattr(hardware.ctypes, "WinDLL", lambda path: calls.append(path))
+        monkeypatch.setattr(
+            hardware.ctypes, "WinDLL", lambda path: calls.append(path), raising=False
+        )
 
         hardware._load_cudnn_sublibraries()
 
@@ -49,6 +53,7 @@ class TestLoadCudnnSublibraries:
         (bin_dir / "cudnn64_9.dll").touch()
         (bin_dir / "cudnn_engines_tensor_ir64_9.dll").touch()
         self._patch_find_spec(monkeypatch, tmp_path / "nvidia")
+        monkeypatch.setattr(hardware.sys, "platform", "win32")
 
         calls = []
 
@@ -58,16 +63,19 @@ class TestLoadCudnnSublibraries:
                 raise OSError("could not locate cudnn64_9.dll")
             return object()
 
-        monkeypatch.setattr(hardware.ctypes, "WinDLL", fake_windll)
+        monkeypatch.setattr(hardware.ctypes, "WinDLL", fake_windll, raising=False)
 
         hardware._load_cudnn_sublibraries()  # must not raise
 
         assert len(calls) == 2
 
     def test_no_nvidia_package_is_a_noop(self, monkeypatch):
+        monkeypatch.setattr(hardware.sys, "platform", "win32")
         monkeypatch.setattr(hardware.importlib.util, "find_spec", lambda name: None)
         calls = []
-        monkeypatch.setattr(hardware.ctypes, "WinDLL", lambda path: calls.append(path))
+        monkeypatch.setattr(
+            hardware.ctypes, "WinDLL", lambda path: calls.append(path), raising=False
+        )
 
         hardware._load_cudnn_sublibraries()  # must not raise
 
@@ -81,7 +89,9 @@ class TestLoadCudnnSublibraries:
         monkeypatch.setattr(hardware.sys, "platform", "linux")
 
         calls = []
-        monkeypatch.setattr(hardware.ctypes, "WinDLL", lambda path: calls.append(path))
+        monkeypatch.setattr(
+            hardware.ctypes, "WinDLL", lambda path: calls.append(path), raising=False
+        )
 
         hardware._load_cudnn_sublibraries()
 
