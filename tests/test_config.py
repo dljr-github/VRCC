@@ -160,6 +160,45 @@ def test_unknown_keys_within_a_section_are_dropped(tmp_path):
     assert store.load_warnings == []
 
 
+def test_old_version_config_upgrades_losslessly(tmp_path):
+    # A config written by an older version (no stt.spoken_languages, and a key
+    # this version no longer defines) must load with every user choice intact,
+    # the new field defaulted, and no first-launch seeding: an existing config
+    # is never a fresh install, so the wizard and OS-locale caption seed stay
+    # off and the user keeps their model and language.
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "stt": {
+                    "model": "small",
+                    "source_language": "German",
+                    "device": "cuda",
+                    "since_removed_setting": True,
+                },
+                "translate": {"enabled": True, "model": "nllb-600M-int8"},
+                "gui": {"theme": "dark"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ConfigStore(path)
+    store.load()
+
+    assert store.missing_on_load is False
+    assert store.config.stt.model == "small"
+    assert store.config.stt.source_language == "German"
+    assert store.config.stt.device == "cuda"
+    assert store.config.stt.spoken_languages == []
+    assert store.config.translate.enabled is True
+    assert store.config.translate.model == "nllb-600M-int8"
+    assert store.config.gui.theme == "dark"
+    # The dropped unknown key validates cleanly, so it is not a warning.
+    assert store.load_warnings == []
+
+
 def test_invalid_field_falls_back_to_default_with_warning(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(
