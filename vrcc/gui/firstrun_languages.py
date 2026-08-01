@@ -47,10 +47,11 @@ def build_spoken_picker(wizard) -> QListWidget:
 
 
 def _preselect(picker: QListWidget, cfg) -> None:
-    """Tick what the config already says the user speaks: their stored
-    multi-select if they have one, else the single source language app.run
-    seeded from the OS locale. A stored "auto" ticks nothing."""
-    wanted = set(cfg.stt.spoken_languages or [cfg.stt.source_language])
+    """Tick only what the config records as a genuine spoken-language answer.
+    A fresh first run has none, so nothing is ticked: the wizard asks rather
+    than assuming a language from the OS locale. A stored answer (a returning
+    user) still pre-ticks."""
+    wanted = set(cfg.stt.spoken_languages)
     for i in range(picker.count()):
         item = picker.item(i)
         if item.text() in wanted:

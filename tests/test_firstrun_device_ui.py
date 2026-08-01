@@ -313,7 +313,7 @@ def _wizard_with_language(tmp_path, monkeypatch, tier, language, default_choice=
     monkeypatch.setattr(recommend, "default_device_choice", lambda: default_choice)
     monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
     store = _store(tmp_path)
-    store.config.stt.source_language = language
+    store.config.stt.spoken_languages = [language]
     dm = _FakeDownloadManager(tmp_path / "models")
     bridge = _bridge()
     return FirstRunWizard(store, dm, bridge), store, dm, bridge
@@ -389,6 +389,10 @@ def test_firstrun_multi_language_source_avoids_auto_on_a_silent_model(
     wiz, store, _dm, bridge = _wizard_with_language(
         tmp_path, monkeypatch, "cpu", "German"
     )
+    # A returning user's stored answer carries both fields together; only
+    # spoken_languages pre-ticks the picker, so name the source explicitly
+    # to match, the way a prior accept would have left it on disk.
+    store.config.stt.source_language = "German"
     try:
         _tick(wiz, "German", "French", only=True)
         assert wiz.recommended_whisper == "parakeet-tdt-0.6b-v3"
@@ -398,16 +402,16 @@ def test_firstrun_multi_language_source_avoids_auto_on_a_silent_model(
         _teardown(wiz, bridge)
 
 
-def test_firstrun_untouched_picker_persists_the_seeded_language_on_accept(
+def test_firstrun_untouched_picker_persists_the_stored_answer_on_accept(
     qapp, tmp_path, monkeypatch
 ):
-    """A user who accepts the pre-ticked default never fires itemChanged; the
-    answer the wizard acted on still has to be the one written down."""
+    """A returning user whose stored spoken answer pre-ticks and who never
+    edits it still has that answer written down on accept."""
     wiz, store, _dm, bridge = _wizard_with_language(
         tmp_path, monkeypatch, "cpu", "Japanese"
     )
     try:
-        assert store.config.stt.spoken_languages == []  # never edited
+        assert store.config.stt.spoken_languages == ["Japanese"]
         wiz._apply_recommendation()
         assert store.config.stt.spoken_languages == ["Japanese"]
         assert store.config.stt.source_language == "Japanese"
