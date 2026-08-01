@@ -99,8 +99,8 @@ class FirstRunWizard(QDialog):
     def _spoken_codes(self) -> tuple[str, ...]:
         """Whisper codes for the ticked spoken languages. Empty when nothing is
         ticked, which keeps the recommendation language-blind rather than
-        guessing -- the same plan the wizard showed before it asked."""
-        return recommend.spoken_whisper_codes(self._store.config)
+        guessing one from the config's default source language."""
+        return recommend.spoken_whisper_codes(self._store.config) if self._store.config.stt.spoken_languages else ()
 
     def _total_mb(self) -> int:
         total = WHISPER_MODELS[self.recommended_whisper].size_mb

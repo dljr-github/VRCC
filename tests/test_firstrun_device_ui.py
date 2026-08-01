@@ -68,13 +68,13 @@ def test_firstrun_cpu_choice_shows_cpu_preset_despite_gpu_tier(
 ):
     wiz, _store_, _dm, bridge = _wizard(tmp_path, monkeypatch, tier="gpu_high")
     try:
-        # The fresh-config source language is English, so the plan is the
-        # language-aware CPU pick, never the gpu_high one.
+        # Nothing is ticked on a fresh run, so the plan is language-blind: the
+        # CPU device choice must still show the CPU-tier preset, not the gpu one.
         cpu_label = WHISPER_MODELS[
-            recommend.preset_for_choice("cpu", tier="gpu_high", languages=("en",))[0]
+            recommend.preset_for_choice("cpu", tier="gpu_high")[0]
         ].label
         gpu_label = WHISPER_MODELS[
-            recommend.preset_for_choice("gpu", tier="gpu_high", languages=("en",))[0]
+            recommend.preset_for_choice("gpu", tier="gpu_high")[0]
         ].label
         text = wiz._summary_label.text()
         assert f"Speech: {cpu_label}" in text

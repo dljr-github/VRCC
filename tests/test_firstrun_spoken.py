@@ -110,6 +110,26 @@ def test_first_run_japanese_end_to_end(qapp, tmp_path, monkeypatch):
         wiz.close(); wiz.deleteLater(); bridge.detach()
 
 
+def test_fresh_run_plan_stays_language_blind_until_a_pick(qapp, tmp_path, monkeypatch):
+    """Nothing ticked means no language is assumed for the shown plan either:
+    the recommendation is the blind preset, not the one implied by the config's
+    default source language."""
+    from vrcc.core import recommend
+    from vrcc.gui.firstrun import FirstRunWizard
+
+    monkeypatch.setattr(recommend, "detect_tier", lambda: "cpu")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    store = _store(tmp_path)  # fresh: source_language defaults to English
+    dm = _FakeDownloadManager(tmp_path / "models")
+    bridge = _bridge()
+    wiz = FirstRunWizard(store, dm, bridge)
+    try:
+        assert wiz._spoken_codes() == ()
+        assert wiz.recommended_whisper == "small"  # blind cpu preset, not parakeet
+    finally:
+        wiz.close(); wiz.deleteLater(); bridge.detach()
+
+
 def test_failed_download_reset_keeps_proceed_disabled_without_pick(qapp, tmp_path, monkeypatch):
     """A failed download re-enables Cancel but must not re-enable the proceed
     buttons while nothing is ticked."""
