@@ -251,7 +251,8 @@ def test_set_mt_none_sends_original_text():
 def test_process_mt_job_engine_detached_mid_flight_sends_original():
     # The enqueue-then-detach race: the job was already created when
     # detach_mt() pulled the engine. Processing must send the ORIGINAL text
-    # and publish no PhraseTranslated (skipped gracefully, caption never lost).
+    # and say on the bus that no translation is coming, so the caption row
+    # leaves "translating…" even with sending off (nothing else would).
     from vrcc.core import languages, pipeline_jobs
     from vrcc.core.pipeline_jobs import _MtJob
 
@@ -261,7 +262,9 @@ def test_process_mt_job_engine_detached_mid_flight_sends_original():
     env.pipeline.detach_mt()  # engine leaves AFTER the job exists
     pipeline_jobs.process_mt_job(env.pipeline, job, threading.Event())
     assert env.chatbox.submits == [("hello", 1)]
-    assert translated == []
+    assert [(e.utterance_id, e.original, e.translations) for e in translated] == [
+        (1, "hello", ())
+    ]
     assert env.mt.calls == []  # the detached engine is never invoked
 
 

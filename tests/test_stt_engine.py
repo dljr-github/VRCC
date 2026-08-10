@@ -162,7 +162,7 @@ def test_language_code_for_japanese_source_language():
 
 
 # --------------------------------------------------------------------------
-# _build_kwargs(): Traditional Chinese initial_prompt bias
+# _build_kwargs(): Chinese script initial_prompt bias
 # --------------------------------------------------------------------------
 
 def test_traditional_chinese_gets_nonempty_seed_initial_prompt():
@@ -173,12 +173,14 @@ def test_traditional_chinese_gets_nonempty_seed_initial_prompt():
     assert kwargs["initial_prompt"]
 
 
-def test_simplified_chinese_initial_prompt_left_unchanged():
+def test_simplified_chinese_gets_its_own_seed_initial_prompt():
+    # Measured: without a seed, large-v3 answers a Chinese Simplified source in
+    # Traditional glyphs. The bias lever has to point both ways.
     eng = SttEngine(_cfg(source_language="Chinese Simplified"), MODEL_DIR, EventBus())
 
     kwargs = eng._build_kwargs()
 
-    assert kwargs["initial_prompt"] is None
+    assert kwargs["initial_prompt"]
 
 
 def test_english_initial_prompt_left_unchanged():
@@ -189,16 +191,28 @@ def test_english_initial_prompt_left_unchanged():
     assert kwargs["initial_prompt"] is None
 
 
-def test_traditional_seed_prompt_differs_from_simplified_and_empty():
-    trad = SttEngine(
-        _cfg(source_language="Chinese Traditional"), MODEL_DIR, EventBus()
-    )._build_kwargs()["initial_prompt"]
-    simp = SttEngine(
-        _cfg(source_language="Chinese Simplified"), MODEL_DIR, EventBus()
+def _seed(display: str) -> str | None:
+    return SttEngine(
+        _cfg(source_language=display), MODEL_DIR, EventBus()
     )._build_kwargs()["initial_prompt"]
 
+
+def test_each_chinese_script_is_seeded_in_its_own_glyphs():
+    trad, simp = _seed("Chinese Traditional"), _seed("Chinese Simplified")
+
     assert trad not in (None, "")
+    assert simp not in (None, "")
     assert trad != simp
+    # 體/content and 简/simplified: each seed must be written in the script it
+    # is asking for, or it biases the decoder the wrong way.
+    assert "繁體" in trad and "简体" in simp
+    assert "简" not in trad and "體" not in simp
+
+
+def test_japanese_is_not_seeded_by_the_chinese_script_rule():
+    # The rule reads the script subtag off the nllb code, and every language
+    # has one ("jpn_Jpan"); only the two Chinese scripts may match.
+    assert _seed("Japanese") is None
 
 
 def test_user_initial_prompt_preserved_verbatim_for_traditional_chinese():

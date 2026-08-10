@@ -188,52 +188,78 @@ _GUTTER_W = 64
 _STATUS_W = 190
 
 
-def render_rows_html(
-    rows: list[CaptionRow], colors: dict | None = None, scale: float = 1.0
+def render_row_html(
+    row: CaptionRow, colors: dict | None = None, scale: float = 1.0
 ) -> str:
-    """Full-document HTML for the caption log (pure, unit-testable).
+    """One entry's HTML (pure, unit-testable).
 
-    Three-column table per entry (timestamp gutter, caption + translations,
-    right-aligned status). Status gets its own cell because Qt's rich-text engine
-    ignores white-space:nowrap; keeping it out of the caption flow is the only
-    reliable way to prevent orphaned fragments. scale grows widths + font-sizes.
+    Three-column table (timestamp gutter, caption + translations, right-aligned
+    status). Status gets its own cell because Qt's rich-text engine ignores
+    white-space:nowrap; keeping it out of the caption flow is the only reliable
+    way to prevent orphaned fragments. scale grows widths + font-sizes.
+
+    Per row, not per document, because the view writes rows into the document
+    one at a time and compares this string to decide which ones changed.
     """
     c = {**_DEFAULT_COLORS, **(colors or {})}
     gutter_w = round(_GUTTER_W * scale)
     status_w = round(_STATUS_W * scale)
     fs = round(11 * scale)
-    blocks = []
-    for row in rows:
-        marker, color = status_markup(row, c, scale)
-        trans = "".join(
-            f'<div style="color:{c["muted"]}; margin-top:4px; '
-            f'border-left: 2px solid {c["border"]}; padding-left:8px;">'
-            f'<span style="color:{c["muted"]};">{_esc(lang)}:</span> {_esc(text)}'
-            f"</div>"
-            for lang, text in row.translations
+    marker, color = status_markup(row, c, scale)
+    trans = "".join(
+        f'<div style="color:{c["muted"]}; margin-top:4px; '
+        f'border-left: 2px solid {c["border"]}; padding-left:8px;">'
+        f'<span style="color:{c["muted"]};">{_esc(lang)}:</span> {_esc(text)}'
+        f"</div>"
+        for lang, text in row.translations
+    )
+    return (
+        f'<div style="margin-bottom:10px;">'
+        f'<table width="100%" cellspacing="0" cellpadding="0" '
+        f'style="border-collapse:collapse;">'
+        f"<tr>"
+        # font-size must live on inner spans: Qt ignores it on <td>.
+        f'<td width="{gutter_w}" style="vertical-align:top;">'
+        f'<span style="color:{c["muted"]}; font-size:{fs}px;">{row.time_label}</span>'
+        f"</td>"
+        f'<td style="vertical-align:top;">'
+        f'<span style="font-weight: normal; color:{c["text"]};">{_esc(row.original)}</span>'
+        f"{trans}"
+        f"</td>"
+        f'<td width="{status_w}" style="vertical-align:top; text-align:right; '
+        f'padding-left:10px;">'
+        f'<span style="font-size:{fs}px; color:{color};">{marker}</span>'
+        f"</td>"
+        f"</tr>"
+        f"</table>"
+        f"</div>"
+    )
+
+
+def render_rows_html(
+    rows: list[CaptionRow], colors: dict | None = None, scale: float = 1.0
+) -> str:
+    """Full-document HTML for the caption log."""
+    return "".join(render_row_html(row, colors, scale) for row in rows)
+
+
+def empty_state_text(stt_state: str | None) -> tuple[str, str]:
+    """(headline, sub) for a log with no rows yet, chosen from the voice
+    model's state. Lives here rather than in the window because it is the
+    empty half of the same feed the renderers above draw."""
+    if stt_state == "failed":
+        # Inviting someone to speak at a model that never loaded wastes their
+        # time and reads as the app ignoring them.
+        return (
+            tr("Model failed to load"),
+            tr("Open Models to re-download it, then restart VRCC."),
         )
-        blocks.append(
-            f'<div style="margin-bottom:10px;">'
-            f'<table width="100%" cellspacing="0" cellpadding="0" '
-            f'style="border-collapse:collapse;">'
-            f"<tr>"
-            # font-size must live on inner spans: Qt ignores it on <td>.
-            f'<td width="{gutter_w}" style="vertical-align:top;">'
-            f'<span style="color:{c["muted"]}; font-size:{fs}px;">{row.time_label}</span>'
-            f"</td>"
-            f'<td style="vertical-align:top;">'
-            f'<span style="font-weight: normal; color:{c["text"]};">{_esc(row.original)}</span>'
-            f"{trans}"
-            f"</td>"
-            f'<td width="{status_w}" style="vertical-align:top; text-align:right; '
-            f'padding-left:10px;">'
-            f'<span style="font-size:{fs}px; color:{color};">{marker}</span>'
-            f"</td>"
-            f"</tr>"
-            f"</table>"
-            f"</div>"
-        )
-    return "".join(blocks)
+    if stt_state in (None, "loading"):
+        return tr("Getting the voice model ready…"), tr("usually takes a few seconds")
+    return (
+        tr("Say something - captions appear here"),
+        tr("then in your VRChat chatbox"),
+    )
 
 
 def empty_state_html(

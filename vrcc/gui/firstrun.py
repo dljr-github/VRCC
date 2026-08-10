@@ -2,18 +2,23 @@
 
 Shown by app.run when the configured models are missing. Asks which languages
 the user speaks (:mod:`vrcc.gui.firstrun_languages`) and who reads the
-translation, proposes the recommend-tier STT+MT preset for that answer, then
-downloads both models on a background thread. DownloadManager is injected so
-tests drive the flow without a network.
+translation, proposes the recommend-tier STT+MT preset for that answer
+(:mod:`vrcc.gui.firstrun_plan`), then downloads both models on a background
+thread (:mod:`vrcc.gui.firstrun_download`) or takes what is already on disk
+(:mod:`vrcc.gui.firstrun_manual`). DownloadManager is injected so tests drive
+the flow without a network.
+
+This module is the widgets and the wiring between them; the four modules above
+hold the logic, for the 500-line cap.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -23,18 +28,21 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from vrcc.core import hardware, recommend
+from vrcc.core import calibrate, hardware, recommend
 from vrcc.core.config import ConfigStore
 from vrcc.core.languages import LANGUAGES
-from vrcc.gui import firstrun_languages
+from vrcc.gui import (
+    firstrun_download,
+    firstrun_languages,
+    firstrun_manual,
+    firstrun_plan,
+    mt_prompts,
+)
 from vrcc.gui.bridge import BusBridge
-from vrcc.gui.model_labels import fmt_size, mt_display_name, whisper_display_name
-from vrcc.gui.models_dialog import ModelsDialog
+from vrcc.gui.model_labels import mt_license_note
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.gui.widgets import SegmentedControl, arrow_svg, icon_label, no_wheel
 from vrcc.i18n import tr, tr_noop
-from vrcc.stt.registry import WHISPER_MODELS
-from vrcc.translate.registry import MT_MODELS
 
 logger = logging.getLogger("vrcc.gui.firstrun")
 
@@ -68,21 +76,26 @@ class FirstRunWizard(QDialog):
         self._bridge = bridge
         self._downloading = False
 
-        self.tier = recommend.detect_tier()
-        # Default device: GPU only when the card has >=16 GB VRAM, else CPU
-        # (user decision); _refresh_plan re-derives this pair on change.
-        self._default_choice = recommend.default_device_choice()
+        index = self._store.config.stt.device_index
+        self.tier = recommend.detect_tier(index)
+        # Machine speed and VRAM are read before the first recommendation so
+        # the plan reads right at once (~57 ms cold, then stored). Default
+        # device is GPU only at >=16 GB (user decision); _refresh_plan re-derives.
+        self._factor = calibrate.cached_factor(self._store.config)
+        self._vram_mb = recommend.detected_vram_mb(index)
+        self._default_choice = recommend.default_device_choice(index)
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
-            self._default_choice, tier=self.tier, languages=self._spoken_codes()
-        )
+            self._default_choice, self.tier, self._spoken_codes(),
+            self._factor, self._vram_mb)
         # Resolved once at construction (theme + text size are restart-applied).
         self._p = PALETTE[resolve_theme(self._store.config.gui.theme)]
         self._scale = max(0.5, min(2.0, self._store.config.gui.font_scale))
 
         self.setWindowTitle(tr("Welcome to VRCC"))
         self.setModal(True)
-        # Tall enough for the device row + explainer added to the download section.
-        self.resize(560, 500)
+        # Tall enough for the device row, the explainer and the translation
+        # tick above the plan summary.
+        self.resize(560, 540)
         self._build_ui()
         # Config mirrors the visible default from the start, so the Models
         # dialog's tier badge never disagrees with the Run-on control.
@@ -101,12 +114,6 @@ class FirstRunWizard(QDialog):
         language behind it. The picker still shows the question and a pick is
         required; the locale seed only pre-fills a default the user can change."""
         return recommend.spoken_whisper_codes(self._store.config)
-
-    def _total_mb(self) -> int:
-        total = WHISPER_MODELS[self.recommended_whisper].size_mb
-        if self._translation_enabled():
-            total += MT_MODELS[self.recommended_mt].size_mb
-        return total
 
     def _section_label(self, text: str) -> QLabel:
         # ~1.15em over the 14px body, with top spacing so section heads read as a step.
@@ -153,12 +160,24 @@ class FirstRunWizard(QDialog):
         speak_hint.setStyleSheet(f"color: {self._p['muted']};")
         root.addWidget(speak_hint)
 
+        # Translation is declined here or nowhere: app.run shows this wizard
+        # modally before any window exists, so Settings cannot be reached until
+        # it closes, and without a toggle the 483 MB translation model is the
+        # price of finishing first run.
+        self._translate_check = QCheckBox(tr("Translate my speech"))
+        # Connected after the initial state, like the language picker: the
+        # handler touches widgets built further down this method.
+        self._translate_check.setChecked(self._translation_enabled())
+        self._translate_check.toggled.connect(self._on_translate_toggled)
+        root.addWidget(self._translate_check)
+
         lang_row = QHBoxLayout()
         lang_row.setSpacing(8)
         lang_row.addWidget(
             icon_label(arrow_svg(self._p["muted"]), 16, colors=self._p, fallback_text="->")
         )
-        lang_row.addWidget(QLabel(tr("They read")))
+        self._target_label = QLabel(tr("They read"))
+        lang_row.addWidget(self._target_label)
         self._target_combo = no_wheel(QComboBox())
         self._target_combo.addItems(list(LANGUAGES.keys()))
         existing_targets = self._store.config.translate.targets
@@ -209,19 +228,15 @@ class FirstRunWizard(QDialog):
         self._summary_label.setWordWrap(True)
         root.addWidget(self._summary_label)
 
-        if self._translation_enabled():
-            mt = MT_MODELS[self.recommended_mt]
-            # The single license mention lives here (the summary above never repeats it).
-            note = QLabel(
-                tr(
-                    "Note: the translation model is licensed {license} "
-                    "(free for personal, non-commercial use).",
-                    license=mt.license,
-                )
-            )
-            note.setWordWrap(True)
-            note.setStyleSheet(f"color: {self._p['muted']};")
-            root.addWidget(note)
+        # The single license mention lives here (the summary above never
+        # repeats it). model_labels owns the wording, including the
+        # non-commercial rider only a CC-BY-NC model earns. Text and visibility
+        # follow the plan: the MT model changes with the tier, and there is
+        # nothing to license once translation is off.
+        self._license_note = QLabel()
+        self._license_note.setWordWrap(True)
+        self._license_note.setStyleSheet(f"color: {self._p['muted']};")
+        root.addWidget(self._license_note)
 
         # Both bars start hidden -- shown only once their download starts (in
         # _on_download_and_start), so the wizard never shows two empty bars up front.
@@ -256,6 +271,7 @@ class FirstRunWizard(QDialog):
         self._cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(self._cancel_btn)
         root.addLayout(buttons)
+        self._sync_translation_widgets()
         self._refresh_plan()
 
     # -- device choice + plan refresh ----------------------------------------
@@ -276,30 +292,43 @@ class FirstRunWizard(QDialog):
         languages and rewrite the Detected/Speech/Translation/Total lines in
         place."""
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
-            "cpu" if self._cpu_chosen() else "gpu",
-            tier=self.tier,
-            languages=self._spoken_codes(),
+            "cpu" if self._cpu_chosen() else "gpu", self.tier,
+            self._spoken_codes(), self._factor, self._vram_mb,
         )
-        whisper = WHISPER_MODELS[self.recommended_whisper]
-        tier_label = {
-            "gpu_high": tr("fast graphics card"),
-            "gpu_low": tr("graphics card"),
-            "cpu": self._cpu_tier_label(),
-        }[self.tier]
-        lines = [
-            tr("Detected: {tier}", tier=tier_label), "",
-            tr("Speech: {label} ({size})",
-               label=whisper_display_name(self.recommended_whisper),
-               size=fmt_size(whisper.size_mb)),
-        ]
-        if self._translation_enabled():
-            mt = MT_MODELS[self.recommended_mt]
-            lines.append(tr("Translation: {label} ({size})",
-                            label=mt_display_name(mt.id), size=fmt_size(mt.size_mb)))
-        lines.append("")
-        lines.append(tr("Total download: {size}", size=fmt_size(self._total_mb())))
-        self._summary_label.setText("\n".join(lines))
+        # A target the plan's MT model writes the same way as another is dropped
+        # from config on the first main-window load, so it must not be offerable.
+        # Every reachable preset is an NLLB, which renders both Chinese
+        # scripts, so nothing is greyed today. Kept because it is derived from
+        # the plan rather than hardcoded: a preset that ever collapses a pair
+        # again must not be offerable here.
+        mt_prompts.grey_collapsed_targets(self._target_combo, self.recommended_mt)
+        self._retarget_off_source()
+        self._summary_label.setText("\n".join(firstrun_plan.summary_lines(self)))
+        note = (
+            mt_license_note(self.recommended_mt)
+            if self._translation_enabled() else ""
+        )
+        self._license_note.setText(note)
+        self._license_note.setVisible(bool(note))
         self._update_proceed_enabled()
+
+    def _on_translate_toggled(self, checked: bool) -> None:
+        self._store.config.translate.enabled = checked
+        self._sync_translation_widgets()
+        self._refresh_plan()
+        # The source language rule turns on whether the translator will be
+        # handed one at all: a model that detects the language but cannot say
+        # which it heard only breaks the translation.
+        firstrun_languages.apply_source_language(self)
+        self._store.save_soon()
+
+    def _sync_translation_widgets(self, live: bool = True) -> None:
+        """Grey the "They read" row while translation is off. Greyed rather
+        than hidden, so the tick above it reads as the reason. ``live`` is
+        False while a download owns the controls."""
+        enabled = live and self._translation_enabled()
+        self._target_combo.setEnabled(enabled)
+        self._target_label.setEnabled(enabled)
 
     def _update_proceed_enabled(self) -> None:
         """Proceed needs a spoken-language pick and no download in flight. The
@@ -307,17 +336,6 @@ class FirstRunWizard(QDialog):
         ready = bool(firstrun_languages.checked_spoken(self)) and not self._downloading
         self._download_btn.setEnabled(ready)
         self._manual_btn.setEnabled(ready)
-
-    @staticmethod
-    def _cpu_tier_label() -> str:
-        """Detected-line label for the "cpu" tier. That tier also covers a
-        visible CUDA device this install cannot drive (no loadable cuBLAS),
-        where "no graphics card" would be plainly false."""
-        if hardware.cuda_device_count() > 0:
-            return tr(
-                "graphics card that this version cannot use, using your processor"
-            )
-        return tr("no graphics card, using your processor")
 
     # -- language picker -----------------------------------------------------
 
@@ -330,6 +348,9 @@ class FirstRunWizard(QDialog):
     def _on_target_changed(self, text: str) -> None:
         self._store.config.translate.targets = [text]
         self._store.save_soon()
+
+    def _retarget_off_source(self) -> None:
+        firstrun_languages.retarget_off_source(self)
 
     # -- config ------------------------------------------------------------
 
@@ -357,128 +378,31 @@ class FirstRunWizard(QDialog):
         self._apply_device_choice()
 
     def _configured_models_present(self) -> bool:
-        cfg = self._store.config
-        if not self._dm.is_whisper_downloaded(cfg.stt.model):
-            return False
-        if cfg.translate.enabled:
-            spec = MT_MODELS.get(cfg.translate.model)
-            if spec is None or not self._dm.is_mt_downloaded(spec):
-                return False
-        return True
+        return firstrun_manual.configured_models_present(self)
 
     # -- download path -----------------------------------------------------
 
     def _download_body(self) -> None:
-        """Download the recommended STT (and MT) models, sequentially. Runs on
-        a worker thread in the GUI; called directly in tests."""
-        self._dm.ensure_whisper(self.recommended_whisper)
-        if self._translation_enabled():
-            self._dm.ensure_mt(MT_MODELS[self.recommended_mt])
+        # Kept as a method: the worker thread calls it and the tests patch it
+        # here to stand in for a network.
+        firstrun_download.download_body(self)
 
     def _on_download_and_start(self) -> None:
-        if self._downloading:
-            return
-        self._apply_recommendation()
-        self._downloading = True
-        self._set_buttons_enabled(False)
-        # Downloads start here (sequentially, on the worker thread below); reveal bars now.
-        self._whisper_bar.setVisible(True)
-        if self._translation_enabled():
-            self._mt_bar.setVisible(True)
-        # Whisper downloads emit no byte progress (only a terminal done event), so
-        # show an indeterminate "busy" bar instead of a frozen 0%.
-        self._whisper_bar.setRange(0, 0)
-
-        def worker() -> None:
-            error = ""
-            success = True
-            try:
-                self._download_body()
-            except Exception as exc:  # noqa: BLE001 -- surfaced via the signal
-                success = False
-                error = str(exc)
-                logger.exception("first-run download failed")
-            self._download_done.emit(success, error)
-
-        threading.Thread(target=worker, name="FirstRunDownload", daemon=True).start()
+        firstrun_download.on_download_and_start(self)
 
     def _on_progress(self, event) -> None:
-        if event.model_id == self.recommended_whisper:
-            bar = self._whisper_bar
-        elif event.model_id == self.recommended_mt:
-            bar = self._mt_bar
-        else:
-            return
-        if event.done:
-            bar.setRange(0, 100)  # leave any indeterminate "busy" state
-            bar.setValue(100)
-        elif event.total > 0:
-            bar.setValue(int(100 * event.downloaded / event.total))
+        firstrun_download.on_progress(self, event)
 
     def _on_download_done(self, success: bool, error: str) -> None:
-        self._downloading = False
-        if success:
-            self.accept()
-            return
-        self._cancel_btn.setEnabled(True)
-        self._update_proceed_enabled()
-        from PySide6.QtWidgets import QMessageBox
-
-        QMessageBox.warning(
-            self,
-            tr("Download failed"),
-            tr(
-                "Could not download the recommended models:\n\n{error}\n\n"
-                "You can try again or choose existing models.",
-                error=error,
-            ),
-        )
+        firstrun_download.on_download_done(self, success, error)
 
     # -- manual path -------------------------------------------------------
 
     def _on_choose_manually(self) -> None:
-        if self._downloading:
-            return
-        # Do NOT force the recommended preset here -- "choose manually" means the
-        # user picks; the models dialog lets them download any model.
-        ModelsDialog(
-            self._dm, self._bridge, config_store=self._store, parent=self
-        ).exec()
-        # Invariant: never rewrite the MODEL config when the configured models
-        # are already present -- respect the user's own pick and start. The
-        # Run-on choice is this wizard's own control, so it still applies.
-        if self._configured_models_present():
-            self._apply_device_choice()
-            self.accept()
-            return
-        # Configured models missing (e.g. user downloaded a different set): point
-        # config at the best models on disk, or stay open with a hint if none usable.
-        cfg = self._store.config
-        whisper, mt = recommend.best_downloaded(
-            self._dm, translate=cfg.translate.enabled,
-            tier="cpu" if self._cpu_chosen() else self.tier,
-            languages=self._spoken_codes(),
-        )
-        if whisper and (mt or not cfg.translate.enabled):
-            cfg.stt.model = whisper
-            if cfg.translate.enabled:
-                cfg.translate.model = mt
-            self._apply_device_choice()
-            self.accept()
-        else:
-            self._warn_need_model(has_whisper=whisper is not None)
+        firstrun_manual.on_choose_manually(self)
 
-    def _warn_need_model(self, *, has_whisper: bool) -> None:
-        from PySide6.QtWidgets import QMessageBox
-
-        if not has_whisper:
-            message = tr("Download at least a voice model to continue.")
-        else:
-            message = tr(
-                "Download a translation model too, or turn off translation "
-                "in Settings, to continue."
-            )
-        QMessageBox.information(self, tr("Almost there"), message)
+    def _warn_if_source_unservable(self, whisper_id: str) -> bool:
+        return firstrun_languages.warn_if_source_unservable(self, whisper_id)
 
     # -- helpers -----------------------------------------------------------
 
@@ -496,3 +420,15 @@ class FirstRunWizard(QDialog):
         self._download_btn.setEnabled(enabled)
         self._manual_btn.setEnabled(enabled)
         self._cancel_btn.setEnabled(enabled)
+        # The plan inputs freeze too. _apply_recommendation writes the pair to
+        # config before the worker starts, but the worker re-reads
+        # recommended_whisper/recommended_mt between its two fetches, so moving
+        # any of these mid-download fetches one model while config names the
+        # other, and startup then points the engine at a directory with no
+        # model.bin in it.
+        self._device_choice.setEnabled(enabled)
+        self._spoken_list.setEnabled(enabled)
+        self._translate_check.setEnabled(enabled)
+        # Through the sync, so handing the controls back after a failed
+        # download does not re-enable a row translation is switched off.
+        self._sync_translation_widgets(enabled)

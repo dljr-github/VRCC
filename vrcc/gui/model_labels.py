@@ -8,15 +8,20 @@ blurb) rather than raising, so the dropdown never breaks.
 
 from __future__ import annotations
 
+from vrcc.core.languages import LANGUAGES
 from vrcc.i18n import tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
-from vrcc.translate.registry import MT_MODELS
+from vrcc.translate.registry import MT_MODELS, collapses_onto
 
+# Identity only. The quality ladder lives in _MT_LEAD_INS; carrying it here
+# too meant two hand-synced copies, and they drifted the moment the
+# preference order moved: the badged row read "small" while the only
+# ladder in the name column pointed at the family that had been demoted.
 _MT_DISPLAY_NAMES: dict[str, str] = {
-    "nllb-600M-int8": tr_noop("NLLB 600M - balanced"),
-    "nllb-1.3B-int8": tr_noop("NLLB 1.3B - higher quality"),
-    "nllb-3.3B-int8": tr_noop("NLLB 3.3B - best quality (large)"),
-    "m2m100-418M-int8": tr_noop("M2M100 418M - small"),
+    "nllb-600M-int8": tr_noop("NLLB 600M"),
+    "nllb-1.3B-int8": tr_noop("NLLB 1.3B"),
+    "nllb-3.3B-int8": tr_noop("NLLB 3.3B"),
+    "m2m100-418M-int8": tr_noop("M2M100 418M"),
     "m2m100-1.2B-int8": tr_noop("M2M100 1.2B"),
     "madlad400-3b": tr_noop("MADLAD-400 3B"),
 }
@@ -83,14 +88,35 @@ _WHISPER_LEAD_INS: dict[str, str] = {
     "sense-voice-small": tr_noop("Fast and accurate, small download"),
 }
 
+# The M2M entries read as they do because they are measured, not because they
+# are small: at beam 1 both M2M sizes render a bare "Okay" correctly where both
+# NLLB sizes fabricate a sentence. Calling the recommended default "lower
+# quality", as this table did while NLLB led, contradicted both the badge
+# beside it and the measurement behind the recommendation.
 _MT_LEAD_INS: dict[str, str] = {
     "nllb-600M-int8": tr_noop("Balanced"),
     "nllb-1.3B-int8": tr_noop("Higher quality"),
     "nllb-3.3B-int8": tr_noop("Best quality (large)"),
-    "m2m100-418M-int8": tr_noop("Fastest, lower quality"),
-    "m2m100-1.2B-int8": tr_noop("Balanced"),
+    "m2m100-418M-int8": tr_noop("Balanced"),
+    "m2m100-1.2B-int8": tr_noop("Higher quality"),
     "madlad400-3b": tr_noop("Best quality (large)"),
 }
+
+
+def collapsed_pair(family: str) -> tuple[str, str] | None:
+    """The first language ``family`` cannot write distinctly and the language
+    it writes instead, or ``None`` when it keeps every language apart.
+
+    Derived from the registry's own collapse map rather than declared here, so
+    the blurb cannot claim a limitation the decoder does not have. Today each
+    affected family collapses exactly one pair (Chinese Traditional onto
+    Simplified); a family that grew a second would need this to list more.
+    """
+    for display in LANGUAGES:
+        other = collapses_onto(family, display)
+        if other is not None:
+            return display, other
+    return None
 
 
 def _generic_lead_in(size_mb: int) -> str:
@@ -110,6 +136,12 @@ def model_blurb(kind: str, model_id: str) -> str:
     for voice specs with ``english_only`` True and the spec's own
     ``language_note`` for other language-restricted voice specs. Unknown ids
     return ``""``.
+
+    An MT family that cannot keep two languages apart says so here too. Two
+    families read "Balanced" at different sizes, and without this the only
+    difference the user could see between them was the number of megabytes,
+    while one of them silently answers a Chinese Traditional request in
+    Simplified.
     """
     if kind == "whisper":
         spec = WHISPER_MODELS.get(model_id)
@@ -132,7 +164,41 @@ def model_blurb(kind: str, model_id: str) -> str:
         lead_in = tr(raw_lead_in) if raw_lead_in else _generic_lead_in(spec.size_mb)
         parts = [lead_in, fmt_size(spec.size_mb)]
         blurb = " · ".join(parts)
+        # Both halves, because the licence is the ONLY reason to prefer an
+        # m2m100 and the accuracy gap is the only reason not to. Naming just
+        # one of them would steer the user without telling them what it costs.
         if "NC" in spec.license:
-            blurb += " · " + tr("non-commercial use")
+            blurb += " · " + tr("personal use only")
+        elif spec.family == "m2m100":
+            blurb += " · " + tr(
+                "fine for paid streaming, less accurate than NLLB"
+            )
+        collapsed = collapsed_pair(spec.family)
+        if collapsed is not None:
+            blurb += " · " + tr(
+                "writes {language} as {other}",
+                language=collapsed[0], other=collapsed[1],
+            )
         return blurb
     return ""
+
+
+def mt_license_note(model_id: str) -> str:
+    """One sentence naming an MT model's license, for the first-run wizard.
+
+    Only a CC-BY-NC license restricts use to personal and non-commercial; MIT
+    and Apache-2.0 grant commercial use, so saying otherwise about them would
+    be false. Same "NC" test :func:`model_blurb` uses, kept beside it so the
+    two cannot say different things about one model. Unknown ids get "".
+    """
+    spec = MT_MODELS.get(model_id)
+    if spec is None:
+        return ""
+    if "NC" in spec.license:
+        return tr(
+            "Note: the translation model is licensed {license} "
+            "(free for personal, non-commercial use).",
+            license=spec.license,
+        )
+    return tr("Note: the translation model is licensed {license}.",
+              license=spec.license)

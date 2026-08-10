@@ -16,7 +16,7 @@ from vrcc.core.config import TranslateConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.core.hardware import resolve
 from vrcc.core.languages import Language, get
-from vrcc.translate.registry import MtModelSpec
+from vrcc.translate.registry import MtModelSpec, distinct_targets
 from vrcc.translate.tokenizers import MtTokenizer
 
 logger = logging.getLogger("vrcc.translate.engine")
@@ -41,6 +41,15 @@ def _is_cuda_unusable(exc: Exception) -> bool:
     runtime library CTranslate2 needs is missing."""
     text = str(exc).lower()
     return any(marker in text for marker in _CUDA_FALLBACK_MARKERS)
+
+
+def _maybe(display: str):
+    """The Language behind a display name, or None for one the registry does
+    not know (a hand-edited config must not break the warm-up)."""
+    try:
+        return get(display)
+    except KeyError:
+        return None
 
 
 class TranslateEngine:
@@ -111,11 +120,27 @@ class TranslateEngine:
 
     def warm_up(self) -> None:
         """Run one throwaway translation to prime kernels/allocations (result
-        discarded). Translates ``"hello"`` into the first target (or Japanese).
-        Errors are not swallowed -- a failed warm-up means the engine is unhealthy.
+        discarded). Errors are not swallowed -- a failed warm-up means the
+        engine is unhealthy, which is the whole point of doing it.
+
+        The target has to differ from the source: :meth:`translate` drops a
+        target that resolves onto it, so warming "hello" from English into a
+        first target of English decoded nothing at all and reported a healthy
+        engine without having touched the decoder.
         """
-        target_name = self._cfg.targets[0] if self._cfg.targets else "Japanese"
-        self.translate("hello", get("English"), [get(target_name)])
+        source = get("English")
+        target = next(
+            (
+                lang
+                for lang in (_maybe(name) for name in self._cfg.targets)
+                if lang is not None and lang != source
+            ),
+            get("Japanese"),
+        )
+        if not self.translate("hello", source, [target]):
+            raise RuntimeError(
+                "MT warm-up produced no output; the engine cannot be verified"
+            )
 
     def unload(self) -> None:
         """Drop the translator and tokenizer. Safe to call when not loaded."""
@@ -127,17 +152,22 @@ class TranslateEngine:
     def translate(
         self, text: str, src: Language, targets: list[Language]
     ) -> list[tuple[str, str]]:
-        """Translate ``text`` from ``src`` into every target in one batch.
+        """Translate ``text`` from ``src`` into every distinct target in one batch.
 
         Returns ``[(target.display, translated_text), ...]`` in target order via
-        a single ``translate_batch`` (layout per model family, below). Raises
-        ``RuntimeError`` if called before :meth:`load`.
+        a single ``translate_batch`` (layout per model family, below). The list
+        can be SHORTER than ``targets``: a family with one control token for two
+        of them (m2m100 and madlad share one for both Chinese scripts) would
+        otherwise run the same decode twice and return the same text twice.
+        Raises ``RuntimeError`` if called before :meth:`load`.
         """
         if self._translator is None or self._tokenizer is None:
             raise RuntimeError(
                 "TranslateEngine.translate() called before a successful load(); "
                 "call load() first."
             )
+
+        targets = distinct_targets(self._spec.family, list(targets), src)
 
         tok = self._tokenizer
         if self._spec.prefix_side == "source":

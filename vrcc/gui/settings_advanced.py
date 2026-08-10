@@ -1,42 +1,48 @@
-"""Heavier Settings pages: VRChat connection and Advanced / power-user tuning,
-plus the raw CTranslate2 kwargs editor. Each ``build_*_page(dlg)`` returns the
-tab widget and reuses ``dlg``'s bind/spin helpers (settings imports this module,
-never the reverse).
+"""Heavier Settings pages: VRChat connection and Advanced / power-user tuning.
+Each ``build_*_page(dlg)`` returns the tab widget and reuses ``dlg``'s
+bind/spin helpers (settings imports this module, never the reverse). The raw
+CTranslate2 kwargs tables live in ``settings_kwargs``.
 """
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
-    QPushButton,
     QRadioButton,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from vrcc.core.hardware import device_names
-from vrcc.gui import model_prompts, settings_reset
+from vrcc.core.hardware import device_names, resolved_device
+from vrcc.gui import model_prompts, settings_kwargs, settings_reset
 from vrcc.gui.widgets import no_wheel
-from vrcc.i18n import tr
+from vrcc.i18n import tr, tr_noop
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
 
 _AUTO = "auto"
+
+# The stored card is not in this machine's list: a portable install carried to
+# a PC with fewer GPUs. Naming it beats silently showing Auto, which claims a
+# setting the config does not hold and makes re-picking Auto a no-op.
+_MISSING_GPU = tr_noop("GPU {index}: not found on this PC")
+
+# Chatbox separator: the default is a newline, which a line edit renders as
+# nothing at all, so the box looks empty and a keystroke silently replaces it.
+_SEPARATOR_TIP = tr_noop(
+    "Text placed between the original and the translation. "
+    "Type \\n for a new line."
+)
 
 
 def _auto_label(dlg: "SettingsDialog") -> QLabel:
@@ -59,15 +65,32 @@ def _device_choices():
     return choices
 
 
-def _make_device_combo(dlg: "SettingsDialog", section) -> QComboBox:
-    combo = no_wheel(QComboBox())
-    for label, device, index in _device_choices():
-        combo.addItem(label, (device, index))
+def _select_stored_device(combo: QComboBox, section) -> None:
+    """Point ``combo`` at the stored (device, index). A value this machine
+    cannot offer gets an entry of its own rather than leaving the combo on
+    Auto: showing Auto would hide what the config actually says, keep the
+    "Auto is using your ..." hint hidden, and make picking Auto a no-op
+    (currentIndexChanged never fires when the index is already 0)."""
     current = (section.device, section.device_index)
     for i in range(combo.count()):
         if combo.itemData(i) == current:
             combo.setCurrentIndex(i)
-            break
+            return
+    if section.device == "cuda":
+        label = tr(_MISSING_GPU, index=section.device_index)
+    else:
+        # Unreachable from the UI (auto/cpu always match): a hand-edited
+        # config, shown verbatim so it is at least recognisable.
+        label = section.device
+    combo.addItem(label, current)
+    combo.setCurrentIndex(combo.count() - 1)
+
+
+def _make_device_combo(dlg: "SettingsDialog", section) -> QComboBox:
+    combo = no_wheel(QComboBox())
+    for label, device, index in _device_choices():
+        combo.addItem(label, (device, index))
+    _select_stored_device(combo, section)
 
     def on_change(_i):
         if dlg._loading:
@@ -91,21 +114,77 @@ def _supported_compute_types(device: str, index: int):
         return []
 
 
-def _make_compute_combo(dlg: "SettingsDialog", section) -> QComboBox:
+def _union_compute_values() -> list[str]:
     values = [_AUTO]
-    seen = {_AUTO}
     for device, index in (("cpu", 0), ("cuda", 0)):
         for ct in _supported_compute_types(device, index):
-            if ct not in seen:
-                seen.add(ct)
+            if ct not in values:
                 values.append(ct)
+    return values
+
+
+def _compute_values(dlg: "SettingsDialog", section) -> list[str]:
+    """Precisions the device THIS section runs on can actually do. Offering
+    the union of CPU and CUDA let a processor user pick float16, which
+    CTranslate2 cannot build there. Falls back to the union when the probe
+    yields nothing (no ctranslate2, or a device it refuses to inspect), so a
+    failed probe leaves a usable control rather than Auto alone."""
+    model_id = dlg._cfg.stt.model if section is dlg._cfg.stt else None
+    device = resolved_device(section.device, section.device_index, model_id)
+    values = [_AUTO] + [
+        ct
+        for ct in _supported_compute_types(device, section.device_index)
+        if ct != _AUTO
+    ]
+    return values if len(values) > 1 else _union_compute_values()
+
+
+def _make_compute_combo(dlg: "SettingsDialog", section) -> QComboBox:
     combo = no_wheel(QComboBox())
+    values = _compute_values(dlg, section)
     combo.addItems(values)
+    # A stored value outside the list stays offered at build time: opening
+    # Settings must not rewrite a config the user never touched here.
     if section.compute_type not in values:
         combo.addItem(section.compute_type)
     combo.setCurrentText(section.compute_type)
     dlg._bind_text_combo(combo, section, "compute_type")
     return combo
+
+
+def refresh_compute_combo(dlg: "SettingsDialog", combo: QComboBox, section) -> None:
+    """Re-offer the precisions the newly selected device supports. A stored
+    value the new device cannot run falls back to Auto: that write follows a
+    device change the user just made, and leaving float16 pinned on the
+    processor would only fail later, at engine build."""
+    values = _compute_values(dlg, section)
+    if [combo.itemText(i) for i in range(combo.count())] == values:
+        return
+    was_loading = dlg._loading
+    dlg._loading = True
+    try:
+        combo.clear()
+        combo.addItems(values)
+        if section.compute_type not in values:
+            section.compute_type = _AUTO
+        combo.setCurrentText(section.compute_type)
+    finally:
+        dlg._loading = was_loading
+    dlg._changed()
+
+
+def escape_separator(raw: str) -> str:
+    """Config value as the Separator box shows it. A line edit paints a
+    newline as nothing, so the default separator reads as an empty box and the
+    first keystroke replaces it without the user knowing there was anything
+    there. Only the newline is escaped: a chatbox separator has no use for a
+    literal backslash, and one escape is one thing to explain."""
+    return raw.replace("\n", "\\n")
+
+
+def unescape_separator(text: str) -> str:
+    """Inverse of :func:`escape_separator`."""
+    return text.replace("\\n", "\n")
 
 
 def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
@@ -175,9 +254,16 @@ def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
     dlg._bind_data_combo(overflow, dlg._cfg.osc, "overflow")
     fmt_form.addRow(tr("If a message is too long"), overflow)
 
-    sep = QLineEdit(dlg._cfg.osc.translation_separator)
-    sep.setToolTip(tr("Text placed between the original and the translation."))
-    dlg._bind_line(sep, dlg._cfg.osc, "translation_separator")
+    sep = QLineEdit(escape_separator(dlg._cfg.osc.translation_separator))
+    sep.setToolTip(tr(_SEPARATOR_TIP))
+
+    def on_separator(text):
+        if dlg._loading:
+            return
+        dlg._cfg.osc.translation_separator = unescape_separator(text)
+        dlg._changed()
+    sep.textChanged.connect(on_separator)
+    dlg._separator_edit = sep
     fmt_form.addRow(tr("Separator"), sep)
 
     sfx = QCheckBox(tr("Play a sound when the chatbox updates"))
@@ -285,6 +371,9 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         tr("Lower precision is faster and uses less memory.")
     )
     form.addRow(tr("Voice processing precision"), dlg._stt_compute_combo)
+    dlg._stt_device_combo.currentIndexChanged.connect(
+        lambda _i: refresh_compute_combo(dlg, dlg._stt_compute_combo, dlg._cfg.stt)
+    )
 
     dlg._mt_device_combo = _make_device_combo(dlg, dlg._cfg.translate)
     dlg._mt_device_combo.setToolTip(
@@ -302,6 +391,9 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
         tr("Lower precision is faster and uses less memory.")
     )
     form.addRow(tr("Translation processing precision"), dlg._mt_compute_combo)
+    dlg._mt_device_combo.currentIndexChanged.connect(
+        lambda _i: refresh_compute_combo(dlg, dlg._mt_compute_combo, dlg._cfg.translate)
+    )
 
     # Threads / workers.
     cpu_threads = dlg._spin(0, 64, dlg._cfg.stt.cpu_threads)
@@ -384,93 +476,17 @@ def build_advanced_page(dlg: "SettingsDialog") -> QWidget:
     kw1 = QLabel(tr("Extra transcribe options (CTranslate2)"))
     outer.addWidget(kw1)
     outer.addWidget(
-        _make_kwargs_editor(dlg, dlg._cfg.stt, "extra_transcribe_kwargs")
+        settings_kwargs.make_kwargs_editor(dlg, dlg._cfg.stt, "extra_transcribe_kwargs")
     )
     kw2 = QLabel(tr("Extra translate options (CTranslate2)"))
     outer.addWidget(kw2)
     outer.addWidget(
-        _make_kwargs_editor(dlg, dlg._cfg.translate, "extra_translate_kwargs")
+        settings_kwargs.make_kwargs_editor(
+            dlg, dlg._cfg.translate, "extra_translate_kwargs"
+        )
     )
 
     outer.addStretch(1)
 
     settings_reset.update_device_auto_labels(dlg)
     return page
-
-
-# -- kwargs editor ---------------------------------------------------------
-
-
-def _make_kwargs_editor(dlg: "SettingsDialog", section, field: str) -> QWidget:
-    holder = QWidget()
-    layout = QVBoxLayout(holder)
-    layout.setContentsMargins(0, 0, 0, 0)
-
-    table = QTableWidget(0, 2)
-    table.setHorizontalHeaderLabels([tr("Key"), tr("Value (JSON)")])
-    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-    table.setMaximumHeight(120)
-
-    current = dict(getattr(section, field))
-    for key, value in current.items():
-        _append_kwargs_row(table, key, _dump_scalar(value))
-
-    def rebuild(*_):
-        if dlg._loading:
-            return
-        new: dict = {}
-        for r in range(table.rowCount()):
-            key_item = table.item(r, 0)
-            key = key_item.text().strip() if key_item else ""
-            if not key:
-                continue
-            val_item = table.item(r, 1)
-            raw = val_item.text() if val_item else ""
-            new[key] = _parse_scalar(raw)
-        setattr(section, field, new)
-        dlg._changed()
-    table.itemChanged.connect(rebuild)
-
-    row = QHBoxLayout()
-    add = QPushButton(tr("Add"))
-    add.clicked.connect(lambda: (_append_kwargs_row(table, "", ""), rebuild()))
-    remove = QPushButton(tr("Remove selected"))
-
-    def do_remove():
-        r = table.currentRow()
-        if r >= 0:
-            table.removeRow(r)
-            rebuild()
-    remove.clicked.connect(do_remove)
-    row.addWidget(add)
-    row.addWidget(remove)
-    row.addStretch(1)
-
-    layout.addWidget(table)
-    layout.addLayout(row)
-    return holder
-
-
-def _append_kwargs_row(table: QTableWidget, key: str, value: str) -> None:
-    r = table.rowCount()
-    table.insertRow(r)
-    table.setItem(r, 0, QTableWidgetItem(key))
-    table.setItem(r, 1, QTableWidgetItem(value))
-
-
-def _dump_scalar(value) -> str:
-    try:
-        return json.dumps(value)
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def _parse_scalar(raw: str):
-    raw = raw.strip()
-    if raw == "":
-        return ""
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
-        return raw

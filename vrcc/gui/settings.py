@@ -33,14 +33,32 @@ from PySide6.QtWidgets import (
 
 from vrcc.core import hardware, languages
 from vrcc.core.config import ConfigStore, apply_profile
-from vrcc.gui import model_fit, model_prompts, settings_advanced, settings_live, settings_pages
+from vrcc.gui import (
+    model_fit,
+    model_prompts,
+    settings_advanced,
+    settings_live,
+    settings_mode,
+    settings_pages,
+)
+from vrcc.gui.model_labels import whisper_display_name
 from vrcc.gui.style import PALETTE, apply_font_scale, apply_theme_guarded, resolve_theme
-from vrcc.gui.widgets import no_wheel
-from vrcc.i18n import tr
+from vrcc.gui.widgets import combo_value, no_wheel
+from vrcc.i18n import tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
 _AUTO = "auto"
+
+# Why a voice model is greyed in its own combo. The mirror of the
+# spoken-language greying in model_prompts, which explains every entry it
+# disables; a model greyed without a reason leaves no way out to find.
+_MODEL_LANGUAGE_TIP = tr_noop(
+    "{name} cannot transcribe {language}. Choose another spoken language first."
+)
+_MODEL_AUTO_TIP = tr_noop(
+    "{name} cannot detect the spoken language. Pick your language first."
+)
 
 # Coalesce window (ms) for the live-apply flush: valueChanged fires per keystroke
 # and an engine rebuild is expensive, so an edit only restarts this timer -- the
@@ -174,16 +192,25 @@ class SettingsDialog(QDialog):
             return specs
         return [s for s in specs if self._download_manager.is_mt_downloaded(s)]
 
-    def _confirm_model_fit(self, model_id: str, registry: dict, device: str) -> bool:
+    def _confirm_model_fit(
+        self, model_id: str, registry: dict, device: str, device_index: int = 0,
+        compute_type: str = "auto",
+    ) -> bool:
         """Whether a switch to ``model_id`` proceeds; ``False`` only when a
         :func:`model_fit.vram_warning` prompt is declined (caller reverts).
         ``device`` is the resolved run device, not the raw config value: an
         "auto" that will land on the processor must not draw a graphics-card
-        warning."""
+        warning. ``device_index`` names the card THAT section is pinned to, so
+        an MT model is sized against translate.device_index rather than the
+        voice model's card. ``compute_type`` is that section's too: the same
+        model costs far more at float16 than at int8, and which one the card
+        will run decides whether it fits."""
         spec = registry.get(model_id)
         if spec is None:
             return True
-        msg = model_fit.vram_warning(spec.size_mb, device)
+        msg = model_fit.vram_warning(
+            spec.size_mb, device, model_id, device_index, compute_type
+        )
         if not msg:
             return True
         answer = QMessageBox.question(
@@ -234,7 +261,10 @@ class SettingsDialog(QDialog):
         device = hardware.resolved_device(
             self._cfg.stt.device, self._cfg.stt.device_index, new_id
         )
-        if not self._confirm_model_fit(new_id, WHISPER_MODELS, device):
+        if not self._confirm_model_fit(
+            new_id, WHISPER_MODELS, device, self._cfg.stt.device_index,
+            self._cfg.stt.compute_type,
+        ):
             self._revert_combo(self._model_combo, self._voice_selected_id)
             return
         self._voice_selected_id = new_id
@@ -263,7 +293,10 @@ class SettingsDialog(QDialog):
         device = hardware.resolved_device(
             self._cfg.translate.device, self._cfg.translate.device_index
         )
-        if not self._confirm_model_fit(new_id, MT_MODELS, device):
+        if not self._confirm_model_fit(
+            new_id, MT_MODELS, device, self._cfg.translate.device_index,
+            self._cfg.translate.compute_type,
+        ):
             self._revert_combo(self._translate_model_combo, self._mt_selected_id)
             return
         self._mt_selected_id = new_id
@@ -288,6 +321,7 @@ class SettingsDialog(QDialog):
                 source, self._cfg.stt.model, translating=self._cfg.translate.enabled
             )
             self._update_language_limited_items()
+        settings_pages.set_translation_page_enabled(self, checked)
         self._changed()
         if self._on_model_change is not None:
             self._on_model_change("mt")
@@ -397,7 +431,7 @@ class SettingsDialog(QDialog):
         """Mode control changed: apply the matching Speed/Quality profile."""
         if self._loading:
             return
-        self._apply_profile("quality" if value == "Quality" else "latency")
+        settings_mode.on_mode_changed(self, value)
 
     def _apply_profile(self, profile: str) -> None:
         """Apply a Speed/Quality preset via ``apply_profile``, then sync widgets."""
@@ -410,8 +444,6 @@ class SettingsDialog(QDialog):
                 self._stt_beam_spin.setValue(self._cfg.stt.beam_size)
             if self._stt_temp_spin is not None:
                 self._stt_temp_spin.setValue(self._cfg.stt.temperature)
-            if self._mt_beam_spin is not None:
-                self._mt_beam_spin.setValue(self._cfg.translate.beam_size)
             if self._mode is not None:
                 self._mode.set_value("Quality" if profile == "quality" else "Speed")
         finally:
@@ -433,7 +465,7 @@ class SettingsDialog(QDialog):
         tag every result "en", which would mislabel the translator's source."""
         if self._model_combo is None:
             return
-        source = self._source_combo.currentText()
+        source = combo_value(self._source_combo)
         model = self._model_combo.model()
         for i, spec in self._limited_model_indices:
             if source == _AUTO:
@@ -448,3 +480,16 @@ class SettingsDialog(QDialog):
             item = model.item(i)
             if item is not None:
                 item.setEnabled(enabled)
+                item.setToolTip("" if enabled else self._limited_tip(spec, source))
+
+    def _limited_tip(self, spec, source: str) -> str:
+        """Why ``spec`` is greyed for the selected spoken language, naming the
+        way out. The reporting case borrows the spoken-language combo's own
+        wording: the fix (a concrete language, or translation off) is the same
+        from either side."""
+        name = whisper_display_name(spec.id)
+        if source != _AUTO:
+            return tr(_MODEL_LANGUAGE_TIP, name=name, language=source)
+        if not spec.auto_language:
+            return tr(_MODEL_AUTO_TIP, name=name)
+        return tr(model_prompts._AUTO_LOCKED_TIP, name=name)

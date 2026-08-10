@@ -18,6 +18,12 @@ CHATBOX_LIMIT = 144
 # dominates) and unreadable at 2 s a part anyway.
 _MAX_MESSAGE_SLICES = 16
 
+# Parts drain one every max(split_delay_s, min_interval_s) and a new utterance
+# clears the queue, so measured over a 12-turn conversation nothing past the
+# third part is seen at conversational pace. fit_message will spend one extra
+# part to carry a translation whole, but never past this.
+_MAX_REPEAT_PARTS = 3
+
 
 def format_message(
     original: str, translations: list[tuple[str, str]], cfg: OscConfig
@@ -94,12 +100,36 @@ def _safe_cut(text: str, index: int) -> int:
     return cut if cut > 0 else index
 
 
-def _balanced_slices(text: str, n: int, limit: int, anchor: str = "start") -> list[str]:
+def _is_spaceless(text: str) -> bool:
+    """Whether `text` is written in a script that does not separate words.
+
+    `text.split()` returns ONE token for a Japanese or Chinese sentence, and
+    that token is usually under the 144-char limit, so the word packer accepts
+    it and drops the whole translation into ONE slice while leaving the other
+    parts blank of it. A translation short enough to travel whole is repeated
+    by :func:`_assemble` and never arrives here; one too long has to be cut,
+    and cutting it by character is the only way every part carries a share.
+
+    Whitespace anywhere means the script separates words (Korean does, and packs
+    correctly), so only a run of unseparated CJK reaches the character branch
+    the docstring above already promises it.
+    """
+    if any(ch.isspace() for ch in text):
+        return False
+    return any(
+        "　" <= ch <= "鿿"      # CJK punctuation, kana, unified ideographs
+        or "가" <= ch <= "힯"   # hangul syllables
+        or "豈" <= ch <= "﫿"   # CJK compatibility ideographs
+        or "･" <= ch <= "ﾟ"   # halfwidth katakana
+        for ch in text
+    )
+
+
+def _balanced_slices(text: str, n: int, limit: int) -> list[str]:
     """Split `text` into exactly `n` ordered slices of near-equal length.
 
-    Word-based whenever the text splits into words that each fit `limit`
-    (fewer words than slices just leaves blank slices, positioned per
-    `anchor`): each slice takes whole words greedily toward a running
+    Word-based whenever the text splits into words that each fit `limit`:
+    each slice takes whole words greedily toward a running
     remaining-length/remaining-slices target (last slice takes the rest), so
     joining the slices with spaces preserves every word in order.
     Character-based ceil-division runs only for spaceless scripts or a
@@ -107,14 +137,17 @@ def _balanced_slices(text: str, n: int, limit: int, anchor: str = "start") -> li
     exactly (boundaries are nudged off combining marks). Callers drop empty
     slices.
 
-    `anchor="start"` (default) leaves any unused trailing slices blank --
-    right for the original, which should fade out once exhausted.
-    `anchor="end"` moves that content to the LAST slices instead, blank ones
-    first: a short translation that runs out early still lands in the
-    final, persisting part rather than only the first one.
+    Fewer words than slices simply leaves the trailing slices blank, so a text
+    that runs out early fades rather than repeating. A translation short enough
+    to travel whole never reaches here at all: :func:`_assemble` repeats it in
+    every part instead, which is what gets it read.
     """
     words = text.split()
-    if words and all(len(word) <= limit for word in words):
+    # Only split a spaceless run too big for one slice; a shorter one is
+    # better served whole, and _assemble has already taken that route where it
+    # fits (see _is_spaceless).
+    spaceless = _is_spaceless(text) and len(text) > limit // n
+    if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []
         idx = 0
         for k in range(n - 1):
@@ -134,9 +167,6 @@ def _balanced_slices(text: str, n: int, limit: int, anchor: str = "start") -> li
                 break
         slices.extend([""] * (n - 1 - len(slices)))
         slices.append(" ".join(words[idx:]))
-        if anchor == "end":
-            content = [s for s in slices if s]
-            slices = [""] * (n - len(content)) + content
         return slices
     size = -(-len(text) // n)  # ceil division
     bounds = [0]
@@ -175,38 +205,36 @@ def fit_message(
     if len(joined) <= CHATBOX_LIMIT:
         return [joined]
 
-    # The same texts format_message joins, in the same order. The original
-    # anchors "start" (fades out once exhausted); every translation anchors
-    # "end" (a short one still lands in the final, persisting part) -- see
-    # `_balanced_slices`.
+    # The same texts format_message joins, in the same order.
     if translations:
         texts = [text for _, text in translations]
-        anchors = ["end"] * len(texts)
+        translated = [True] * len(texts)
         if cfg.include_original:
             texts.insert(0, original)
-            anchors.insert(0, "start")
+            translated.insert(0, False)
     else:
         texts = [original]
-        anchors = ["start"]
-    stripped = [(text.strip(), anchor) for text, anchor in zip(texts, anchors)]
+        translated = [False]
+    stripped = [(text.strip(), is_tr) for text, is_tr in zip(texts, translated)]
     texts = [text for text, _ in stripped if text]
-    anchors = [anchor for text, anchor in stripped if text]
+    translated = [is_tr for text, is_tr in stripped if text]
 
     start = max(2, -(-len(joined) // CHATBOX_LIMIT))
     for n in range(start, _MAX_MESSAGE_SLICES + 1):
-        sliced = [
-            _balanced_slices(text, n, CHATBOX_LIMIT, anchor=anchor)
-            for text, anchor in zip(texts, anchors)
-        ]
-        parts = []
-        for i in range(n):
-            part = cfg.translation_separator.join(
-                s[i] for s in sliced if s[i]
-            ).strip()
-            if part:
-                parts.append(part)
-        if parts and all(len(part) <= CHATBOX_LIMIT for part in parts):
-            return parts
+        parts, repeated = _assemble(texts, translated, n, cfg)
+        if not (parts and all(len(part) <= CHATBOX_LIMIT for part in parts)):
+            continue
+        # One more part, never past the third, when the extra room lets a
+        # translation travel whole that could not at this count. Measured, that
+        # trade wins at one target (delivery 75% to 100%) and is what the
+        # ceiling protects: unbounded, the same growth cost three targets 75%
+        # to 71.7%, because a part nobody reads is worse than a shorter one.
+        if n + 1 <= _MAX_REPEAT_PARTS:
+            grown, grown_repeated = _assemble(texts, translated, n + 1, cfg)
+            fits = grown and all(len(part) <= CHATBOX_LIMIT for part in grown)
+            if fits and len(grown_repeated) > len(repeated):
+                return grown
+        return parts
     # Degenerate input that no slice count could balance: split EACH
     # language's own text independently rather than the flat joined string
     # (whose ``.split()`` would treat the "\n" separator as just more
@@ -215,6 +243,66 @@ def fit_message(
     parts = []
     for text in texts:
         parts.extend(_split_words(text, CHATBOX_LIMIT))
+    return parts
+
+
+def _assemble(
+    texts: list[str], translated: list[bool], n: int, cfg: OscConfig
+) -> tuple[list[str], set[int]]:
+    """Build `n` parts, repeating each translation that fits rather than
+    slicing it. Returns the parts and which texts were repeated.
+
+    Parts drain one every `max(split_delay_s, min_interval_s)`, and a new
+    utterance clears the queue, so anything past roughly the third part is
+    rarely seen at conversational pace. Slicing a translation therefore spread
+    it across parts the reader would never receive; putting a short one in
+    EVERY part means it arrives in the first and is still on screen when the
+    user stops talking. Measured over a 12-turn conversation at four paces,
+    that beat slicing on delivery and on what survives afterwards, in every
+    combination tried.
+
+    Repeated shortest first and only while every part still fits, so a long
+    translation falls back to being sliced across the parts in order. The
+    original is always sliced: it is the one text the reader can afford to lose
+    the tail of, since it is not what a non-speaker is reading.
+    """
+    # Shortest first so a long translation cannot crowd out two short ones it
+    # could not fit beside anyway. Swept 2875 realistic messages through
+    # fit_message with the order reversed and the output was identical every
+    # time, so this is insurance rather than a measured win: keep it because it
+    # is the order that can only help, not because it is currently doing work.
+    order = sorted(
+        (i for i, is_tr in enumerate(translated) if is_tr), key=lambda i: len(texts[i])
+    )
+    repeated: set[int] = set()
+    for i in order:
+        candidate = repeated | {i}
+        if all(
+            len(part) <= CHATBOX_LIMIT
+            for part in _join(texts, candidate, n, cfg)
+        ):
+            repeated = candidate
+    return _join(texts, repeated, n, cfg), repeated
+
+
+def _join(
+    texts: list[str], repeated: set[int], n: int, cfg: OscConfig
+) -> list[str]:
+    """`n` parts, with the `repeated` texts whole in each and the rest sliced."""
+    sliced = {
+        i: _balanced_slices(text, n, CHATBOX_LIMIT)
+        for i, text in enumerate(texts)
+        if i not in repeated
+    }
+    parts = []
+    for slot in range(n):
+        pieces = [
+            texts[i] if i in repeated else sliced[i][slot]
+            for i in range(len(texts))
+        ]
+        part = cfg.translation_separator.join(p for p in pieces if p).strip()
+        if part:
+            parts.append(part)
     return parts
 
 

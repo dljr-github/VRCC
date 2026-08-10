@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
-from vrcc.core import recommend
+from vrcc.core import calibrate, recommend
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.gui import settings as settings_mod
 from vrcc.gui import settings_reset
@@ -59,8 +59,8 @@ def _dialog(tmp_path, monkeypatch, *, apply=None, on_model_change=None):
     # Pin the hardware verdict: a CPU verdict makes the reset bind the device
     # to "cpu" (by design), so unpinned tests would assert different devices
     # on a GPU dev box and a GPU-less CI runner.
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "gpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_high")
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     cfg = store.config
     cfg.stt.model = "tiny"
@@ -153,7 +153,16 @@ def test_no_changes_nothing(qapp, tmp_path, monkeypatch):
         before = store.config.model_dump()
         _answer(monkeypatch, QMessageBox.StandardButton.No)
         settings_reset.confirm_and_reset(dlg)
-        assert store.config.model_dump() == before
+        # The hardware section is excluded: previewing measures the machine,
+        # and that reading is a fact about the PC rather than a setting. Assert
+        # what it holds, not merely that it exists -- the point of keeping it is
+        # that declining twice does not probe twice, which only holds once the
+        # factor and the fingerprint it was measured under are both recorded.
+        after = store.config.model_dump()
+        hardware = after.pop("hardware")
+        assert hardware["cpu_factor"] >= 1.0
+        assert hardware["cpu_factor_fingerprint"] == calibrate.machine_fingerprint()
+        assert after == {k: v for k, v in before.items() if k != "hardware"}
         assert model_calls == []
         assert apply.calls == []
         assert dlg._stt_device_combo.currentData() == ("cuda", 0)
@@ -250,12 +259,57 @@ def test_yes_pushes_vad_timings_live_exactly_once(qapp, tmp_path, monkeypatch):
         dlg.deleteLater()
 
 
+def _capture_question(monkeypatch, button):
+    bodies = []
+
+    def question(parent, title, text, *args, **kwargs):
+        bodies.append(text)
+        return button
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(question))
+    return bodies
+
+
+def test_recommended_reset_moves_the_pause_timings_only(qapp, tmp_path, monkeypatch):
+    # The behaviour the confirm body has to disclose: the performance mode it
+    # sets carries the pause timings with it. max_utterance_s is deliberately
+    # NOT among them: the two modes agree on it, so it belongs to "Reset tuning
+    # to defaults" rather than to a control that has no opinion about it.
+    dlg, store = _dialog(tmp_path, monkeypatch, apply=_RecordingApply())
+    try:
+        store.config.vad.finalize_silence_ms = 1234
+        store.config.vad.pre_roll_ms = 999
+        store.config.vad.max_utterance_s = 44.0
+        _answer(monkeypatch, QMessageBox.StandardButton.Yes)
+        settings_reset.confirm_and_reset(dlg)
+        assert store.config.vad.finalize_silence_ms != 1234
+        assert store.config.vad.pre_roll_ms != 999
+        assert store.config.vad.max_utterance_s == 44.0
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_recommended_confirm_body_names_the_timings_it_rewrites(qapp, tmp_path, monkeypatch):
+    dlg, _ = _dialog(tmp_path, monkeypatch)
+    try:
+        bodies = _capture_question(monkeypatch, QMessageBox.StandardButton.No)
+        settings_reset.confirm_and_reset(dlg)
+        body = bodies[0].lower()
+        assert "device, thread and search settings" in body
+        assert "timings" in body
+        assert "advanced" in body
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
 def test_headless_construction_and_reset_do_not_raise(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(settings_mod.settings_advanced, "device_names", lambda: ["Fake GPU"])
     # Bare construction skips the _dialog helper, so the hardware verdict is
     # pinned here too: a CPU verdict binds the device to "cpu" by design.
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "gpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_high")
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     store.config.stt.device = "cuda"
     dlg = SettingsDialog(store)  # bare: no apply / download_manager / on_model_change
@@ -287,7 +341,7 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
     store.config.osc.ip = "10.0.0.5"
     # Tuning to be reset away from defaults.
     store.config.vad.threshold = 0.60
-    store.config.gui.update_check_enabled = False
+    store.config.gui.update_check_enabled = False  # a preference, not tuning
     store.config.stt.avg_logprob_gate = -2.5
     store.config.stt.no_speech_gate = 0.9
     store.config.stt.condition_on_previous_text = True
@@ -302,7 +356,6 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         d = AppConfig()
         # Tuning reset.
         assert store.config.vad.threshold == d.vad.threshold
-        assert store.config.gui.update_check_enabled == d.gui.update_check_enabled
         assert store.config.audio.denoise_enabled == d.audio.denoise_enabled
         assert store.config.audio.denoise_strength == d.audio.denoise_strength
         # Personal preserved.
@@ -316,10 +369,57 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         assert dlg._stt_ns_gate_spin.value() == d.stt.no_speech_gate
         assert dlg._stt_cond_check.isChecked() == d.stt.condition_on_previous_text
         assert dlg._sensitivity.value() == 90 - round(d.vad.threshold * 100)
-        assert dlg._update_check.isChecked() == d.gui.update_check_enabled
+        # Not tuning, so deliberately NOT reset: see the dedicated test below.
+        assert dlg._update_check.isChecked() is False
         assert dlg._denoise_check.isChecked() == d.audio.denoise_enabled
         assert dlg._denoise_strength.value() == round(d.audio.denoise_strength * 100)
         assert dlg._denoise_strength.isEnabled() == d.audio.denoise_enabled
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_resetting_tuning_leaves_the_update_check_alone(qapp, tmp_path, monkeypatch):
+    """A button called "Reset tuning to defaults" must not undo a preference
+    about reaching the network. It used to switch "Check for updates" back on
+    without naming it in the confirmation."""
+    dlg, store = _dialog(tmp_path, monkeypatch)
+    try:
+        store.config.gui.update_check_enabled = False
+        store.config.vad.threshold = 0.59
+        _answer(monkeypatch, QMessageBox.StandardButton.Yes)
+
+        settings_reset.confirm_and_reset_defaults(dlg)
+
+        assert store.config.gui.update_check_enabled is False
+        assert store.config.vad.threshold != 0.59, "but tuning IS reset"
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_recommended_confirm_body_names_the_precision_it_resets(qapp, tmp_path, monkeypatch):
+    """reset_to_recommended puts both compute_type fields back to "auto", which
+    are the Precision rows on the Advanced page. A body that enumerates what
+    Yes will change has to include them."""
+    from vrcc.core import recommend
+    from vrcc.core.config import AppConfig
+
+    probe = AppConfig()
+    probe.stt.compute_type = probe.translate.compute_type = "float32"
+    recommend.reset_to_recommended(probe, None)
+    assert probe.stt.compute_type == "auto"
+    assert probe.translate.compute_type == "auto"
+
+    dlg, _store = _dialog(tmp_path, monkeypatch)
+    bodies: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: bodies.append(a[2]) or QMessageBox.StandardButton.No),
+    )
+    try:
+        settings_reset.confirm_and_reset(dlg)
+        assert bodies and "precision" in bodies[0].lower()
     finally:
         dlg.close()
         dlg.deleteLater()

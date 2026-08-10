@@ -22,60 +22,21 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from vrcc.core import recommend
-from vrcc.core.hardware import resolved_device
 from vrcc.core.languages import LANGUAGES
-from vrcc.gui import model_prompts, settings_audio, settings_reset
+from vrcc.gui import model_prompts, settings_audio, settings_mode, settings_reset
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
-from vrcc.gui.widgets import SegmentedControl, no_wheel
+from vrcc.gui.widgets import combo_value, fill_spoken_languages, set_combo_value, SegmentedControl, no_wheel
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
-from vrcc.stt.registry import WHISPER_MODELS
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
 
 _AUTO = "auto"
 
-# Plain-language Speed/Quality explanation (Mode tooltip + visible description).
-_MODE_TOOLTIP = tr_noop(
-    "Speed shows captions almost instantly. Quality is more accurate and "
-    "clips fewer words off the ends of sentences, but each caption takes a "
-    "little longer."
-)
-_MODE_DESC = tr_noop(
-    "Speed shows captions almost instantly; Quality is more accurate and "
-    "clips fewer words, but each caption takes a little longer."
-)
-# Replaces _MODE_TOOLTIP while the active voice model decodes greedily (the
-# onnxruntime backends ignore beam size and temperature, the profile's headline
-# caption-quality effect).
-_MODE_LOCKED_TOOLTIP = tr_noop(
-    "{name} always decodes at full accuracy, so Speed / Quality "
-    "does not change its captions."
-)
-# Appended to _MODE_DESC for a whisper model the benchmarks have an opinion on
-# (recommend.recommended_profile); mapped from its "quality"/"latency" verdict.
-_MODE_RECOMMEND_QUALITY = tr_noop(
-    "Quality is recommended for this model: more accurate, and barely slower."
-)
-_MODE_RECOMMEND_SPEED = tr_noop(
-    "Speed is recommended for this model: Quality is no more accurate here."
-)
-
-
-def _mode_recommendation(dlg: "SettingsDialog") -> str:
-    """Muted Speed/Quality recommendation for the active whisper model on its
-    resolved device, or "" when the recommender has no opinion (onnx-asr, or an
-    unmeasured model/device)."""
-    device = resolved_device(
-        dlg._cfg.stt.device, dlg._cfg.stt.device_index, dlg._cfg.stt.model
-    )
-    profile = recommend.recommended_profile(dlg._cfg.stt.model, device)
-    if profile == "quality":
-        return tr(_MODE_RECOMMEND_QUALITY)
-    if profile == "latency":
-        return tr(_MODE_RECOMMEND_SPEED)
-    return ""
+# Shown under the interface-language picker: tr() runs at construction, so the
+# open dialog keeps the old language and only the main-window rebuild on close
+# shows the new one. Without this the picker looks broken.
+_UI_LANGUAGE_HINT = tr_noop("The new language appears when you close Settings.")
 
 # Labels double as SegmentedControl values (compared/persisted via scale_map);
 # tr_noop keeps them stable values while making them catalog-extractable for
@@ -101,7 +62,7 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
 
     form.addRow(tr("Microphone"), settings_audio.make_input_device_row(dlg))
 
-    dlg._sensitivity = QSlider(Qt.Orientation.Horizontal)
+    dlg._sensitivity = no_wheel(QSlider(Qt.Orientation.Horizontal))
     dlg._sensitivity.setRange(30, 60)
     # Higher = more sensitive = lower VAD speech threshold, so the slider reads
     # the way its label promises. threshold 0.60..0.30 maps to slider 30..60.
@@ -122,48 +83,7 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     sens_row, dlg._sensitivity_low, dlg._sensitivity_high = dlg._anchored_slider(dlg._sensitivity)
     form.addRow(tr("Microphone sensitivity"), sens_row)
 
-    # Mode: Speed <-> Quality (maps to apply_profile), with tooltip + description.
-    dlg._mode = SegmentedControl(
-        [("Speed", tr("Speed")), ("Quality", tr("Quality"))],
-        "Quality" if dlg._cfg.gui.profile == "quality" else "Speed",
-    )
-    dlg._mode.setToolTip(tr(_MODE_TOOLTIP))
-    dlg._mode.changed.connect(dlg._on_mode_changed)
-    form.addRow(tr("Mode"), dlg._mode)
-
-    dlg._mode_desc = QLabel(tr(_MODE_DESC))
-    dlg._mode_desc.setWordWrap(True)
-    dlg._mode_desc.setStyleSheet(dlg._muted_style)
-    form.addRow("", dlg._mode_desc)
-
-    def update_mode_for_model():
-        # The onnxruntime-backed models decode greedily, so the profile's
-        # beam/temperature presets can't tune their captions: grey the control
-        # in place. The stored profile is untouched (its VAD/translation parts
-        # still apply, and the Advanced knobs stay usable). The visible
-        # description must not advertise a trade-off the locked control can't
-        # deliver, so it swaps to the locked explanation and back.
-        spec = WHISPER_MODELS.get(dlg._cfg.stt.model)
-        locked = spec is not None and spec.runs_on_onnxruntime
-        dlg._mode.setEnabled(not locked)
-        if locked:
-            locked_text = tr(
-                _MODE_LOCKED_TOOLTIP, name=whisper_display_name(spec.id)
-            )
-            dlg._mode.setToolTip(locked_text)
-            dlg._mode_desc.setText(locked_text)
-            return
-        dlg._mode.setToolTip(tr(_MODE_TOOLTIP))
-        text = tr(_MODE_DESC)
-        recommendation = _mode_recommendation(dlg)
-        if recommendation:
-            text = text + "\n" + recommendation
-        dlg._mode_desc.setText(text)
-    dlg._update_mode_for_model = update_mode_for_model
-    # Re-evaluate the recommendation when the Mode toggles (device / model
-    # triggers fire from their own combos).
-    dlg._mode.changed.connect(lambda _v: update_mode_for_model())
-    update_mode_for_model()
+    settings_mode.build_mode_control(dlg, form)
 
     dlg._send_check = QCheckBox(tr("Send my captions to VRChat"))
     dlg._send_check.setChecked(dlg._cfg.osc.send_to_vrchat)
@@ -203,6 +123,11 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     dlg._bind_data_combo(ui_lang, dlg._cfg.gui, "ui_language")
     dlg._ui_language_combo = ui_lang
     form.addRow(tr("Language"), ui_lang)
+
+    dlg._ui_language_hint = QLabel(tr(_UI_LANGUAGE_HINT))
+    dlg._ui_language_hint.setWordWrap(True)
+    dlg._ui_language_hint.setStyleSheet(dlg._muted_style)
+    form.addRow("", dlg._ui_language_hint)
 
     scale_map = dict(_FONT_SCALE_PRESETS)
     cur = min(scale_map, key=lambda k: abs(scale_map[k] - dlg._cfg.gui.font_scale))
@@ -279,9 +204,10 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         form.addRow("", hint)
 
     dlg._source_combo = no_wheel(QComboBox())
-    dlg._source_combo.addItem(_AUTO)
-    dlg._source_combo.addItems(list(LANGUAGES.keys()))
-    dlg._set_combo_text(dlg._source_combo, dlg._cfg.stt.source_language)
+    fill_spoken_languages(
+        dlg._source_combo, tr("Auto (detect)"), _AUTO, LANGUAGES.keys()
+    )
+    set_combo_value(dlg._source_combo, dlg._cfg.stt.source_language)
     dlg._source_combo.setToolTip(
         tr("The language you speak. Auto tries to detect it.")
     )
@@ -290,7 +216,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
         dlg._update_language_limited_items()
         if dlg._loading:
             return
-        dlg._cfg.stt.source_language = dlg._source_combo.currentText()
+        dlg._cfg.stt.source_language = combo_value(dlg._source_combo)
         dlg._changed()
     dlg._source_combo.currentIndexChanged.connect(on_source)
 
@@ -306,7 +232,17 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     dlg._gate_check = gate
     form.addRow(gate)
 
-    slider = QSlider(Qt.Orientation.Horizontal)
+    def on_gate_toggled(checked: bool) -> None:
+        # The gate is off by default and energy_gate.gated_level() returns
+        # before reading the threshold, so a live slider here gives full
+        # feedback for a control that does nothing. The denoise pair two rows
+        # below already greys together; this matches it.
+        for w in (slider, dlg._noise_value_label, dlg._noise_low, dlg._noise_high):
+            w.setEnabled(bool(checked))
+
+    gate.toggled.connect(on_gate_toggled)
+
+    slider = no_wheel(QSlider(Qt.Orientation.Horizontal))
     slider.setRange(0, 2000)
     slider.setValue(dlg._cfg.audio.energy_threshold)
     slider.setToolTip(
@@ -325,6 +261,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     gate_row, dlg._noise_low, dlg._noise_high = dlg._anchored_slider(slider, dlg._noise_value_label)
     dlg._noise_slider = slider
     form.addRow(tr("Background noise level"), gate_row)
+    on_gate_toggled(gate.isChecked())
 
     settings_audio.build_denoise_controls(dlg, form)
 
@@ -466,4 +403,22 @@ def build_translation_page(dlg: "SettingsDialog") -> QWidget:
     adv_form.addRow(tr("Block repeats"), norepeat)
     form.addRow(adv)
 
+    dlg._translate_page_widgets = [adv]
+    # A combo left disabled because nothing is downloaded must stay disabled,
+    # so it only joins the follow-the-toggle set when it has something to offer.
+    if mt_specs:
+        dlg._translate_page_widgets.append(model)
+        model_label = form.labelForField(model)
+        if model_label is not None:
+            dlg._translate_page_widgets.append(model_label)
+    set_translation_page_enabled(dlg, dlg._cfg.translate.enabled)
     return page
+
+
+def set_translation_page_enabled(dlg: "SettingsDialog", enabled: bool) -> None:
+    """Grey the Translation page with the feature, the way the denoise slider
+    follows its checkbox: every control here writes a field nothing reads while
+    ``translate.enabled`` is off. The note at the top stays live, since it says
+    where to turn translation back on."""
+    for widget in getattr(dlg, "_translate_page_widgets", ()):
+        widget.setEnabled(bool(enabled))

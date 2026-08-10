@@ -32,6 +32,11 @@ class EngineLoader:
     also publishes an :class:`AppError`). Engines publish their own state events.
     Each engine loads in its own try block, so one failure never skips the
     other; ``failed_kinds`` records which kind(s) failed for the caller.
+
+    ``success`` means captioning can run, which is the STT engine's business
+    alone. A dead translator costs the user their translations, not their
+    captions, so it must not keep capture from starting; callers that care
+    which kind died read ``failed_kinds``.
     """
 
     def __init__(
@@ -46,8 +51,10 @@ class EngineLoader:
         self._bus = bus
         self._on_complete = on_complete
         self._thread: threading.Thread | None = None
-        # Which engine kinds failed to load ("stt"/"mt"). Read by run() after
-        # on_complete(False) to seed the reloader's per-kind failure state.
+        # Which engine kinds failed to load ("stt"/"mt"). Read by run() on
+        # every completion, not only a failed one: an MT failure reports
+        # success (captions still run) and still has to seed the reloader's
+        # per-kind failure state and detach the dead engine.
         self.failed_kinds: set[str] = set()
 
     def start(self) -> None:
@@ -78,7 +85,7 @@ class EngineLoader:
                 logger.exception("%s engine load failed", kind)
                 self._bus.publish(AppError("ENGINE_LOAD_FAILED", str(exc)))
         try:
-            self._on_complete(not self.failed_kinds)
+            self._on_complete("stt" not in self.failed_kinds)
         except Exception:  # noqa: BLE001 -- a bad callback must not crash the thread
             logger.exception("engine-load completion callback raised")
 

@@ -14,11 +14,39 @@ from vrcc.gui.style import PALETTE
 
 
 def no_wheel(widget: QWidget) -> QWidget:
-    """Make ``widget`` ignore the scroll wheel. Spin boxes and combo boxes
-    step their value when the pointer crosses them mid-scroll; ignoring the
-    event lets it bubble up to the enclosing scroll area instead."""
+    """Make ``widget`` ignore the scroll wheel. Spin boxes, combo boxes and
+    sliders all step their value when the pointer crosses them mid-scroll;
+    ignoring the event lets it bubble up to the enclosing scroll area instead."""
     widget.wheelEvent = lambda event: event.ignore()
     return widget
+
+
+def fill_spoken_languages(combo, auto_label: str, auto_value: str, languages) -> None:
+    """Fill a spoken-language combo, carrying each entry's STORED value in the
+    data role.
+
+    Only the auto entry's label differs from its value, and that is the point:
+    it used to render as the raw config string "auto", lowercase, among Title
+    Case language names, while Settings showed the same concept translated.
+    Every entry carries data so readers use one rule rather than special-casing
+    the odd one out.
+    """
+    combo.addItem(auto_label, auto_value)
+    for display in languages:
+        combo.addItem(display, display)
+
+
+def combo_value(combo) -> str:
+    """The stored value behind the current entry (data role, text as a
+    fallback for a combo built before this was threaded through)."""
+    data = combo.currentData()
+    return combo.currentText() if data is None else data
+
+
+def set_combo_value(combo, value: str) -> None:
+    index = combo.findData(value)
+    if index >= 0:
+        combo.setCurrentIndex(index)
 
 
 def svg_pixmap(svg: str, size: int) -> QPixmap | None:

@@ -82,7 +82,11 @@ def test_onnx_pick_on_cuda_yes_flips_device_to_cpu(qapp, tmp_path, monkeypatch):
         combo = dlg._model_combo
         combo.setCurrentIndex(combo.findData("parakeet-tdt-0.6b-v3"))
         assert len(asked) == 1
-        assert "VRAM" in asked[0]
+        # House vocabulary: "graphics card" and "processor", never VRAM/GPU/CPU
+        # (the rule model_fit states and test_models_dialog_ui asserts).
+        assert "processor" in asked[0] and "graphics card" in asked[0]
+        for jargon in ("VRAM", "GPU", "CPU"):
+            assert jargon not in asked[0]
         assert store.config.stt.model == "parakeet-tdt-0.6b-v3"  # switch kept
         assert store.config.stt.device == "cpu"
         assert dlg._stt_device_combo.currentData() == ("cpu", 0)

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vrcc.core import recommend
+from vrcc.core import calibrate, recommend
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
@@ -120,19 +120,39 @@ def test_rank_whisper_synthetic_ordering_rules():
     ]
 
 
-def test_rank_whisper_gpu_low_size_cap():
+def test_rank_whisper_gpu_low_vram_budget():
     specs = {
-        "big": SimpleNamespace(size_mb=2500, languages=None),
-        "little": SimpleNamespace(size_mb=400, languages=None),
+        "big": SimpleNamespace(size_mb=400, languages=None),
+        "little": SimpleNamespace(size_mb=2500, languages=None),
     }
     bench = {
         "big": (0.010, 0.010, 0.05, 0.05),  # best WER and latency, but...
         "little": (0.050, 0.050, 0.10, 0.10),
     }
-    # ...over 2000 MB cannot be trusted beside VRChat in < 8 GB VRAM
-    assert recommend._rank_whisper("gpu_low", specs=specs, bench=bench) == ["little", "big"]
-    # the cap is gpu_low-only: gpu_high ranks purely on the measurements
-    assert recommend._rank_whisper("gpu_high", specs=specs, bench=bench) == ["big", "little"]
+    # ...it will not fit beside VRChat and the translation model. The sizes
+    # above deliberately contradict the footprints: the budget must follow the
+    # measured peak, which is what stopped turbo losing to medium on a 6 GB
+    # card despite shipping the bigger file.
+    vram = {"big": 2500, "little": 400}
+    ranked = recommend._rank_whisper(
+        "gpu_low", specs=specs, bench=bench, vram=vram, vram_mb=6 * 1024
+    )
+    assert ranked == ["little", "big"]
+    # gpu_high has the headroom, so it ranks purely on the measurements.
+    assert recommend._rank_whisper(
+        "gpu_high", specs=specs, bench=bench, vram=vram, vram_mb=6 * 1024
+    ) == ["big", "little"]
+
+
+def test_rank_whisper_does_not_gate_an_unmeasured_footprint():
+    # Guessing is what the measured table replaced, so an id with no row is
+    # ranked on its numbers rather than on an invented size.
+    specs = {"big": SimpleNamespace(size_mb=9999, languages=None)}
+    bench = {"big": (0.010, 0.010, 0.05, 0.05)}
+    ranked = recommend._rank_whisper(
+        "gpu_low", specs=specs, bench=bench, vram={}, vram_mb=2 * 1024
+    )
+    assert ranked == ["big"]
 
 
 # Per-model performance mode, from the beam-1 vs beam-5 runs (BEAM_BENCH).
@@ -201,11 +221,16 @@ def _cfg_with_personal_choices():
     cfg.osc.port = 9999
     cfg.gui.font_scale = 1.5
     cfg.gui.ui_language = "ja"
+    # reset_to_recommended probes the host CPU. Record a reading for this
+    # machine so the advised profile does not turn on how fast whatever machine
+    # runs the suite is: base at beam 5 crosses the 1.0 s gate past 3.85x.
+    cfg.hardware.cpu_factor = 1.0
+    cfg.hardware.cpu_factor_fingerprint = calibrate.machine_fingerprint()
     return cfg
 
 
 def test_reset_to_recommended_restores_engine_fields_and_picks_models(monkeypatch):
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
     cfg = _cfg_with_personal_choices()
 
     summary = recommend.reset_to_recommended(cfg)
@@ -224,8 +249,8 @@ def test_reset_to_recommended_restores_engine_fields_and_picks_models(monkeypatc
 
 
 def test_reset_to_recommended_keeps_auto_device_for_a_gpu_verdict(monkeypatch):
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "gpu")
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "gpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_high")
     cfg = _cfg_with_personal_choices()
 
     recommend.reset_to_recommended(cfg)
@@ -236,7 +261,7 @@ def test_reset_to_recommended_keeps_auto_device_for_a_gpu_verdict(monkeypatch):
 
 
 def test_reset_to_recommended_leaves_mt_model_alone_when_translation_off(monkeypatch):
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
     cfg = _cfg_with_personal_choices()
     cfg.translate.enabled = False
     cfg.translate.model = "m2m100-418M-int8"
@@ -249,7 +274,7 @@ def test_reset_to_recommended_leaves_mt_model_alone_when_translation_off(monkeyp
 
 
 def test_reset_to_recommended_leaves_personal_choices_alone(monkeypatch):
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
     cfg = _cfg_with_personal_choices()
 
     recommend.reset_to_recommended(cfg)
@@ -262,10 +287,25 @@ def test_reset_to_recommended_leaves_personal_choices_alone(monkeypatch):
     assert cfg.gui.ui_language == "ja"
 
 
+def test_reset_to_recommended_restores_the_mt_beam(monkeypatch):
+    # The load migration only reaches configs written before schema 2, so a
+    # beam narrowed on the Advanced page afterwards has no other way back to
+    # the measured default, and greedy MT decoding fabricates content.
+    from vrcc.core.config import AppConfig, TranslateConfig
+
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
+    cfg = AppConfig()
+    cfg.translate.beam_size = 1
+
+    recommend.reset_to_recommended(cfg)
+
+    assert cfg.translate.beam_size == TranslateConfig().beam_size
+
+
 def test_reset_to_recommended_prefers_a_downloaded_model(monkeypatch):
     # The ranking would pick parakeet for German on CPU, but only small is on
     # disk: resetting must not leave the app unable to caption.
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
     cfg = _cfg_with_personal_choices()
     dm = _FakeDM(whisper=["small"], mt=["nllb-600M-int8"])
 
@@ -278,7 +318,7 @@ def test_reset_to_recommended_prefers_a_downloaded_model(monkeypatch):
 def test_reset_to_recommended_applies_the_advised_profile(monkeypatch):
     # base on CPU is the case where Quality earns its keep, so a reset that
     # lands on it must also switch the mode.
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: "cpu")
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
     cfg = _cfg_with_personal_choices()
     cfg.stt.source_language = "Japanese"  # no NeMo model covers it
     dm = _FakeDM(whisper=["base"], mt=[])
@@ -304,7 +344,7 @@ def test_preset_is_first(tier):
 
 
 def test_best_downloaded_uses_detect_tier_when_none(monkeypatch):
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "cpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "cpu")
     dm = _FakeDM(whisper={recommend.PRESETS["cpu"][0]})
     whisper, mt = recommend.best_downloaded(dm, translate=False)
     assert whisper == recommend.PRESETS["cpu"][0]
@@ -357,7 +397,7 @@ def test_preset_for_choice_gpu_uses_given_tier():
 
 
 def test_preset_for_choice_gpu_detects_tier_when_none(monkeypatch):
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_low")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_low")
     assert recommend.preset_for_choice("gpu") == recommend.PRESETS["gpu_low"]
 
 
@@ -368,15 +408,16 @@ def test_preset_for_choice_gpu_on_cpu_tier_falls_back_to_gpu_low():
 
 
 def _cfg_with_device(device: str) -> SimpleNamespace:
-    return SimpleNamespace(stt=SimpleNamespace(device=device))
+    # device_index too: tier_for_config judges the card the engines load onto.
+    return SimpleNamespace(stt=SimpleNamespace(device=device, device_index=0))
 
 
 def test_tier_for_config_cpu_device_pins_cpu_tier(monkeypatch):
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_high")
     assert recommend.tier_for_config(_cfg_with_device("cpu")) == "cpu"
 
 
 def test_tier_for_config_other_devices_follow_detected_tier(monkeypatch):
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_high")
     assert recommend.tier_for_config(_cfg_with_device("auto")) == "gpu_high"
     assert recommend.tier_for_config(_cfg_with_device("cuda")) == "gpu_high"
