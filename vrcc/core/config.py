@@ -36,6 +36,14 @@ class AudioConfig(BaseModel):
     # damage set in.
     denoise_enabled: bool = False
     denoise_strength: float = Field(default=0.25, ge=0.0, le=1.0)
+    # Caption what the SPEAKERS play, so other people in VRChat can be read as
+    # well as heard. Off by default: it is a second transcription stream, and
+    # what it captures is the whole output device rather than VRChat's voice
+    # channel, so it is opt-in rather than a surprise. Empty device means the
+    # current default speaker, resolved at capture time so a headset swap is
+    # followed.
+    hear_others_enabled: bool = False
+    hear_others_device: str = ""
 
 
 class VadConfig(BaseModel):
