@@ -44,6 +44,9 @@ class EngineStack:
     mt: TranslateEngine | None
     chatbox: ChatboxSender
     mute: MuteSync | None
+    # Present only when the user opted in to captioning what they hear. Its own
+    # capture and segmenter, the pipeline's engines and locks.
+    heard: "HeardStream | None" = None
 
 
 def build_engine_stack(
@@ -111,6 +114,8 @@ def build_engine_stack(
         cfg, bus, source, segmenter, stt_engine, mt_engine, chatbox, mute
     )
 
+    heard = _build_heard(cfg, bus, pipeline, stt_engine, mt_engine)
+
     return EngineStack(
         pipeline=pipeline,
         source=source,
@@ -120,4 +125,31 @@ def build_engine_stack(
         mt=mt_engine,
         chatbox=chatbox,
         mute=mute,
+        heard=heard,
+    )
+
+
+def _build_heard(cfg, bus, pipeline, stt_engine, mt_engine):
+    """The speaker-capture stream, or None when it is off or unavailable.
+
+    Its own Segmenter, because VAD state is per stream and one shared instance
+    would let either voice end the other's utterance. The ENGINES are the
+    pipeline's, under the pipeline's locks: a second copy of the voice model
+    costs the VRAM the card was sized for once.
+    """
+    if not cfg.audio.hear_others_enabled:
+        return None
+    from vrcc.audio.loopback import LoopbackSource
+    from vrcc.core.heard import HeardStream
+
+    heard_vad = StreamingVad(threshold=cfg.vad.threshold)
+    return HeardStream(
+        cfg,
+        bus,
+        LoopbackSource(cfg.audio.hear_others_device or None),
+        Segmenter(cfg.vad, heard_vad.prob),
+        stt_engine,
+        mt_engine,
+        pipeline._stt_lock,
+        pipeline._mt_lock,
     )

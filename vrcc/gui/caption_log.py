@@ -19,9 +19,10 @@ TRANSLATING = "translating"
 QUEUED = "queued"
 SENT = "sent"
 TRUNCATED = "truncated"
+HEARD = "heard"
 NOT_SENT = "not_sent"
 
-_TERMINAL = frozenset({SENT, TRUNCATED, NOT_SENT})
+_TERMINAL = frozenset({SENT, TRUNCATED, NOT_SENT, HEARD})
 
 
 @dataclass
@@ -33,6 +34,11 @@ class CaptionRow:
     translations: list[tuple[str, str]] = field(default_factory=list)
     status: str = TRANSLATING
     latency_ms: int | None = None
+    # Someone else's speech, captured from the speakers. Never sent anywhere,
+    # so it carries no delivery status and is drawn apart from the user's own
+    # captions: a row that looks identical to yours invites the reading that
+    # VRChat saw it too.
+    heard: bool = False
 
 
 class CaptionModel:
@@ -53,6 +59,25 @@ class CaptionModel:
         self._cap = cap
         self._clock = clock
         self._time_label = time_label or (lambda: time.strftime("%H:%M"))
+
+    def heard(self, text: str, translations: list[tuple[str, str]]) -> None:
+        """Add a row for speech captured from the speakers.
+
+        Complete on arrival: there is no later translated or sent event to wait
+        for, because nothing is sent. HEARD is terminal for the same reason.
+        """
+        key = self._next_key
+        self._next_key += 1
+        self._rows[key] = CaptionRow(
+            key=key,
+            utterance_id=-key,  # never collides with a real utterance id
+            time_label=self._time_label(),
+            original=text,
+            translations=list(translations),
+            status=HEARD,
+            heard=True,
+        )
+        self._trim()
 
     def recognized(
         self, utterance_id: int, text: str, *, translate_enabled: bool, send_enabled: bool
@@ -157,6 +182,11 @@ def status_markup(
     ``scale`` is accepted for signature symmetry with the other renderers; the
     status text itself carries no font-size (that lives on the render cell)."""
     c = {**_DEFAULT_COLORS, **(colors or {})}
+    if row.status == HEARD:
+        # Not a delivery state: this row was never going anywhere. The word
+        # says whose speech it is, which is the thing a reader needs to know
+        # at a glance.
+        return (tr("heard"), c["muted"])
     if row.status == SENT:
         return (tr("sent") + _latency_inline(row, c), c["good"])
     if row.status == TRUNCATED:
@@ -206,6 +236,9 @@ def render_row_html(
     status_w = round(_STATUS_W * scale)
     fs = round(11 * scale)
     marker, color = status_markup(row, c, scale)
+    # Someone else's words are drawn muted, so a glance separates them from
+    # your own without reading the status column.
+    body_color = c["muted"] if row.heard else c["text"]
     trans = "".join(
         f'<div style="color:{c["muted"]}; margin-top:4px; '
         f'border-left: 2px solid {c["border"]}; padding-left:8px;">'

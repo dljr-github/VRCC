@@ -23,7 +23,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from vrcc.core.languages import LANGUAGES
-from vrcc.gui import model_prompts, settings_audio, settings_mode, settings_reset
+from vrcc.gui import (
+    model_prompts,
+    settings_audio,
+    settings_heard,
+    settings_mode,
+    settings_reset,
+)
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
 from vrcc.gui.widgets import combo_value, fill_spoken_languages, set_combo_value, SegmentedControl, no_wheel
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
@@ -98,6 +104,8 @@ def build_simple_page(dlg: "SettingsDialog") -> QWidget:
     # on_model_change("mt"), not the restart-gated generic binding.
     dlg._translate_check.toggled.connect(dlg._on_translate_toggled)
     form.addRow(dlg._translate_check)
+
+    settings_heard.build_heard_controls(dlg, form)
 
     dlg._include_original_check = QCheckBox(tr("Show my original words in the chatbox"))
     dlg._include_original_check.setChecked(dlg._cfg.osc.include_original)

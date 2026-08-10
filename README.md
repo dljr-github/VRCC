@@ -234,10 +234,20 @@ speed.
    inside VRChat's chatbox rate limit so continuous speech never triggers
    the in-game spam mute. Turn it down or off under **Settings → Voice
    recognition → Reduce background noise**.
-4. **Typed messages:** the text box at the bottom of the main window sends
+4. **Read other people:** tick **Settings → Simple → Caption what I hear**
+   to transcribe and translate the voices coming out of your speakers, so you
+   can follow someone speaking a language you don't read. Two things to know.
+   It captures the whole output device rather than VRChat's voice channel,
+   because Windows offers no per-app voice tap, so game and world audio are
+   transcribed too. And it is shown only in the VRCC window: other people's
+   words are never sent to the chatbox, since the room already heard them and
+   relaying it would republish their speech under your name. Without a
+   graphics card it shares one voice model with your own captions, so both
+   get slower.
+5. **Typed messages:** the text box at the bottom of the main window sends
    typed text through the same translate → chatbox path (useful when you'd
    rather not speak).
-5. **Mute sync:** when enabled, muting yourself in VRChat makes VRCC stop
+6. **Mute sync:** when enabled, muting yourself in VRChat makes VRCC stop
    listening entirely (configurable to ignore or invert). Speech made
    while muted is never captured, so unmuting mid-sentence captions only
    what you say after the unmute. This uses VRChat's OSCQuery discovery

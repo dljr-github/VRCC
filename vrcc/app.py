@@ -46,6 +46,27 @@ def _make_source_with_denoise(config, device_cfg: str) -> MicSource:
     return MicSource(_resolve_audio_device(device_cfg), denoiser=denoiser)
 
 
+def _start_heard_guarded(heard, bus: EventBus) -> None:
+    """Start the speaker-capture stream, if the user turned it on.
+
+    Never fatal: captioning what you hear is an extra, and losing it must not
+    take the microphone down with it. A failure inside the capture thread is
+    already handled there; this covers a start() that raises outright.
+    """
+    if heard is None:
+        return
+    try:
+        heard.start()
+    except Exception:
+        logger.warning(
+            "could not start captioning what you hear; the microphone is "
+            "unaffected", exc_info=True,
+        )
+        bus.publish(
+            AppError("HEARD_START_FAILED", "Could not listen to your speakers.")
+        )
+
+
 def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, pipeline) -> None:
     """Mark each engine kind that failed at startup, and unhook a dead
     translator from ``pipeline``.
@@ -233,6 +254,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
                         False, tr("{name} failed to load", name=tr("voice model"))
                     )
                 return
+            _start_heard_guarded(stack.heard, bus)
             if not _start_pipeline_guarded(stack.pipeline, bus):
                 # The AppError already flashed the status bar; a dead mic kills
                 # the core function, so also say it loudly. App stays up: fix
@@ -446,6 +468,8 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     finally:
         detector.stop()
         stack.pipeline.stop()
+        if stack.heard is not None:
+            stack.heard.stop()
         stack.chatbox.stop()
         # Covers both the startup coordinator and one LiveApply built lazily
         # when mute sync was enabled after launch (stack.mute is None then).

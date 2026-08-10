@@ -204,6 +204,7 @@ class MainWindow(QMainWindow):
             (b.app_error, self._on_app_error),
             (b.vrchat_detected, self._on_vrchat_detected),
             (b.update_result, self._on_update_result),
+            (b.heard_phrase, self._on_heard_phrase),
         )
 
     def _connect_bridge(self) -> None:
@@ -266,6 +267,12 @@ class MainWindow(QMainWindow):
         # event is None only for the initial "checking" render at construction.
         detected = bool(event.detected) if event is not None else None
         status_render.render_vrchat(self, detected)
+
+    def _on_heard_phrase(self, event) -> None:
+        """Someone else's speech, for reading only. Never reaches the chatbox:
+        HeardStream has no sender, so there is nothing to suppress here."""
+        self._caption_model.heard(event.text, list(event.translations))
+        self._render_log()
 
     def _on_engine_state(self, event) -> None:
         # State drives the caption feed's loading message via _engine_states; it
