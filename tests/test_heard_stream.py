@@ -298,3 +298,74 @@ def test_stopping_leaves_no_worker_thread():
     stream.stop()
 
     assert [t for t in threading.enumerate() if t.name == "HeardStream"] == []
+
+
+# -- not captioning the user back to themselves -------------------------------
+
+
+def test_speech_heard_while_the_microphone_was_live_is_dropped():
+    """Loopback captures everything the output device plays, and on many setups
+    that includes the user's own voice: hardware direct monitoring, headset
+    sidetone, or a virtual mix output. Captioning that back reads as the
+    feature being broken."""
+    stt = _Stt()
+    stream, source, bus = _stream(stt=stt)
+    try:
+        stream.start()
+        stream.note_mic_level(0.9)  # the user is talking
+        source.feed()
+        time.sleep(0.15)
+    finally:
+        stream.stop()
+
+    assert bus.published == []
+    assert stream._suppressed == 1
+    assert stt.calls == 0, "it should not even be transcribed"
+
+
+def test_speech_heard_while_the_microphone_is_quiet_is_captioned():
+    stream, source, bus = _stream()
+    try:
+        stream.start()
+        stream.note_mic_level(0.01)  # silence on the mic
+        source.feed()
+        published = _wait(bus)
+    finally:
+        stream.stop()
+
+    assert published, "a quiet microphone must not suppress other people"
+
+
+def test_the_guard_lapses_after_the_user_stops():
+    """Otherwise one word from the user would mute everyone else for the rest
+    of the session."""
+    from vrcc.core import heard as heard_mod
+
+    stream, source, bus = _stream()
+    try:
+        stream.start()
+        stream.note_mic_level(0.9)
+        # Rewind past the grace window, as if the user finished a moment ago.
+        stream._user_spoke_at -= heard_mod._SELF_ECHO_GRACE_S + 0.5
+        source.feed()
+        published = _wait(bus)
+    finally:
+        stream.stop()
+
+    assert published
+
+
+def test_a_level_below_the_speech_threshold_is_not_treated_as_speech():
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    stream, source, bus = _stream(cfg=cfg)
+    try:
+        stream.start()
+        stream.note_mic_level(cfg.vad.threshold - 0.01)
+        source.feed()
+        published = _wait(bus)
+    finally:
+        stream.stop()
+
+    assert published

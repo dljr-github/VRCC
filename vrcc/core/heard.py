@@ -22,6 +22,15 @@ the model.
 
 Source language is always detected. You cannot know in advance what someone
 else will speak, which is the whole reason for the feature.
+
+It also refuses to caption the user back to themselves. Loopback captures
+everything the output device plays, and on a lot of setups that includes the
+user's own voice: hardware direct monitoring (an Elgato Wave XLR does this),
+sidetone on a headset, or any virtual "mix" output. Those are audio-routing
+facts VRCC cannot change, and the result reads as the feature being broken,
+so an utterance heard while the microphone was live is dropped rather than
+shown. It costs the moments when someone talks over you, which is also when
+the transcription would have been poor.
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 
 import numpy as np
 
@@ -44,6 +54,12 @@ logger = logging.getLogger("vrcc.core.heard")
 _QUEUE_MAX = 4
 
 _AUTO = "auto"
+
+# How long after the user stops speaking their voice may still be arriving on
+# the loopback. Covers the monitoring path's own delay plus the tail of an
+# utterance already in the segmenter, without swallowing a reply that lands
+# immediately afterwards.
+_SELF_ECHO_GRACE_S = 1.0
 
 
 class HeardStream:
@@ -71,12 +87,25 @@ class HeardStream:
         self._stt_lock = stt_lock
         self._mt_lock = mt_lock
 
+        # Monotonic timestamp of the last frame the MICROPHONE judged to be
+        # speech, written by the bus thread and read by the worker. A float
+        # assignment is atomic under the GIL, so no lock is warranted.
+        self._user_spoke_at = 0.0
+        self._suppressed = 0
+
         self._queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAX)
         self._thread: threading.Thread | None = None
         self._running = False
         self.dropped = 0
 
     # -- lifecycle ---------------------------------------------------------
+
+    def note_mic_level(self, vad_prob: float) -> None:
+        """Called for every microphone frame, so the stream knows when the user
+        is talking. Fed from MicLevel rather than reaching into the pipeline:
+        the mic's own VAD has already made this judgement."""
+        if vad_prob >= self._config.vad.threshold:
+            self._user_spoke_at = time.monotonic()
 
     def start(self) -> None:
         if self._running:
@@ -143,6 +172,12 @@ class HeardStream:
                 logger.warning("heard utterance failed", exc_info=True)
 
     def _handle(self, samples: np.ndarray) -> None:
+        if time.monotonic() - self._user_spoke_at < _SELF_ECHO_GRACE_S:
+            # The user was talking while this was captured, so it is most
+            # likely their own voice arriving back through monitoring.
+            self._suppressed += 1
+            logger.debug("dropped a heard utterance that overlapped your speech")
+            return
         with self._stt_lock:
             result = self._stt.transcribe(samples)
         if result is None or not result.text.strip():
