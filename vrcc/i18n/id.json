@@ -32,6 +32,8 @@
   "CPU": "CPU",
   "CPU threads (0 = auto)": "Thread CPU (0 = otomatis)",
   "Cancel": "Batal",
+  "Cannot caption what you hear: a component is missing from this install. Reinstall VRCC.": "Tidak bisa menakarirkan yang kamu dengar: ada komponen yang hilang dari instalasi ini. Pasang ulang VRCC.",
+  "Cannot caption what you hear: your speakers could not be opened. Pick a different one in Settings > Audio.": "Tidak bisa menakarirkan yang kamu dengar: speaker tidak bisa dibuka. Pilih yang lain di Pengaturan > Audio.",
   "Caption what I hear": "Takarir untuk yang saya dengar",
   "Caption what your speakers play, so you can read other people. Shown here only, never sent to VRChat.": "Menakarirkan apa yang diputar speakermu agar kamu bisa membaca orang lain. Hanya ditampilkan di sini, tidak pernah dikirim ke VRChat.",
   "Captioning on": "Takarir aktif",

@@ -352,6 +352,7 @@ class MainWindow(QMainWindow):
         logger.warning("AppError %s: %s", event.code, event.message)
         friendly = _FRIENDLY_ERRORS.get(event.code, _FRIENDLY_ERRORS["HANDLER_ERROR"])
         self._flash_status(tr(friendly))
+        main_heard.on_error(self, event.code)
 
     def _on_update_result(self, event) -> None:
         from vrcc.gui import updates_ui

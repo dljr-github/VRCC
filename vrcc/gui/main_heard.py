@@ -40,6 +40,33 @@ def on_toggled(w: MainWindow, checked: bool) -> None:
         w._on_hear_others(checked)
 
 
+# Failures that mean the stream is not running, whatever the toggle says.
+_FAILURE_CODES = frozenset({"HEARD_NO_LIBRARY", "HEARD_DEVICE_FAILED"})
+
+
+def on_error(w: MainWindow, code: str) -> None:
+    """Put the toggle back down when the capture could not start.
+
+    The capture opens its device on its own thread, so a failure arrives long
+    after the click returned. Without this the button stays lit beside a stream
+    that is not running, which is the state that made this feature look like it
+    worked while producing nothing.
+
+    Signals are blocked because the config has already been switched off by the
+    publisher; re-entering the toggle handler would only ask a dead stream to
+    stop again.
+    """
+    if code not in _FAILURE_CODES:
+        return
+    blocked = w._hear_btn.blockSignals(True)
+    try:
+        w._hear_btn.setChecked(False)
+    finally:
+        w._hear_btn.blockSignals(blocked)
+    w._heard_meter.set_active(False)
+    w._heard_meter.set_level(0.0)
+
+
 def on_phrase(w: MainWindow, event) -> None:
     """Someone else's speech, for reading only. Nothing is suppressed here
     because there is nothing to suppress: HeardStream has no sender."""

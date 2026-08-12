@@ -91,6 +91,14 @@ FRIENDLY_ERRORS = {
     "CHATBOX_SEND_FAILED": tr_noop(
         "Could not send to the VRChat chatbox. Is VRChat running?"
     ),
+    "HEARD_NO_LIBRARY": tr_noop(
+        "Cannot caption what you hear: a component is missing from this install. "
+        "Reinstall VRCC."
+    ),
+    "HEARD_DEVICE_FAILED": tr_noop(
+        "Cannot caption what you hear: your speakers could not be opened. "
+        "Pick a different one in Settings > Audio."
+    ),
     "ENGINE_LOAD_FAILED": tr_noop(
         "An engine failed to load. Open Models to re-download, then restart VRCC."
     ),

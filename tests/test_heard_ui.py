@@ -239,3 +239,56 @@ def test_the_mic_and_speaker_meters_are_separate_widgets(qapp, tmp_path):
     finally:
         window.close()
         bridge.detach()
+
+
+def test_a_capture_failure_puts_the_toggle_back_down(qapp, tmp_path):
+    """A lit toggle beside a stream that is not running is the exact state that
+    made this feature look like it worked while producing nothing. The failure
+    arrives from the capture thread long after the click returned, so the
+    button cannot un-check itself in the click handler."""
+    from vrcc.core.events import AppError
+
+    w, bridge = _main_window(_store(tmp_path))
+    try:
+        w._hear_btn.setChecked(True)
+        assert w._hear_btn.isChecked()
+
+        w._on_app_error(AppError("HEARD_NO_LIBRARY", "soundcard is not installed"))
+
+        assert not w._hear_btn.isChecked()
+    finally:
+        w.close()
+        bridge.detach()
+
+
+def test_a_capture_failure_names_the_cause_on_screen(qapp, tmp_path):
+    """The generic handler sentence would tell a user nothing: the whole point
+    of reporting the failure is which of the two causes it was."""
+    from vrcc.core.events import AppError
+
+    w, bridge = _main_window(_store(tmp_path))
+    try:
+        for code, wanted in (
+            ("HEARD_NO_LIBRARY", "Reinstall VRCC"),
+            ("HEARD_DEVICE_FAILED", "speakers could not be opened"),
+        ):
+            w._on_app_error(AppError(code, "detail for the log only"))
+            shown = w.statusBar().currentMessage()
+            assert wanted in shown, (code, shown)
+    finally:
+        w.close()
+        bridge.detach()
+
+
+def test_an_unrelated_error_leaves_the_toggle_alone(qapp, tmp_path):
+    """Only the two speaker-capture codes mean that stream is dead."""
+    from vrcc.core.events import AppError
+
+    w, bridge = _main_window(_store(tmp_path))
+    try:
+        w._hear_btn.setChecked(True)
+        w._on_app_error(AppError("CHATBOX_SEND_FAILED", "no VRChat"))
+        assert w._hear_btn.isChecked()
+    finally:
+        w.close()
+        bridge.detach()

@@ -179,3 +179,65 @@ def test_any_block_size_is_rechunked_to_whole_frames(blocksize):
 
     assert frames
     assert all(f.shape == (FRAME_LEN,) for f in frames)
+
+
+def test_a_missing_soundcard_is_reported_not_swallowed():
+    """The defect this feature shipped with. The import happens on the capture
+    thread, so an ImportError can never reach a try/except around start(): the
+    thread logged a warning and returned, and the stream sat there receiving
+    nothing for the life of the process. Five sessions of logs looked like
+    this."""
+    import sys
+
+    reported = []
+    src = LoopbackSource(on_failure=lambda code, detail: reported.append(code))
+    saved = sys.modules.get("soundcard", "absent")
+    sys.modules["soundcard"] = None  # makes `import soundcard` raise
+    try:
+        src.start(lambda frame: None)
+        deadline = time.monotonic() + 2.0
+        while not reported and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        src.stop()
+        if saved == "absent":
+            sys.modules.pop("soundcard", None)
+        else:
+            sys.modules["soundcard"] = saved
+
+    assert reported == ["HEARD_NO_LIBRARY"]
+
+
+def test_a_device_that_will_not_open_is_reported():
+    """The other way this dies silently: the library is there but the chosen
+    output cannot be opened for loopback."""
+    reported = []
+
+    def refuse(_device):
+        raise OSError("device is in exclusive use")
+
+    src = LoopbackSource(
+        recorder_factory=refuse,
+        on_failure=lambda code, detail: reported.append((code, detail)),
+    )
+    try:
+        src.start(lambda frame: None)
+        deadline = time.monotonic() + 2.0
+        while not reported and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        src.stop()
+
+    assert reported and reported[0][0] == "HEARD_DEVICE_FAILED"
+    # The detail carries the cause to the log. It was an undefined name here
+    # once, which turned the report itself into a second silent failure.
+    assert "exclusive use" in reported[0][1]
+
+
+def test_every_reported_code_has_a_sentence_a_user_can_act_on():
+    """A code with no entry falls through to the generic handler message,
+    which would throw away the one thing worth saying: which failure it was."""
+    from vrcc.gui.icons import FRIENDLY_ERRORS
+
+    for code in ("HEARD_NO_LIBRARY", "HEARD_DEVICE_FAILED"):
+        assert code in FRIENDLY_ERRORS, code

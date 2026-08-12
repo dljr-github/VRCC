@@ -181,14 +181,14 @@ def apply_hear_others(stack: EngineStack, cfg) -> None:
     if heard.running:
         heard.stop()
 
-    def on_failure(reason: str) -> None:
+    def on_failure(code: str, detail: str) -> None:
         # From the capture thread. Switch the setting back off so the toggle
         # cannot sit on "on" beside a stream that is not running, which is
-        # what made this feature look like it did nothing at all.
+        # what made this feature look like it did nothing at all. The code
+        # carries a sentence of its own in FRIENDLY_ERRORS; detail is for the
+        # log, where the underlying exception text belongs.
         cfg.audio.hear_others_enabled = False
-        heard.bus.publish(
-            AppError("HEARD_UNAVAILABLE", f"Cannot caption what you hear: {reason}.")
-        )
+        heard.bus.publish(AppError(code, detail))
 
     heard.set_source(
         LoopbackSource(cfg.audio.hear_others_device or None, on_failure=on_failure)

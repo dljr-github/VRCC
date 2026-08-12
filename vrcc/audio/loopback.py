@@ -119,7 +119,7 @@ class LoopbackSource:
         self, device: str | None = None, recorder_factory=None, on_failure=None
     ) -> None:
         self._device = device
-        # Called with a plain reason when capture cannot run. The failure
+        # Called with (error code, detail) when capture cannot run. The failure
         # happens on the worker thread, so it can never reach a try/except
         # around start(), and without this the feature is simply dead with
         # nothing on screen: the whole reason this bug survived five sessions.
@@ -154,11 +154,11 @@ class LoopbackSource:
             # and shutdown must not hang on a wedged audio device.
             thread.join(timeout=2.0)
 
-    def _fail(self, reason: str) -> None:
+    def _fail(self, code: str, detail: str) -> None:
         if self._on_failure is None:
             return
         try:
-            self._on_failure(reason)
+            self._on_failure(code, detail)
         except Exception:
             logger.debug("loopback failure callback raised", exc_info=True)
 
@@ -187,7 +187,7 @@ class LoopbackSource:
                 _soundcard()
             except Exception:
                 logger.warning("soundcard is unavailable", exc_info=True)
-                self._fail("the audio library it needs is not installed")
+                self._fail("HEARD_NO_LIBRARY", "soundcard is not installed")
                 return
             owns_com = _com_initialize()
         try:
@@ -199,13 +199,13 @@ class LoopbackSource:
     def _capture(self, on_frame, rechunker) -> None:
         try:
             recorder = self._open()
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "could not open loopback capture for %r; captioning what you "
                 "hear is off for this session",
                 self._device, exc_info=True,
             )
-            self._fail("your speakers could not be opened")
+            self._fail("HEARD_DEVICE_FAILED", f"could not open the output device: {exc}")
             return
 
         consecutive = 0

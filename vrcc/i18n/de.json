@@ -32,6 +32,8 @@
   "CPU": "CPU",
   "CPU threads (0 = auto)": "CPU-Threads (0 = auto)",
   "Cancel": "Abbrechen",
+  "Cannot caption what you hear: a component is missing from this install. Reinstall VRCC.": "Was du hörst, kann nicht untertitelt werden: In dieser Installation fehlt eine Komponente. Installiere VRCC neu.",
+  "Cannot caption what you hear: your speakers could not be opened. Pick a different one in Settings > Audio.": "Was du hörst, kann nicht untertitelt werden: Die Lautsprecher konnten nicht geöffnet werden. Wähle unter Einstellungen > Audio andere aus.",
   "Caption what I hear": "Untertitel für das, was ich höre",
   "Caption what your speakers play, so you can read other people. Shown here only, never sent to VRChat.": "Untertitelt, was deine Lautsprecher wiedergeben, damit du andere mitlesen kannst. Wird nur hier angezeigt und nie an VRChat gesendet.",
   "Captioning on": "Untertitel an",

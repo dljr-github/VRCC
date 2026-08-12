@@ -32,6 +32,8 @@
   "CPU": "CPU",
   "CPU threads (0 = auto)": "Потоки CPU (0 = авто)",
   "Cancel": "Скасувати",
+  "Cannot caption what you hear: a component is missing from this install. Reinstall VRCC.": "Не вдалося створити субтитри до того, що ви чуєте: у цій інсталяції бракує компонента. Перевстановіть VRCC.",
+  "Cannot caption what you hear: your speakers could not be opened. Pick a different one in Settings > Audio.": "Не вдалося створити субтитри до того, що ви чуєте: не вдалося відкрити динаміки. Виберіть інші в розділі Налаштування > Звук.",
   "Caption what I hear": "Субтитри для того, що я чую",
   "Caption what your speakers play, so you can read other people. Shown here only, never sent to VRChat.": "Створює субтитри до того, що відтворюють динаміки, щоб ви могли читати інших. Показується лише тут і ніколи не надсилається у VRChat.",
   "Captioning on": "Субтитрування ввімкнено",
