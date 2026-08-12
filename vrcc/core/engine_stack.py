@@ -14,7 +14,7 @@ from vrcc.audio.segmenter import Segmenter
 from vrcc.audio.source import AudioSource, MicSource
 from vrcc.audio.vad import StreamingVad
 from vrcc.core.bus import EventBus
-from vrcc.core.events import MicLevel
+from vrcc.core.events import AppError, MicLevel
 from vrcc.core.config import ConfigStore, Paths
 from vrcc.core.pipeline import Pipeline
 from vrcc.core.startup import resolve_audio_device as _resolve_audio_device
@@ -119,7 +119,7 @@ def build_engine_stack(
     if heard is not None:
         # The mic's own VAD decides when the user is speaking; the heard stream
         # only needs to be told, so it can drop its own echo.
-        bus.subscribe(MicLevel, lambda e: heard.note_mic_level(e.vad_prob))
+        bus.subscribe(MicLevel, lambda e: heard.note_mic_level(e.rms, e.vad_prob))
 
     return EngineStack(
         pipeline=pipeline,
@@ -180,5 +180,17 @@ def apply_hear_others(stack: EngineStack, cfg) -> None:
 
     if heard.running:
         heard.stop()
-    heard.set_source(LoopbackSource(cfg.audio.hear_others_device or None))
+
+    def on_failure(reason: str) -> None:
+        # From the capture thread. Switch the setting back off so the toggle
+        # cannot sit on "on" beside a stream that is not running, which is
+        # what made this feature look like it did nothing at all.
+        cfg.audio.hear_others_enabled = False
+        heard.bus.publish(
+            AppError("HEARD_UNAVAILABLE", f"Cannot caption what you hear: {reason}.")
+        )
+
+    heard.set_source(
+        LoopbackSource(cfg.audio.hear_others_device or None, on_failure=on_failure)
+    )
     heard.start()

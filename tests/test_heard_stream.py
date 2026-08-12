@@ -318,7 +318,7 @@ def test_speech_heard_while_the_microphone_was_live_is_dropped():
     stream, source, bus = _stream(stt=stt)
     try:
         stream.start()
-        stream.note_mic_level(0.9)  # the user is talking
+        stream.note_mic_level(0.2)  # the user is talking (loud on the mic)
         source.feed()
         time.sleep(0.15)
     finally:
@@ -333,7 +333,7 @@ def test_speech_heard_while_the_microphone_is_quiet_is_captioned():
     stream, source, bus = _stream()
     try:
         stream.start()
-        stream.note_mic_level(0.01)  # silence on the mic
+        stream.note_mic_level(0.0001)  # silence on the mic
         source.feed()
         published = _wait(bus)
     finally:
@@ -344,15 +344,16 @@ def test_speech_heard_while_the_microphone_is_quiet_is_captioned():
 
 def test_the_guard_lapses_after_the_user_stops():
     """Otherwise one word from the user would mute everyone else for the rest
-    of the session."""
+    of the session. The lookback is the utterance's own length plus the grace,
+    since the check covers the whole capture window rather than its end."""
     from vrcc.core import heard as heard_mod
 
     stream, source, bus = _stream()
     try:
         stream.start()
-        stream.note_mic_level(0.9)
-        # Rewind past the grace window, as if the user finished a moment ago.
-        stream._user_spoke_at -= heard_mod._SELF_ECHO_GRACE_S + 0.5
+        stream.note_mic_level(0.2)
+        # One second of samples per fed frame, so rewind past window + grace.
+        stream._user_spoke_at -= 1.0 + heard_mod._SELF_ECHO_GRACE_S + 0.5
         source.feed()
         published = _wait(bus)
     finally:
@@ -361,14 +362,16 @@ def test_the_guard_lapses_after_the_user_stops():
     assert published
 
 
-def test_a_level_below_the_speech_threshold_is_not_treated_as_speech():
+def test_a_level_below_the_floor_is_not_treated_as_speech():
+    """Room tone must not mute the room."""
+    from vrcc.core import heard as heard_mod
     from vrcc.core.config import AppConfig
 
     cfg = AppConfig()
     stream, source, bus = _stream(cfg=cfg)
     try:
         stream.start()
-        stream.note_mic_level(cfg.vad.threshold - 0.01)
+        stream.note_mic_level(heard_mod._MIC_ACTIVE_RMS / 10)
         source.feed()
         published = _wait(bus)
     finally:
@@ -416,3 +419,42 @@ def test_the_meter_still_moves_while_the_echo_guard_suppresses_captions():
 
     assert _phrases(bus) == [], "captions suppressed"
     assert [e for e in bus.published if isinstance(e, HeardLevel)], "but the meter lives"
+
+
+def test_the_guard_arms_even_when_the_pipeline_zeroes_the_vad():
+    """The defect that made the first version of this guard dead code:
+    pipeline_frames publishes MicLevel(vad_prob=0.0) whenever captioning is off
+    or mute sync is holding, and those are the states this feature is used in.
+    RMS is real in every state, so either signal arms it."""
+    stt = _Stt()
+    stream, source, bus = _stream(stt=stt)
+    try:
+        stream.start()
+        stream.note_mic_level(0.2, 0.0)  # loud mic, VAD zeroed by the gate
+        source.feed()
+        time.sleep(0.15)
+    finally:
+        stream.stop()
+
+    assert _phrases(bus) == []
+    assert stt.calls == 0
+
+
+def test_an_utterance_that_merely_ENDS_after_you_stop_is_still_dropped():
+    """The segmenter holds an utterance open for finalize_silence_ms, so the
+    user's own speech and a fast reply arrive welded together. Judging only by
+    when the merged utterance ended would pass their own voice through."""
+    stream, source, bus = _stream()
+    try:
+        stream.start()
+        stream.note_mic_level(0.2)
+        # The utterance covers 1.0 s of audio and is dequeued right after the
+        # user stopped: its WINDOW overlaps them even though its end does not.
+        time.sleep(0.05)
+        source.feed()
+        time.sleep(0.15)
+    finally:
+        stream.stop()
+
+    assert _phrases(bus) == []
+    assert stream._suppressed == 1

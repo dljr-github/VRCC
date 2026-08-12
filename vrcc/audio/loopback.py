@@ -115,8 +115,15 @@ class LoopbackSource:
     their default between sessions is followed.
     """
 
-    def __init__(self, device: str | None = None, recorder_factory=None) -> None:
+    def __init__(
+        self, device: str | None = None, recorder_factory=None, on_failure=None
+    ) -> None:
         self._device = device
+        # Called with a plain reason when capture cannot run. The failure
+        # happens on the worker thread, so it can never reach a try/except
+        # around start(), and without this the feature is simply dead with
+        # nothing on screen: the whole reason this bug survived five sessions.
+        self._on_failure = on_failure
         # Defaults to soundcard's recorder; tests inject a fake exposing the
         # same record(numframes) context manager.
         self._recorder_factory = recorder_factory
@@ -147,6 +154,14 @@ class LoopbackSource:
             # and shutdown must not hang on a wedged audio device.
             thread.join(timeout=2.0)
 
+    def _fail(self, reason: str) -> None:
+        if self._on_failure is None:
+            return
+        try:
+            self._on_failure(reason)
+        except Exception:
+            logger.debug("loopback failure callback raised", exc_info=True)
+
     def _open(self):
         if self._recorder_factory is not None:
             return self._recorder_factory(self._device)
@@ -172,6 +187,7 @@ class LoopbackSource:
                 _soundcard()
             except Exception:
                 logger.warning("soundcard is unavailable", exc_info=True)
+                self._fail("the audio library it needs is not installed")
                 return
             owns_com = _com_initialize()
         try:
@@ -189,6 +205,7 @@ class LoopbackSource:
                 "hear is off for this session",
                 self._device, exc_info=True,
             )
+            self._fail("your speakers could not be opened")
             return
 
         consecutive = 0

@@ -43,6 +43,7 @@ import time
 import numpy as np
 
 from vrcc.audio.segmenter import SegFinal, SegLevel
+from vrcc.audio.source import SAMPLE_RATE
 from vrcc.core.events import HeardLevel, HeardPhrase
 from vrcc.core.languages import get
 
@@ -56,10 +57,22 @@ _QUEUE_MAX = 4
 _AUTO = "auto"
 
 # How long after the user stops speaking their voice may still be arriving on
-# the loopback. Covers the monitoring path's own delay plus the tail of an
-# utterance already in the segmenter, without swallowing a reply that lands
-# immediately afterwards.
+# the loopback, covering the monitoring path's own delay. The utterance's whole
+# capture window is checked as well, so this does NOT also have to cover
+# vad.finalize_silence_ms (600 ms by default, 800 in the quality profile, and
+# settable to 5 s in Advanced) the way a single end-of-utterance comparison
+# would have.
 _SELF_ECHO_GRACE_S = 1.0
+
+# Microphone loudness that counts as the user making a sound. Deliberately low:
+# suppressing a little of someone else costs a caption, while captioning the
+# user back to themselves makes the feature look broken.
+#
+# RMS rather than the VAD probability because MicLevel's vad_prob is ZERO
+# whenever the pipeline is gated (pipeline_frames.process_frame returns before
+# the VAD runs when captioning is off or mute sync is holding), which is
+# exactly the state this feature is used in. RMS is real in every state.
+_MIC_ACTIVE_RMS = 0.01
 
 
 class HeardStream:
@@ -100,12 +113,21 @@ class HeardStream:
 
     # -- lifecycle ---------------------------------------------------------
 
-    def note_mic_level(self, vad_prob: float) -> None:
+    def note_mic_level(self, rms: float, vad_prob: float = 0.0) -> None:
         """Called for every microphone frame, so the stream knows when the user
-        is talking. Fed from MicLevel rather than reaching into the pipeline:
-        the mic's own VAD has already made this judgement."""
-        if vad_prob >= self._config.vad.threshold:
+        is making sound.
+
+        Either signal counts. vad_prob is the better judgement but is published
+        as 0.0 whenever the pipeline is gated, and captioning starts off every
+        launch, so relying on it alone left this guard inert in the one state
+        the feature is normally used in.
+        """
+        if rms >= _MIC_ACTIVE_RMS or vad_prob >= self._config.vad.threshold:
             self._user_spoke_at = time.monotonic()
+
+    @property
+    def bus(self):
+        return self._bus
 
     def set_source(self, source) -> None:
         """Swap the capture source. Only while stopped: the running one owns a
@@ -172,7 +194,9 @@ class HeardStream:
             if not isinstance(event, SegFinal):
                 continue
             try:
-                self._queue.put_nowait(event.samples)
+                # Stamped at capture, so the check below can ask about the
+                # whole window rather than only the instant it was dequeued.
+                self._queue.put_nowait((event.samples, time.monotonic()))
             except queue.Full:
                 # Oldest first: a caption of what was said a minute ago is
                 # worse than not captioning it.
@@ -183,18 +207,21 @@ class HeardStream:
 
     def _work(self) -> None:
         while self._running:
-            samples = self._queue.get()
-            if samples is None or not self._running:
+            item = self._queue.get()
+            if item is None or not self._running:
                 continue
             try:
-                self._handle(samples)
+                self._handle(*item)
             except Exception:
                 logger.warning("heard utterance failed", exc_info=True)
 
-    def _handle(self, samples: np.ndarray) -> None:
-        if time.monotonic() - self._user_spoke_at < _SELF_ECHO_GRACE_S:
-            # The user was talking while this was captured, so it is most
-            # likely their own voice arriving back through monitoring.
+    def _handle(self, samples: np.ndarray, captured_at: float) -> None:
+        # The whole capture window, not just its end. The segmenter will not
+        # close an utterance until finalize_silence_ms of silence, so a reply
+        # arriving sooner is welded onto the user's own speech and an
+        # end-of-utterance check would pass the merged audio through.
+        window_start = captured_at - len(samples) / SAMPLE_RATE
+        if self._user_spoke_at >= window_start - _SELF_ECHO_GRACE_S:
             self._suppressed += 1
             logger.debug("dropped a heard utterance that overlapped your speech")
             return
