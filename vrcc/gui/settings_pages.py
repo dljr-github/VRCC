@@ -1,4 +1,7 @@
-"""Page builders for the friendly Settings tabs (Simple / Voice / Translation).
+"""Page builders for the friendly Settings tabs (Voice / Translation / VRChat).
+
+The Simple page lives in :mod:`vrcc.gui.settings_simple`; it is re-exported here
+so ``settings`` keeps one import site for every page builder.
 
 Each ``build_*_page(dlg)`` returns the tab widget and writes live control refs
 back onto ``dlg`` (the :class:`SettingsDialog`), reusing its bind/spin helpers.
@@ -34,24 +37,13 @@ from vrcc.gui.model_labels import mt_display_name, whisper_display_name
 from vrcc.gui.widgets import combo_value, fill_spoken_languages, set_combo_value, SegmentedControl, no_wheel
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
 
+from vrcc.gui.settings_simple import build_simple_page  # noqa: F401  (re-export)
+
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
 
 _AUTO = "auto"
 
-# Shown under the interface-language picker: tr() runs at construction, so the
-# open dialog keeps the old language and only the main-window rebuild on close
-# shows the new one. Without this the picker looks broken.
-_UI_LANGUAGE_HINT = tr_noop("The new language appears when you close Settings.")
-
-# Labels double as SegmentedControl values (compared/persisted via scale_map);
-# tr_noop keeps them stable values while making them catalog-extractable for
-# the dynamic tr(label) at the control build site.
-_FONT_SCALE_PRESETS = [
-    (tr_noop("Small"), 0.9),
-    (tr_noop("Normal"), 1.0),
-    (tr_noop("Large"), 1.2),
-]
 _DELETED_MODEL_TEXT = tr_noop("Current model (deleted) - choose another")
 
 
@@ -59,113 +51,6 @@ def _add_deleted_placeholder_if_needed(combo: QComboBox, specs, configured_id) -
     if specs and not any(s.id == configured_id for s in specs):
         combo.addItem(tr(_DELETED_MODEL_TEXT), None)
         combo.model().item(0).setEnabled(False)
-
-
-def build_simple_page(dlg: "SettingsDialog") -> QWidget:
-    page = QWidget()
-    form = QFormLayout(page)
-    form.setContentsMargins(24, 16, 24, 16)
-
-    form.addRow(tr("Microphone"), settings_audio.make_input_device_row(dlg))
-
-    dlg._sensitivity = no_wheel(QSlider(Qt.Orientation.Horizontal))
-    dlg._sensitivity.setRange(30, 60)
-    # Higher = more sensitive = lower VAD speech threshold, so the slider reads
-    # the way its label promises. threshold 0.60..0.30 maps to slider 30..60.
-    dlg._sensitivity.setValue(90 - int(round(dlg._cfg.vad.threshold * 100)))
-    dlg._sensitivity.setToolTip(
-        tr(
-            "How easily VRCC picks up your speech. Higher catches quieter or "
-            "softer talking; lower ignores more."
-        )
-    )
-
-    def on_sensitivity(v):
-        if dlg._loading:
-            return
-        dlg._cfg.vad.threshold = (90 - v) / 100.0
-        dlg._changed()
-    dlg._sensitivity.valueChanged.connect(on_sensitivity)
-    sens_row, dlg._sensitivity_low, dlg._sensitivity_high = dlg._anchored_slider(dlg._sensitivity)
-    form.addRow(tr("Microphone sensitivity"), sens_row)
-
-    settings_mode.build_mode_control(dlg, form)
-
-    dlg._send_check = QCheckBox(tr("Send my captions to VRChat"))
-    dlg._send_check.setChecked(dlg._cfg.osc.send_to_vrchat)
-    dlg._send_check.setToolTip(tr("Show your captions in the VRChat chatbox."))
-    dlg._bind_checkbox(dlg._send_check, dlg._cfg.osc, "send_to_vrchat")
-    form.addRow(dlg._send_check)
-
-    dlg._translate_check = QCheckBox(tr("Translate my speech"))
-    dlg._translate_check.setChecked(dlg._cfg.translate.enabled)
-    dlg._translate_check.setToolTip(tr("Also show a translation of what you say."))
-    # Translate on/off applies live via a dedicated handler that pokes
-    # on_model_change("mt"), not the restart-gated generic binding.
-    dlg._translate_check.toggled.connect(dlg._on_translate_toggled)
-    form.addRow(dlg._translate_check)
-
-    settings_heard.build_heard_controls(dlg, form)
-
-    dlg._include_original_check = QCheckBox(tr("Show my original words in the chatbox"))
-    dlg._include_original_check.setChecked(dlg._cfg.osc.include_original)
-    dlg._include_original_check.setToolTip(
-        tr("Turn off to send only the translations. If translation is off, "
-           "your words are always sent.")
-    )
-    dlg._bind_checkbox(dlg._include_original_check, dlg._cfg.osc, "include_original")
-    form.addRow(dlg._include_original_check)
-
-    # Interface language. Unlike the other fields it can't retint live widgets
-    # (tr() runs at construction), so SettingsDialog rebuilds the main window on
-    # close when it changed. Data is the code; labels are each language's own
-    # name, so a user stuck in the wrong language can still find theirs.
-    ui_lang = no_wheel(QComboBox())
-    ui_lang.addItem(tr("Auto (match my system)"), "auto")
-    for code, native_name in UI_LANGUAGES.items():
-        ui_lang.addItem(native_name, code)
-    li = ui_lang.findData(dlg._cfg.gui.ui_language)
-    if li >= 0:
-        ui_lang.setCurrentIndex(li)
-    ui_lang.setToolTip(tr("The language of VRCC's interface."))
-    dlg._bind_data_combo(ui_lang, dlg._cfg.gui, "ui_language")
-    dlg._ui_language_combo = ui_lang
-    form.addRow(tr("Language"), ui_lang)
-
-    dlg._ui_language_hint = QLabel(tr(_UI_LANGUAGE_HINT))
-    dlg._ui_language_hint.setWordWrap(True)
-    dlg._ui_language_hint.setStyleSheet(dlg._muted_style)
-    form.addRow("", dlg._ui_language_hint)
-
-    scale_map = dict(_FONT_SCALE_PRESETS)
-    cur = min(scale_map, key=lambda k: abs(scale_map[k] - dlg._cfg.gui.font_scale))
-    dlg._text_size = SegmentedControl([(label, tr(label)) for label in scale_map], cur)
-    dlg._text_size.setToolTip(tr("Make all text larger or smaller."))
-
-    def on_text_size(label):
-        if not dlg._loading:
-            dlg._cfg.gui.font_scale = scale_map[label]
-            dlg._changed()
-    dlg._text_size.changed.connect(on_text_size)
-    form.addRow(tr("Text size"), dlg._text_size)
-
-    # The recommended reset lives with the everyday controls. Switching Mode
-    # above applies the same presets, so the per-profile reset buttons are
-    # gone; re-applying the CURRENT profile over hand-tuned Advanced knobs
-    # now goes through this reset (a deliberate trade for a simpler page).
-    reset = QPushButton(settings_reset.reset_button_text())
-    reset.setToolTip(settings_reset.reset_button_tooltip())
-    reset.clicked.connect(lambda: settings_reset.confirm_and_reset(dlg))
-    form.addRow("", reset)
-
-    # A separate reset for the tuning knobs (VAD/denoise/STT/MT quality gates):
-    # it never touches the personal choices the recommended reset also spares.
-    reset_defaults = QPushButton(settings_reset.reset_defaults_button_text())
-    reset_defaults.setToolTip(settings_reset.reset_defaults_button_tooltip())
-    reset_defaults.clicked.connect(lambda: settings_reset.confirm_and_reset_defaults(dlg))
-    form.addRow("", reset_defaults)
-
-    return page
 
 
 def build_voice_page(dlg: "SettingsDialog") -> QWidget:

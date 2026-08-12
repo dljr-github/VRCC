@@ -388,3 +388,59 @@ def test_the_target_language_round_trips_through_config(qapp, tmp_path):
     finally:
         reopened.close()
         reopened.deleteLater()
+
+
+def _simple_form(dlg):
+    """The Simple page's form. The tab holds a QScrollArea, so the form is on
+    the scroll area's inner widget rather than on the tab itself."""
+    from PySide6.QtWidgets import QFormLayout
+
+    inner = dlg._tabs.widget(0).widget()
+    form = inner.layout()
+    assert isinstance(form, QFormLayout), type(form).__name__
+    return form
+
+
+def test_the_two_language_pickers_say_which_is_which(qapp, tmp_path):
+    """The complaint that prompted the grouping: two language dropdowns a few
+    rows apart, one choosing what other people's speech is shown in and one
+    choosing VRCC's own interface, with nothing on either to tell them apart.
+    A row labelled just "Language" is the least useful name available in an app
+    whose whole subject is languages."""
+    from PySide6.QtWidgets import QFormLayout, QLabel
+
+    dlg, _store_ = _dialog(tmp_path)
+    try:
+        form = _simple_form(dlg)
+
+        labels = []
+        for row in range(form.rowCount()):
+            item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, QLabel) and widget.text():
+                labels.append(widget.text())
+
+        assert "Language" not in labels, (
+            "a bare 'Language' row cannot be told from the other language picker"
+        )
+        assert "VRCC's language" in labels
+        assert "Show it in" in labels
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_every_simple_row_sits_under_a_heading(qapp, tmp_path):
+    """Grouping is the point: a row above the first heading would be floating
+    with nothing to say what it governs."""
+    from PySide6.QtWidgets import QFormLayout
+
+    dlg, _store_ = _dialog(tmp_path)
+    try:
+        form = _simple_form(dlg)
+        first = form.itemAt(0, QFormLayout.ItemRole.SpanningRole)
+        assert first is not None, "the page must open with a spanning heading"
+        assert first.widget().text() == "Microphone"
+    finally:
+        dlg.close()
+        dlg.deleteLater()
