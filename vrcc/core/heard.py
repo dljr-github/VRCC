@@ -262,12 +262,18 @@ class HeardStream:
             return []
 
     def _heard_targets(self) -> list[str]:
-        """What to render their speech INTO: the language the user speaks.
+        """What to render their speech INTO.
 
-        Not translate.targets, which is the outbound direction (what the room
+        A language picked for this stream wins. Otherwise the language the user
+        speaks, which is right for almost everyone and needs no setting.
+
+        Never translate.targets, which is the outbound direction (what the room
         reads). Someone speaking Japanese at an English speaker should be shown
         English, and translate.targets would send it back to Japanese.
         """
+        chosen = self._config.audio.hear_others_language
+        if chosen:
+            return [chosen]
         spoken = self._config.stt.spoken_languages
         if spoken:
             return list(spoken)

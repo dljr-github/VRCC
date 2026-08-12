@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel
 
 from vrcc.core import recommend
-from vrcc.gui.widgets import no_wheel
+from vrcc.core.languages import LANGUAGES
+from vrcc.gui.widgets import fill_spoken_languages, no_wheel
 from vrcc.i18n import tr, tr_noop
 
 if TYPE_CHECKING:
@@ -41,6 +42,10 @@ _HEAR_CPU_WARNING = tr_noop(
     "captions, so both will be slower."
 )
 _SPEAKER_LABEL = tr_noop("Listen to")
+_TARGET_LABEL = tr_noop("Show it in")
+# Empty value: follow the spoken language rather than pin one. The wording says
+# what it resolves to, because "Auto" alone would not say into which language.
+_TARGET_AUTO = tr_noop("The language I speak")
 _SPEAKER_DEFAULT = tr_noop("Default speakers")
 _NO_SPEAKERS = tr_noop("No speakers found")
 
@@ -55,10 +60,22 @@ def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
     dlg._hear_device_combo = combo
     _fill_speakers(combo, dlg._cfg.audio.hear_others_device)
 
+    target = no_wheel(QComboBox())
+    dlg._hear_target_combo = target
+    fill_spoken_languages(target, tr(_TARGET_AUTO), "", LANGUAGES.keys())
+    at = target.findData(dlg._cfg.audio.hear_others_language)
+    target.setCurrentIndex(at if at >= 0 else 0)
+
     def on_device(_index: int) -> None:
         if dlg._loading:
             return
         dlg._cfg.audio.hear_others_device = combo.currentData() or _DEFAULT_SPEAKER
+        dlg._changed()
+
+    def on_target(_index: int) -> None:
+        if dlg._loading:
+            return
+        dlg._cfg.audio.hear_others_language = target.currentData() or ""
         dlg._changed()
 
     def on_toggle(checked: bool) -> None:
@@ -73,6 +90,7 @@ def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
         dlg._changed()
 
     combo.currentIndexChanged.connect(on_device)
+    target.currentIndexChanged.connect(on_target)
     dlg._hear_check.toggled.connect(on_toggle)
 
     dlg._hear_note = QLabel(tr(_HEAR_CPU_WARNING))
@@ -81,6 +99,7 @@ def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
 
     form.addRow(dlg._hear_check)
     form.addRow(tr(_SPEAKER_LABEL), combo)
+    form.addRow(tr(_TARGET_LABEL), target)
     form.addRow("", dlg._hear_note)
     on_toggle(dlg._hear_check.isChecked())
 

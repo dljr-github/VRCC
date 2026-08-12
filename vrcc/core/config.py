@@ -44,6 +44,10 @@ class AudioConfig(BaseModel):
     # followed.
     hear_others_enabled: bool = False
     hear_others_device: str = ""
+    # Empty means whatever the user speaks, which is right for almost everyone.
+    # Set explicitly by someone who wants to read others in a language they are
+    # not captioning themselves in.
+    hear_others_language: str = ""
 
 
 class VadConfig(BaseModel):

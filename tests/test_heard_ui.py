@@ -355,3 +355,36 @@ def test_a_capture_failure_takes_the_whole_on_state_down_with_it(qapp, tmp_path)
     finally:
         w.close()
         bridge.detach()
+
+
+def test_the_target_language_round_trips_through_config(qapp, tmp_path):
+    """Picking a language must survive reopening the dialog, and the default
+    entry must mean "follow what I speak" rather than pin a language."""
+    dlg, store = _dialog(tmp_path)
+    try:
+        assert dlg._hear_target_combo.currentData() == ""
+
+        index = dlg._hear_target_combo.findData("Japanese")
+        assert index > 0, "the language list must offer Japanese"
+        dlg._hear_target_combo.setCurrentIndex(index)
+        assert store.config.audio.hear_others_language == "Japanese"
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+    store.save_now()
+
+    # Built by hand rather than through _dialog: that helper does not load, and
+    # a store still holding defaults would make this pass for the wrong reason.
+    from vrcc.core.config import ConfigStore, default_paths
+    from vrcc.gui.settings import SettingsDialog
+
+    again_store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    again_store.load()
+    assert again_store.config.audio.hear_others_language == "Japanese"
+    reopened = SettingsDialog(again_store)
+    try:
+        assert reopened._hear_target_combo.currentData() == "Japanese"
+    finally:
+        reopened.close()
+        reopened.deleteLater()
