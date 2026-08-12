@@ -83,10 +83,16 @@ def test_unticking_everything_makes_the_plan_language_blind(
     language blind" when nobody answers. It kept ranking for the language just
     removed, because spoken_whisper_codes reads the stored source when the
     multi-select is empty."""
-    from vrcc.core import recommend
+    from vrcc.core import calibrate, recommend
 
     monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "cpu")
     monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
+    # Pin the CPU calibration factor. It is measured from the machine running
+    # the tests, and it scales the latency gate that decides between "small"
+    # and "base": a slower runner (CI) legitimately ranks differently from a
+    # fast desktop. These tests are about language coverage driving the
+    # ranking, not about how quick the runner is.
+    monkeypatch.setattr(calibrate, "cached_factor", lambda cfg, remeasure=False: 1.0)
     wiz, store, _dm, bridge = _wizard(tmp_path, source_language="Japanese")
     try:
         assert wiz.recommended_whisper == "small"
@@ -107,10 +113,16 @@ def test_declining_to_answer_keeps_a_source_a_silent_model_cannot_replace(
     """Parakeet detects the language but tags every result "en", so "auto" is
     not a source it can honour while translating. A stale answer beats one the
     translator would be handed wrong."""
-    from vrcc.core import recommend
+    from vrcc.core import calibrate, recommend
 
     monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "cpu")
     monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
+    # Pin the CPU calibration factor. It is measured from the machine running
+    # the tests, and it scales the latency gate that decides between "small"
+    # and "base": a slower runner (CI) legitimately ranks differently from a
+    # fast desktop. These tests are about language coverage driving the
+    # ranking, not about how quick the runner is.
+    monkeypatch.setattr(calibrate, "cached_factor", lambda cfg, remeasure=False: 1.0)
     wiz, store, _dm, bridge = _wizard(tmp_path, source_language="German")
     try:
         assert wiz.recommended_whisper == "parakeet-tdt-0.6b-v3"
@@ -127,10 +139,16 @@ def test_declining_to_answer_keeps_a_source_a_silent_model_cannot_replace(
 def test_locale_japanese_end_to_end(qapp, tmp_path, monkeypatch):
     """A Japanese-locale user: Japanese pre-ticks, SenseVoice is recommended,
     proceed is enabled, and the download marks SenseVoice present and active."""
-    from vrcc.core import recommend
+    from vrcc.core import calibrate, recommend
 
     monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "cpu")
     monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: "cpu")
+    # Pin the CPU calibration factor. It is measured from the machine running
+    # the tests, and it scales the latency gate that decides between "small"
+    # and "base": a slower runner (CI) legitimately ranks differently from a
+    # fast desktop. These tests are about language coverage driving the
+    # ranking, not about how quick the runner is.
+    monkeypatch.setattr(calibrate, "cached_factor", lambda cfg, remeasure=False: 1.0)
     wiz, store, dm, bridge = _wizard(tmp_path, source_language="Japanese")
     try:
         assert firstrun_languages.checked_spoken(wiz) == ["Japanese"]

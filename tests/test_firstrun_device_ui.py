@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 from tests.test_firstrun_ui import _FakeDownloadManager, _bridge, _store
-from vrcc.core import hardware, recommend
+from vrcc.core import calibrate, hardware, recommend
 from vrcc.stt.registry import WHISPER_MODELS
 
 
@@ -34,6 +34,13 @@ def _wizard(
     monkeypatch.setattr(recommend, "detect_tier", lambda index=0: tier)
     # Pin the VRAM-driven default so tests are deterministic on any machine.
     monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: default_choice)
+    # Pin the CPU calibration factor. It is measured from the machine running
+    # the tests, and it scales the latency gate that decides between "small"
+    # and "base": a slower runner (CI) legitimately ranks differently from a
+    # fast desktop. These tests are about language coverage driving the
+    # ranking, not about how quick the runner is.
+    monkeypatch.setattr(calibrate, "cached_factor", lambda cfg, remeasure=False: 1.0)
+
     # The cpu-tier wording depends on whether a CUDA device is visible; pin it.
     monkeypatch.setattr(hardware, "cuda_device_count", lambda: device_count)
     store = _store(tmp_path)
@@ -312,6 +319,12 @@ def _wizard_with_language(tmp_path, monkeypatch, tier, language, default_choice=
 
     monkeypatch.setattr(recommend, "detect_tier", lambda index=0: tier)
     monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: default_choice)
+    # Pin the CPU calibration factor. It is measured from the machine running
+    # the tests, and it scales the latency gate that decides between "small"
+    # and "base": a slower runner (CI) legitimately ranks differently from a
+    # fast desktop. These tests are about language coverage driving the
+    # ranking, not about how quick the runner is.
+    monkeypatch.setattr(calibrate, "cached_factor", lambda cfg, remeasure=False: 1.0)
     monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
     store = _store(tmp_path)
     store.config.stt.source_language = language
