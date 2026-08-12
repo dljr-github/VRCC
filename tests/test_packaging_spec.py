@@ -99,3 +99,20 @@ def test_pyproject_version_matches_package_init():
     assert m.group(1) == __version__, (
         f"pyproject.toml version {m.group(1)} != vrcc/__init__.py {__version__}"
     )
+
+
+def test_spec_ships_soundcard():
+    """Captioning what you hear imports soundcard lazily, inside a function on
+    the capture thread, which PyInstaller's static analysis cannot see. Without
+    both of these the feature is dead in every packaged build, and the error it
+    then shows tells the user to reinstall, which would not help."""
+    text = _SPEC.read_text(encoding="utf-8")
+    block = text.split("hiddenimports = [", 1)[1].split("]", 1)[0]
+    assert '"soundcard"' in block, (
+        "vrcc.spec must list soundcard in hiddenimports; vrcc.audio.loopback "
+        "imports it inside a function"
+    )
+    assert 'collect_data_files("soundcard")' in text, (
+        "vrcc.spec must bundle soundcard's package data; it reads a cffi cdef "
+        "header (mediafoundation.py.h) from beside its own source at import"
+    )

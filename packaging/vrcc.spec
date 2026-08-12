@@ -113,6 +113,11 @@ datas += [
 # Window icon: vrcc.gui.style resolves it relative to the vrcc package, so
 # it must land at _internal/vrcc/vrcc.ico, same shape as the i18n catalogs.
 datas += [(os.path.join(REPO_ROOT, "vrcc", "vrcc.ico"), "vrcc")]
+
+# soundcard reads a cffi cdef header beside its own source at import time
+# (mediafoundation.py.h on Windows), so shipping the modules alone leaves the
+# import raising and captioning what you hear dead in every packaged build.
+datas += collect_data_files("soundcard")
 # GTCRN denoiser model and license.
 datas += [
     (os.path.join(REPO_ROOT, "vrcc", "audio", "gtcrn.onnx"), os.path.join("vrcc", "audio")),
@@ -141,6 +146,9 @@ hiddenimports = [
     "pynvml",
     # Imported lazily by vrcc.stt.onnx_asr at engine load time.
     "onnx_asr",
+    # Imported lazily by vrcc.audio.loopback, inside a function on the capture
+    # thread, so PyInstaller's static analysis cannot see it at all.
+    "soundcard",
 ]
 
 a = Analysis(
