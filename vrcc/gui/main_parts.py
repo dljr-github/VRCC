@@ -148,17 +148,20 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     card.body.addLayout(actions)
 
     w._captioning_btn = QPushButton(tr("Start captioning"))
-    # One static mic icon; the label text alone carries the on/off state.
-    mic_pm = svg_pixmap(mic_svg(w._p["muted"]), 20)
+    # Text-coloured, not muted: the button fills with the accent when it is on
+    # and a muted grey glyph all but vanishes against it.
+    mic_pm = svg_pixmap(mic_svg(w._p["text"]), 20)
     if mic_pm is not None:
         w._captioning_btn.setIcon(QIcon(mic_pm))
     w._captioning_btn.setCheckable(True)
+    w._captioning_btn.setProperty("buttonRole", "toggle")
     w._captioning_btn.setToolTip(tr("Pause or resume captioning without closing VRCC."))
     w._captioning_btn.toggled.connect(w._on_captions_toggled)
     actions.addWidget(w._captioning_btn)
 
     w._hear_btn = QPushButton(tr("Hear others"))
     w._hear_btn.setCheckable(True)
+    w._hear_btn.setProperty("buttonRole", "toggle")
     w._hear_btn.setToolTip(
         tr(
             "Caption what your speakers play, so you can read other people. "
@@ -200,22 +203,29 @@ def build_status_strip(w: "MainWindow") -> QWidget:
     row.setContentsMargins(4, 0, 4, 0)
     row.setSpacing(8)
 
-    # Live mic level (animated while capturing, dimmed when paused).
+    # Two meters, each with its own label immediately after it. The label
+    # belongs to the meter on its left. An unlabelled second meter placed after
+    # a single "Microphone" label read as though that one word covered both.
+    #
+    # "You" and "Others" rather than "Microphone" and "Speakers": it is whose
+    # voice each meter shows that matters, the wording matches the "You speak"
+    # / "They read" row above, and the short words keep the strip inside the
+    # 680px window minimum that lets it sit in a VR overlay corner.
     w._mic_meter = MicMeter(colors=w._p)
     row.addWidget(w._mic_meter)
-    row.addWidget(_flow_label(w, tr("Microphone")))
+    row.addWidget(_flow_label(w, tr("You")))
 
-    # The speaker capture gets its own meter. It is the only way to see what
-    # that stream is actually receiving: silence here while VRChat is loud
-    # means the wrong output device, and movement here while only the user
-    # talks means their own voice is being played back into it.
-    # Named by tooltip rather than a second text label: the window has a hard
-    # 680px minimum so it can sit in a VR overlay corner, and the label cost
-    # 96px of it. Its meaning is carried by sitting beside the microphone one.
+    # The speaker capture is the only way to see what that stream receives:
+    # silence here while VRChat is loud means the wrong output device, and
+    # movement here while only the user talks means their own voice is being
+    # played back into it. Hidden entirely while the feature is off, because a
+    # meter that can never move is a control that looks broken.
     w._heard_meter = MicMeter(colors=w._p)
     w._heard_meter.set_active(False)
-    w._heard_meter.setToolTip(tr("Speakers"))
+    w._heard_label = _flow_label(w, tr("Others"))
     row.addWidget(w._heard_meter)
+    row.addWidget(w._heard_label)
+    set_heard_visible(w, False)
 
     row.addStretch(1)
 
@@ -231,6 +241,16 @@ def build_status_strip(w: "MainWindow") -> QWidget:
     row.addWidget(w._capture_label)
 
     return strip
+
+
+def set_heard_visible(w: "MainWindow", visible: bool) -> None:
+    """Show or hide the speakers meter and its label together.
+
+    They are one unit: a label with no meter, or a meter with no label, is
+    exactly the ambiguity this pair was split up to remove.
+    """
+    w._heard_meter.setVisible(visible)
+    w._heard_label.setVisible(visible)
 
 
 def build_caption_log(w: "MainWindow") -> QTextBrowser:

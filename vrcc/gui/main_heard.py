@@ -16,8 +16,28 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vrcc.gui import main_parts
+from vrcc.i18n import tr
+
 if TYPE_CHECKING:
     from vrcc.gui.main_window import MainWindow
+
+
+def set_toggle_state(w: MainWindow, on: bool) -> None:
+    """Put every part of the window that shows this state into agreement.
+
+    Three cues, because the button alone was unreadable: the label says which
+    state it is in, the accent fill shows it at a glance, and the meter appears
+    only while there is something to meter.
+    """
+    w._hear_btn.setText(tr("Hearing others") if on else tr("Hear others"))
+    # A property change needs the style re-polished; Qt does not repaint on it.
+    w._hear_btn.style().unpolish(w._hear_btn)
+    w._hear_btn.style().polish(w._hear_btn)
+    w._heard_meter.set_active(on)
+    if not on:
+        w._heard_meter.set_level(0.0)
+    main_parts.set_heard_visible(w, on)
 
 
 def on_level(w: MainWindow, rms: float) -> None:
@@ -31,7 +51,7 @@ def on_toggled(w: MainWindow, checked: bool) -> None:
     did nothing until a relaunch. The meter dims with it, because a still meter
     beside a live one reads as broken rather than off.
     """
-    w._heard_meter.set_active(checked)
+    set_toggle_state(w, checked)
     if w._loading:
         return
     w._store.config.audio.hear_others_enabled = checked
@@ -63,8 +83,9 @@ def on_error(w: MainWindow, code: str) -> None:
         w._hear_btn.setChecked(False)
     finally:
         w._hear_btn.blockSignals(blocked)
-    w._heard_meter.set_active(False)
-    w._heard_meter.set_level(0.0)
+    # Signals are blocked, so the toggle handler will not run and the rest of
+    # the window would otherwise keep showing this as on.
+    set_toggle_state(w, False)
 
 
 def on_phrase(w: MainWindow, event) -> None:

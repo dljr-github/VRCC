@@ -95,11 +95,15 @@ def _dialog(tmp_path):
     return SettingsDialog(store), store
 
 
-def test_the_speaker_picker_is_disabled_until_the_feature_is_on(qapp, tmp_path):
+def test_the_speaker_picker_can_be_used_before_the_feature_is_on(qapp, tmp_path):
+    """It used to be greyed out until the tick was on, which left the one
+    question a user actually has, which speakers, unanswerable first. A
+    disabled combo reading "Default speakers" also gives no hint that the tick
+    above it is what locked it, so it just looks stuck."""
     dlg, _store_ = _dialog(tmp_path)
     try:
         assert not dlg._hear_check.isChecked()
-        assert not dlg._hear_device_combo.isEnabled()
+        assert dlg._hear_device_combo.isEnabled()
 
         dlg._hear_check.setChecked(True)
         assert dlg._hear_device_combo.isEnabled()
@@ -289,6 +293,65 @@ def test_an_unrelated_error_leaves_the_toggle_alone(qapp, tmp_path):
         w._hear_btn.setChecked(True)
         w._on_app_error(AppError("CHATBOX_SEND_FAILED", "no VRChat"))
         assert w._hear_btn.isChecked()
+    finally:
+        w.close()
+        bridge.detach()
+
+
+def test_the_toggle_says_which_state_it_is_in(qapp, tmp_path):
+    """Fusion's checked look is a slightly sunken border, invisible on a dark
+    surface, so a button with one fixed label read the same on as off."""
+    w, bridge = _main_window(_store(tmp_path))
+    try:
+        off = w._hear_btn.text()
+        w._hear_btn.setChecked(True)
+        on = w._hear_btn.text()
+
+        assert on != off, "the label must change with the state"
+        assert w._hear_btn.property("buttonRole") == "toggle", (
+            "the toggle needs the role that paints it when checked"
+        )
+    finally:
+        w.close()
+        bridge.detach()
+
+
+def test_the_speakers_meter_is_labelled_and_only_shown_when_live(qapp, tmp_path):
+    """An unlabelled meter placed after the microphone's label read as though
+    that one word covered both, and a meter that can never move looks broken."""
+    w, bridge = _main_window(_store(tmp_path))
+    try:
+        # isVisibleTo, not isVisible: every child of an unshown top-level
+        # window reports invisible, which would pass the "off" half for free.
+        strip = w._heard_meter.parentWidget()
+        assert w._heard_label.text(), "the speakers meter needs its own label"
+        assert not w._heard_meter.isVisibleTo(strip)
+        assert not w._heard_label.isVisibleTo(strip)
+
+        w._hear_btn.setChecked(True)
+        assert w._heard_meter.isVisibleTo(strip)
+        assert w._heard_label.isVisibleTo(strip)
+        assert w._heard_meter._active
+    finally:
+        w.close()
+        bridge.detach()
+
+
+def test_a_capture_failure_takes_the_whole_on_state_down_with_it(qapp, tmp_path):
+    """The failure path un-checks with signals blocked, so nothing else in the
+    window would follow unless it is driven directly."""
+    from vrcc.core.events import AppError
+
+    w, bridge = _main_window(_store(tmp_path))
+    try:
+        w._hear_btn.setChecked(True)
+        on_label = w._hear_btn.text()
+
+        w._on_app_error(AppError("HEARD_DEVICE_FAILED", "no device"))
+
+        assert not w._hear_btn.isChecked()
+        assert w._hear_btn.text() != on_label
+        assert not w._heard_meter.isVisibleTo(w._heard_meter.parentWidget())
     finally:
         w.close()
         bridge.detach()

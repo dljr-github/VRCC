@@ -180,7 +180,9 @@ class MainWindow(QMainWindow):
         # Re-read on every reload, so ticking it in Settings moves the button
         # and vice versa: two controls for one setting must never disagree.
         self._hear_btn.setChecked(bool(cfg.audio.hear_others_enabled))
-        self._heard_meter.set_active(bool(cfg.audio.hear_others_enabled))
+        # setChecked is a no-op when the value already matches, so the label,
+        # fill and meter are set here rather than left to the toggle signal.
+        main_heard.set_toggle_state(self, bool(cfg.audio.hear_others_enabled))
 
         self._captioning_btn.setChecked(bool(self._pipeline.captioning_enabled))
         # setChecked only emits toggled on a state change, so sync the meter's

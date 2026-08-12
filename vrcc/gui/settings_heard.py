@@ -62,7 +62,10 @@ def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
         dlg._changed()
 
     def on_toggle(checked: bool) -> None:
-        combo.setEnabled(bool(checked))
+        # The picker stays usable either way. Greying it out until the tick is
+        # on means the one device question a user has ("which speakers?")
+        # cannot be answered first, and a disabled combo showing "Default
+        # speakers" gives no hint that the tick above is what locked it.
         dlg._hear_note.setVisible(bool(checked) and _on_cpu(dlg))
         if dlg._loading:
             return
