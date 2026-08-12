@@ -4,6 +4,10 @@ Split from ``settings_audio`` because this is the one audio control that is not
 about the microphone: it captures the speakers, so other people in VRChat can be
 read as well as heard.
 
+On/off lives on the main window, next to the captioning toggle, because it is
+something you reach for mid-conversation. What is left here is the setup you
+choose once: which output to listen to, and which language to read it in.
+
 Two things the UI has to be honest about, because neither is guessable and both
 will otherwise read as bugs. What gets captured is the whole output device, not
 VRChat's voice channel, so world audio and music are transcribed too. And it is
@@ -15,7 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel
+from PySide6.QtWidgets import QComboBox, QLabel
 
 from vrcc.core import recommend
 from vrcc.core.languages import LANGUAGES
@@ -29,14 +33,14 @@ if TYPE_CHECKING:
 
 _DEFAULT_SPEAKER = ""
 
-_HEAR_LABEL = tr_noop("Caption what I hear")
 _HEAR_TIP = tr_noop(
     "Read what other people are saying, translated into your language. This "
     "captures everything your speakers play, including game and world audio, "
     "and it is only shown in this window."
 )
-# Shown under the tick on a machine with no graphics card, where the second
-# stream shares one voice model with the user's own captions.
+# Shown on a machine with no graphics card, where the second stream shares one
+# voice model with the user's own captions. Not conditional on the feature
+# being on: it is the reason someone might decide not to turn it on.
 _HEAR_CPU_WARNING = tr_noop(
     "Without a graphics card this shares the voice model with your own "
     "captions, so both will be slower."
@@ -51,11 +55,7 @@ _NO_SPEAKERS = tr_noop("No speakers found")
 
 
 def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
-    """Add the "caption what I hear" tick and its speaker picker."""
-    dlg._hear_check = QCheckBox(tr(_HEAR_LABEL))
-    dlg._hear_check.setChecked(dlg._cfg.audio.hear_others_enabled)
-    dlg._hear_check.setToolTip(tr(_HEAR_TIP))
-
+    """Add the speaker picker and the language its captions are shown in."""
     combo = no_wheel(QComboBox())
     dlg._hear_device_combo = combo
     _fill_speakers(combo, dlg._cfg.audio.hear_others_device)
@@ -78,30 +78,18 @@ def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
         dlg._cfg.audio.hear_others_language = target.currentData() or ""
         dlg._changed()
 
-    def on_toggle(checked: bool) -> None:
-        # The picker stays usable either way. Greying it out until the tick is
-        # on means the one device question a user has ("which speakers?")
-        # cannot be answered first, and a disabled combo showing "Default
-        # speakers" gives no hint that the tick above is what locked it.
-        dlg._hear_note.setVisible(bool(checked) and _on_cpu(dlg))
-        if dlg._loading:
-            return
-        dlg._cfg.audio.hear_others_enabled = bool(checked)
-        dlg._changed()
-
     combo.currentIndexChanged.connect(on_device)
     target.currentIndexChanged.connect(on_target)
-    dlg._hear_check.toggled.connect(on_toggle)
 
     dlg._hear_note = QLabel(tr(_HEAR_CPU_WARNING))
     dlg._hear_note.setWordWrap(True)
     dlg._hear_note.setStyleSheet(dlg._muted_style)
 
-    form.addRow(dlg._hear_check)
+    combo.setToolTip(tr(_HEAR_TIP))
     form.addRow(tr(_SPEAKER_LABEL), combo)
     form.addRow(tr(_TARGET_LABEL), target)
     form.addRow("", dlg._hear_note)
-    on_toggle(dlg._hear_check.isChecked())
+    dlg._hear_note.setVisible(_on_cpu(dlg))
 
 
 def _on_cpu(dlg: "SettingsDialog") -> bool:

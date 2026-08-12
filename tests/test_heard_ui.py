@@ -95,31 +95,27 @@ def _dialog(tmp_path):
     return SettingsDialog(store), store
 
 
-def test_the_speaker_picker_can_be_used_before_the_feature_is_on(qapp, tmp_path):
-    """It used to be greyed out until the tick was on, which left the one
-    question a user actually has, which speakers, unanswerable first. A
-    disabled combo reading "Default speakers" also gives no hint that the tick
-    above it is what locked it, so it just looks stuck."""
-    dlg, _store_ = _dialog(tmp_path)
+def test_the_speaker_picker_is_usable_with_the_feature_off(qapp, tmp_path):
+    """It used to be greyed out until a tick beside it was on, which left the
+    one question a user actually has, which speakers, unanswerable first, and
+    looked stuck rather than disabled. On/off now lives on the main window, so
+    nothing on this page can lock it."""
+    dlg, store = _dialog(tmp_path)
     try:
-        assert not dlg._hear_check.isChecked()
+        assert store.config.audio.hear_others_enabled is False
         assert dlg._hear_device_combo.isEnabled()
-
-        dlg._hear_check.setChecked(True)
-        assert dlg._hear_device_combo.isEnabled()
+        assert dlg._hear_target_combo.isEnabled()
     finally:
         dlg.close()
         dlg.deleteLater()
 
 
-def test_ticking_it_writes_config(qapp, tmp_path):
-    dlg, store = _dialog(tmp_path)
+def test_settings_does_not_offer_a_second_on_off(qapp, tmp_path):
+    """One control per decision. A tick here and a toggle on the main window
+    would be two places to look, and the pair could disagree on screen."""
+    dlg, _store_ = _dialog(tmp_path)
     try:
-        dlg._hear_check.setChecked(True)
-        assert store.config.audio.hear_others_enabled is True
-
-        dlg._hear_check.setChecked(False)
-        assert store.config.audio.hear_others_enabled is False
+        assert not hasattr(dlg, "_hear_check")
     finally:
         dlg.close()
         dlg.deleteLater()
@@ -130,7 +126,6 @@ def test_the_default_speaker_stores_an_empty_device(qapp, tmp_path):
     swaps headsets is followed rather than pinned to a device that is gone."""
     dlg, store = _dialog(tmp_path)
     try:
-        dlg._hear_check.setChecked(True)
         dlg._hear_device_combo.setCurrentIndex(0)
         assert store.config.audio.hear_others_device == ""
     finally:
@@ -144,7 +139,8 @@ def test_the_cpu_warning_shows_only_where_it_applies(qapp, tmp_path, monkeypatch
     monkeypatch.setattr(settings_heard.recommend, "detect_tier", lambda index=0: "cpu")
     dlg, _store_ = _dialog(tmp_path)
     try:
-        dlg._hear_check.setChecked(True)
+        # Not conditional on the feature being on: it is the reason someone
+        # might decide not to turn it on.
         assert dlg._hear_note.isVisibleTo(dlg)
         assert "graphics card" in dlg._hear_note.text()
     finally:
@@ -158,7 +154,6 @@ def test_no_cpu_warning_on_a_machine_with_a_graphics_card(qapp, tmp_path, monkey
     monkeypatch.setattr(settings_heard.recommend, "detect_tier", lambda index=0: "gpu_high")
     dlg, _store_ = _dialog(tmp_path)
     try:
-        dlg._hear_check.setChecked(True)
         assert not dlg._hear_note.isVisibleTo(dlg)
     finally:
         dlg.close()

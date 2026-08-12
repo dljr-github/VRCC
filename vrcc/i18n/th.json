@@ -34,7 +34,6 @@
   "Cancel": "ยกเลิก",
   "Cannot caption what you hear: a component is missing from this install. Reinstall VRCC.": "ไม่สามารถใส่คำบรรยายเสียงที่คุณได้ยิน เพราะการติดตั้งนี้ขาดส่วนประกอบบางอย่าง กรุณาติดตั้ง VRCC ใหม่",
   "Cannot caption what you hear: your speakers could not be opened. Pick a different one in Settings > Audio.": "ไม่สามารถใส่คำบรรยายเสียงที่คุณได้ยิน เพราะเปิดลำโพงไม่ได้ กรุณาเลือกอุปกรณ์อื่นใน การตั้งค่า > เสียง",
-  "Caption what I hear": "ใส่คำบรรยายสิ่งที่ฉันได้ยิน",
   "Caption what your speakers play, so you can read other people. Shown here only, never sent to VRChat.": "ใส่คำบรรยายให้กับเสียงที่ลำโพงเล่น เพื่อให้คุณอ่านคำพูดของคนอื่นได้ แสดงที่นี่เท่านั้น ไม่ถูกส่งไปยัง VRChat",
   "Captioning on": "คำบรรยายเปิดอยู่",
   "Chatbox message": "ข้อความกล่องแชท",

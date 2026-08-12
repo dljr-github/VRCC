@@ -34,7 +34,6 @@
   "Cancel": "取消",
   "Cannot caption what you hear: a component is missing from this install. Reinstall VRCC.": "无法为你听到的声音添加字幕：本次安装缺少一个组件。请重新安装 VRCC。",
   "Cannot caption what you hear: your speakers could not be opened. Pick a different one in Settings > Audio.": "无法为你听到的声音添加字幕：无法打开扬声器。请在“设置 > 音频”中另选一个。",
-  "Caption what I hear": "为我听到的内容添加字幕",
   "Caption what your speakers play, so you can read other people. Shown here only, never sent to VRChat.": "为扬声器播放的内容添加字幕，让你能读到其他人说的话。仅在此处显示，绝不会发送到 VRChat。",
   "Captioning on": "字幕已开启",
   "Chatbox message": "聊天框消息",

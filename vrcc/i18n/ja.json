@@ -34,7 +34,6 @@
   "Cancel": "キャンセル",
   "Cannot caption what you hear: a component is missing from this install. Reinstall VRCC.": "聞こえている音声に字幕を付けられません。このインストールに必要な構成要素がありません。VRCC を再インストールしてください。",
   "Cannot caption what you hear: your speakers could not be opened. Pick a different one in Settings > Audio.": "聞こえている音声に字幕を付けられません。スピーカーを開けませんでした。「設定 > オーディオ」で別のものを選んでください。",
-  "Caption what I hear": "聞こえた音声にも字幕を付ける",
   "Caption what your speakers play, so you can read other people. Shown here only, never sent to VRChat.": "スピーカーが再生する音声に字幕を付け、他の人の発言を読めるようにします。ここに表示されるだけで、VRChat には送信されません。",
   "Captioning on": "字幕オン",
   "Chatbox message": "チャットボックスメッセージ",
