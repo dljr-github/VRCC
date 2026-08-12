@@ -135,15 +135,17 @@ def build_engine_stack(
 
 
 def _build_heard(cfg, bus, pipeline, stt_engine, mt_engine):
-    """The speaker-capture stream, or None when it is off or unavailable.
+    """The speaker-capture stream, built whether or not it is switched on.
+
+    Built unconditionally because the user can turn it on mid-session and a
+    relaunch to hear the room is a poor trade. Construction is cheap: no device
+    is opened and soundcard is not even imported until start().
 
     Its own Segmenter, because VAD state is per stream and one shared instance
     would let either voice end the other's utterance. The ENGINES are the
     pipeline's, under the pipeline's locks: a second copy of the voice model
     costs the VRAM the card was sized for once.
     """
-    if not cfg.audio.hear_others_enabled:
-        return None
     from vrcc.audio.loopback import LoopbackSource
     from vrcc.core.heard import HeardStream
 
@@ -158,3 +160,25 @@ def _build_heard(cfg, bus, pipeline, stt_engine, mt_engine):
         pipeline._stt_lock,
         pipeline._mt_lock,
     )
+
+
+def apply_hear_others(stack: EngineStack, cfg) -> None:
+    """Start or stop the speaker-capture stream to match config.
+
+    Called from the main-window toggle and after Settings closes, so turning it
+    on never needs a relaunch. The source is rebuilt on every start because a
+    LoopbackSource is bound to one device for its lifetime, which is how a
+    speaker change takes effect.
+    """
+    heard = stack.heard
+    if heard is None:
+        return
+    if not cfg.audio.hear_others_enabled:
+        heard.stop()
+        return
+    from vrcc.audio.loopback import LoopbackSource
+
+    if heard.running:
+        heard.stop()
+    heard.set_source(LoopbackSource(cfg.audio.hear_others_device or None))
+    heard.start()

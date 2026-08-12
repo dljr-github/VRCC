@@ -110,11 +110,17 @@ def _stream(cfg=None, stt=None, mt=_DEFAULT, segmenter=None, source=None, locks=
     return stream, source, stream._bus
 
 
+def _phrases(bus):
+    """Only the caption events. The stream also publishes a HeardLevel per
+    frame for the speaker meter, which no test here is about."""
+    return [e for e in bus.published if isinstance(e, HeardPhrase)]
+
+
 def _wait(bus, count=1, seconds=1.0):
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline and len(bus.published) < count:
+    while time.monotonic() < deadline and len(_phrases(bus)) < count:
         time.sleep(0.005)
-    return bus.published
+    return _phrases(bus)
 
 
 # -- the boundary -------------------------------------------------------------
@@ -186,7 +192,7 @@ def test_speech_already_in_the_users_language_is_not_translated():
         stream.stop()
 
     assert mt.calls == [], "translated Japanese into Japanese"
-    assert bus.published[0].translations == []
+    assert _phrases(bus)[0].translations == []
 
 
 def test_no_translation_engine_still_publishes_the_transcript():
@@ -276,7 +282,7 @@ def test_empty_or_blank_transcriptions_publish_nothing():
     finally:
         stream.stop()
 
-    assert bus.published == []
+    assert _phrases(bus) == []
 
 
 def test_start_and_stop_are_idempotent():
@@ -318,7 +324,7 @@ def test_speech_heard_while_the_microphone_was_live_is_dropped():
     finally:
         stream.stop()
 
-    assert bus.published == []
+    assert _phrases(bus) == []
     assert stream._suppressed == 1
     assert stt.calls == 0, "it should not even be transcribed"
 
@@ -369,3 +375,44 @@ def test_a_level_below_the_speech_threshold_is_not_treated_as_speech():
         stream.stop()
 
     assert published
+
+
+def test_every_frame_feeds_the_speaker_meter():
+    """The meter has to move on sound that never becomes an utterance, because
+    seeing the level is how a user tells "wrong output device" (silent) from
+    "nothing is being said" (moving)."""
+    from vrcc.core.events import HeardLevel
+
+    stream, source, bus = _stream()
+    try:
+        stream.start()
+        source.feed(3)
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and len(
+            [e for e in bus.published if isinstance(e, HeardLevel)]
+        ) < 3:
+            time.sleep(0.005)
+    finally:
+        stream.stop()
+
+    levels = [e for e in bus.published if isinstance(e, HeardLevel)]
+    assert len(levels) >= 3
+
+
+def test_the_meter_still_moves_while_the_echo_guard_suppresses_captions():
+    """Otherwise a user whose own voice is in the speaker output would see a
+    dead meter and conclude the capture was broken, when it is working and
+    being suppressed on purpose."""
+    from vrcc.core.events import HeardLevel
+
+    stream, source, bus = _stream()
+    try:
+        stream.start()
+        stream.note_mic_level(0.9)
+        source.feed(2)
+        time.sleep(0.15)
+    finally:
+        stream.stop()
+
+    assert _phrases(bus) == [], "captions suppressed"
+    assert [e for e in bus.published if isinstance(e, HeardLevel)], "but the meter lives"

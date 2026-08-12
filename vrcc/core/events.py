@@ -97,6 +97,19 @@ class UpdateCheckResult:
 
 
 @dataclass(frozen=True)
+class HeardLevel:
+    """Loudness of the SPEAKER capture, for its own meter.
+
+    Separate from MicLevel rather than reusing it with a flag: the two drive
+    different widgets and one of them is the evidence a user needs when the
+    speaker stream is not hearing what they expect.
+    """
+
+    rms: float
+    vad_prob: float
+
+
+@dataclass(frozen=True)
 class HeardPhrase:
     """Something the SPEAKERS played, transcribed for the user to read.
 

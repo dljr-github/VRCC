@@ -15,7 +15,7 @@ from vrcc.audio.source import MicSource
 from vrcc.core import calibrate, hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, default_paths
-from vrcc.core.engine_stack import build_engine_stack
+from vrcc.core.engine_stack import apply_hear_others, build_engine_stack
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
 from vrcc.core.logs import setup_logging
@@ -46,17 +46,17 @@ def _make_source_with_denoise(config, device_cfg: str) -> MicSource:
     return MicSource(_resolve_audio_device(device_cfg), denoiser=denoiser)
 
 
-def _start_heard_guarded(heard, bus: EventBus) -> None:
+def _start_heard_guarded(stack, config, bus: EventBus) -> None:
     """Start the speaker-capture stream, if the user turned it on.
 
     Never fatal: captioning what you hear is an extra, and losing it must not
     take the microphone down with it. A failure inside the capture thread is
     already handled there; this covers a start() that raises outright.
     """
-    if heard is None:
+    if stack.heard is None:
         return
     try:
-        heard.start()
+        apply_hear_others(stack, config)
     except Exception:
         logger.warning(
             "could not start captioning what you hear; the microphone is "
@@ -254,7 +254,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
                         False, tr("{name} failed to load", name=tr("voice model"))
                     )
                 return
-            _start_heard_guarded(stack.heard, bus)
+            _start_heard_guarded(stack, store.config, bus)
             if not _start_pipeline_guarded(stack.pipeline, bus):
                 # The AppError already flashed the status bar; a dead mic kills
                 # the core function, so also say it loudly. App stays up: fix
@@ -416,6 +416,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             on_open_settings=open_settings,
             on_open_models=open_models,
             mt_available=stack.mt is not None,
+            on_hear_others=lambda _on: apply_hear_others(stack, store.config),
             download_manager=dm,
             on_model_change=on_model_change,
             on_check_updates=lambda: updater.check(announce_no_update=True),

@@ -157,6 +157,17 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     w._captioning_btn.toggled.connect(w._on_captions_toggled)
     actions.addWidget(w._captioning_btn)
 
+    w._hear_btn = QPushButton(tr("Hear others"))
+    w._hear_btn.setCheckable(True)
+    w._hear_btn.setToolTip(
+        tr(
+            "Caption what your speakers play, so you can read other people. "
+            "Shown here only, never sent to VRChat."
+        )
+    )
+    w._hear_btn.toggled.connect(w._on_hear_others_toggled)
+    actions.addWidget(w._hear_btn)
+
     actions.addStretch(1)
 
     w._gear_btn = IconButton(
@@ -193,6 +204,18 @@ def build_status_strip(w: "MainWindow") -> QWidget:
     w._mic_meter = MicMeter(colors=w._p)
     row.addWidget(w._mic_meter)
     row.addWidget(_flow_label(w, tr("Microphone")))
+
+    # The speaker capture gets its own meter. It is the only way to see what
+    # that stream is actually receiving: silence here while VRChat is loud
+    # means the wrong output device, and movement here while only the user
+    # talks means their own voice is being played back into it.
+    # Named by tooltip rather than a second text label: the window has a hard
+    # 680px minimum so it can sit in a VR overlay corner, and the label cost
+    # 96px of it. Its meaning is carried by sitting beside the microphone one.
+    w._heard_meter = MicMeter(colors=w._p)
+    w._heard_meter.set_active(False)
+    w._heard_meter.setToolTip(tr("Speakers"))
+    row.addWidget(w._heard_meter)
 
     row.addStretch(1)
 

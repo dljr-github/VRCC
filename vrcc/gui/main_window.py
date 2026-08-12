@@ -15,9 +15,8 @@ from typing import Callable
 from PySide6.QtCore import QByteArray
 from PySide6.QtWidgets import QComboBox, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
-from vrcc import __version__
 from vrcc.core.config import ConfigStore, apply_profile
-from vrcc.gui import main_targets, model_prompts, mt_prompts, status_render
+from vrcc.gui import main_heard, main_targets, model_prompts, status_render
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.caption_log import (
     CaptionModel,
@@ -65,6 +64,7 @@ class MainWindow(QMainWindow):
         download_manager=None,
         on_model_change=None,
         on_check_updates=None,
+        on_hear_others=None,
     ) -> None:
         super().__init__()
         self._bridge = bridge
@@ -84,6 +84,9 @@ class MainWindow(QMainWindow):
         self._on_open_settings = on_open_settings
         self._on_open_models = on_open_models
         self._on_check_updates = on_check_updates
+        # Starts/stops the speaker capture live (None when headless), so the
+        # toggle never needs a relaunch to take effect.
+        self._on_hear_others = on_hear_others
         # Kept for caller compat but no longer read: engines hot-swap mid-session,
         # so a launch-time "was MT built?" snapshot would wrongly suppress the
         # "translating…" row. Live config is the only correct source of truth.
@@ -174,6 +177,11 @@ class MainWindow(QMainWindow):
 
         main_targets.load_targets(self, cfg)
 
+        # Re-read on every reload, so ticking it in Settings moves the button
+        # and vice versa: two controls for one setting must never disagree.
+        self._hear_btn.setChecked(bool(cfg.audio.hear_others_enabled))
+        self._heard_meter.set_active(bool(cfg.audio.hear_others_enabled))
+
         self._captioning_btn.setChecked(bool(self._pipeline.captioning_enabled))
         # setChecked only emits toggled on a state change, so sync the meter's
         # active/dimmed state directly, else it stays bright when captioning loads off.
@@ -205,6 +213,7 @@ class MainWindow(QMainWindow):
             (b.vrchat_detected, self._on_vrchat_detected),
             (b.update_result, self._on_update_result),
             (b.heard_phrase, self._on_heard_phrase),
+            (b.heard_level, self._on_heard_level),
         )
 
     def _connect_bridge(self) -> None:
@@ -268,11 +277,14 @@ class MainWindow(QMainWindow):
         detected = bool(event.detected) if event is not None else None
         status_render.render_vrchat(self, detected)
 
+    def _on_heard_level(self, rms: float, _vad_prob: float) -> None:
+        main_heard.on_level(self, rms)
+
+    def _on_hear_others_toggled(self, checked: bool) -> None:
+        main_heard.on_toggled(self, checked)
+
     def _on_heard_phrase(self, event) -> None:
-        """Someone else's speech, for reading only. Never reaches the chatbox:
-        HeardStream has no sender, so there is nothing to suppress here."""
-        self._caption_model.heard(event.text, list(event.translations))
-        self._render_log()
+        main_heard.on_phrase(self, event)
 
     def _on_engine_state(self, event) -> None:
         # State drives the caption feed's loading message via _engine_states; it
@@ -455,13 +467,9 @@ class MainWindow(QMainWindow):
             self._on_check_updates()
 
     def _show_about(self) -> None:
-        blurb = tr("Live voice captioning and translation for the VRChat chatbox.")
-        credit = tr('Created by <a href="https://github.com/dljr-github">dljr-github</a>')
-        QMessageBox.about(
-            self,
-            tr("About VRCC"),
-            f"<p><b>VRCC</b> v{__version__}</p><p>{blurb}</p><p>{credit}</p>",
-        )
+        from vrcc.gui import updates_ui
+
+        updates_ui.show_about(self)
 
     # -- geometry persistence ----------------------------------------------
 

@@ -159,3 +159,83 @@ def test_no_cpu_warning_on_a_machine_with_a_graphics_card(qapp, tmp_path, monkey
     finally:
         dlg.close()
         dlg.deleteLater()
+
+
+# -- the main-window toggle and meter -----------------------------------------
+
+
+def test_the_toggle_starts_and_stops_it_without_a_relaunch(qapp, tmp_path):
+    """The setting used to be read only at startup, so turning it on did
+    nothing until the app was restarted."""
+    calls: list[bool] = []
+    window, bridge = _main_window(_store(tmp_path))
+    window._on_hear_others = calls.append
+    try:
+        assert not window._hear_btn.isChecked()
+
+        window._hear_btn.setChecked(True)
+        assert window._store.config.audio.hear_others_enabled is True
+        assert calls == [True]
+
+        window._hear_btn.setChecked(False)
+        assert window._store.config.audio.hear_others_enabled is False
+        assert calls == [True, False]
+    finally:
+        window.close()
+        bridge.detach()
+
+
+def test_the_button_follows_the_setting_changed_in_settings(qapp, tmp_path):
+    """Two controls for one setting must never disagree."""
+    window, bridge = _main_window(_store(tmp_path))
+    try:
+        window._store.config.audio.hear_others_enabled = True
+        window.reload_from_config()
+
+        assert window._hear_btn.isChecked()
+    finally:
+        window.close()
+        bridge.detach()
+
+
+def test_the_speaker_meter_moves_with_the_loopback_level(qapp, tmp_path):
+    """Its own meter, because it is the only way to see what that stream is
+    receiving: silence while VRChat is loud means the wrong output device."""
+    window, bridge = _main_window(_store(tmp_path))
+    try:
+        window._on_heard_level(0.3, 0.9)
+        moved = window._heard_meter._level
+
+        window._on_heard_level(0.0, 0.0)
+
+        assert moved > 0
+        assert window._heard_meter._level == 0
+    finally:
+        window.close()
+        bridge.detach()
+
+
+def test_the_speaker_meter_is_dimmed_while_the_feature_is_off(qapp, tmp_path):
+    """A still meter beside a live one reads as broken rather than off."""
+    window, bridge = _main_window(_store(tmp_path))
+    try:
+        assert not window._heard_meter._active
+
+        window._hear_btn.setChecked(True)
+        assert window._heard_meter._active
+    finally:
+        window.close()
+        bridge.detach()
+
+
+def test_the_mic_and_speaker_meters_are_separate_widgets(qapp, tmp_path):
+    window, bridge = _main_window(_store(tmp_path))
+    try:
+        window._on_mic_level(0.5, 0.9)
+        window._on_heard_level(0.0, 0.0)
+
+        assert window._mic_meter._level > 0
+        assert window._heard_meter._level == 0
+    finally:
+        window.close()
+        bridge.detach()

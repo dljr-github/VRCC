@@ -42,8 +42,8 @@ import time
 
 import numpy as np
 
-from vrcc.audio.segmenter import SegFinal
-from vrcc.core.events import HeardPhrase
+from vrcc.audio.segmenter import SegFinal, SegLevel
+from vrcc.core.events import HeardLevel, HeardPhrase
 from vrcc.core.languages import get
 
 logger = logging.getLogger("vrcc.core.heard")
@@ -107,6 +107,18 @@ class HeardStream:
         if vad_prob >= self._config.vad.threshold:
             self._user_spoke_at = time.monotonic()
 
+    def set_source(self, source) -> None:
+        """Swap the capture source. Only while stopped: the running one owns a
+        thread reading a device. Lets a speaker change take effect without a
+        relaunch, since the source is bound to one device for its lifetime."""
+        if self._running:
+            self.stop()
+        self._source = source
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
     def start(self) -> None:
         if self._running:
             return
@@ -149,6 +161,14 @@ class HeardStream:
             logger.warning("heard segmenter raised", exc_info=True)
             return
         for event in events:
+            if isinstance(event, SegLevel):
+                # Every frame, so the meter shows what the speakers are
+                # actually feeding this stream even when nothing is loud
+                # enough to become an utterance.
+                self._bus.publish(
+                    HeardLevel(rms=event.rms, vad_prob=event.vad_prob)
+                )
+                continue
             if not isinstance(event, SegFinal):
                 continue
             try:

@@ -23,6 +23,7 @@ from vrcc.core.events import (
     MicLevel,
     MuteChanged,
     PhraseRecognized,
+    HeardLevel,
     HeardPhrase,
     PhraseTranslated,
     UpdateCheckResult,
@@ -54,6 +55,7 @@ class BusBridge(QObject):
     vrchat_detected = Signal(object)  # VrchatDetected
     update_result = Signal(object)  # UpdateCheckResult
     heard_phrase = Signal(object)  # HeardPhrase
+    heard_level = Signal(float, float)  # rms, vad_prob
 
     def __init__(self, bus: EventBus, clock: Callable[[], float] = time.monotonic) -> None:
         super().__init__()
@@ -68,6 +70,7 @@ class BusBridge(QObject):
             bus.subscribe(PhraseRecognized, self.phrase_recognized.emit),
             bus.subscribe(PhraseTranslated, self.phrase_translated.emit),
             bus.subscribe(HeardPhrase, self.heard_phrase.emit),
+            bus.subscribe(HeardLevel, self._on_heard_level),
             bus.subscribe(ChatboxSent, self.chatbox_sent.emit),
             bus.subscribe(MuteChanged, self.mute_changed.emit),
             bus.subscribe(DownloadProgress, self.download_progress.emit),
@@ -76,6 +79,9 @@ class BusBridge(QObject):
             bus.subscribe(VrchatDetected, self.vrchat_detected.emit),
             bus.subscribe(UpdateCheckResult, self.update_result.emit),
         ]
+
+    def _on_heard_level(self, event) -> None:
+        self.heard_level.emit(event.rms, event.vad_prob)
 
     def _on_mic_level(self, event: MicLevel) -> None:
         """Time-gate MicLevel to ~10 Hz. Runs on the segmenter thread; the
