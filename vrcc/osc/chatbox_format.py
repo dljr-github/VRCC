@@ -111,8 +111,13 @@ def _is_spaceless(text: str) -> bool:
     and cutting it by character is the only way every part carries a share.
 
     Whitespace anywhere means the script separates words (Korean does, and packs
-    correctly), so only a run of unseparated CJK reaches the character branch
+    correctly), so only a run of unseparated text reaches the character branch
     the docstring above already promises it.
+
+    Thai is here for the same reason as CJK: written without spaces between
+    words, so `.split()` returns one token. Those are the only scripts among
+    the languages vrcc.core.languages offers that do this, so the ranges stop
+    there rather than guessing at ones nothing can produce.
     """
     if any(ch.isspace() for ch in text):
         return False
@@ -121,11 +126,14 @@ def _is_spaceless(text: str) -> bool:
         or "가" <= ch <= "힯"   # hangul syllables
         or "豈" <= ch <= "﫿"   # CJK compatibility ideographs
         or "･" <= ch <= "ﾟ"   # halfwidth katakana
+        or "ก" <= ch <= "๛"      # Thai
         for ch in text
     )
 
 
-def _balanced_slices(text: str, n: int, limit: int) -> list[str]:
+def _balanced_slices(
+    text: str, n: int, limit: int, anchor: str = "start"
+) -> list[str]:
     """Split `text` into exactly `n` ordered slices of near-equal length.
 
     Word-based whenever the text splits into words that each fit `limit`:
@@ -137,8 +145,13 @@ def _balanced_slices(text: str, n: int, limit: int) -> list[str]:
     exactly (boundaries are nudged off combining marks). Callers drop empty
     slices.
 
-    Fewer words than slices simply leaves the trailing slices blank, so a text
-    that runs out early fades rather than repeating.
+    Fewer words than slices leaves blank slices, positioned per `anchor`.
+    ``"start"`` leaves them at the end, so the original fades out once
+    exhausted. ``"end"`` puts them first, so a text that runs out early still
+    lands in the final part: parts drain one at a time and a new utterance
+    clears the queue, so the last part is the one still on screen when the user
+    stops talking, and a translation absent from it is one the reader never
+    ends up with.
     """
     words = text.split()
     # A spaceless run within its per-part share is better carried whole, which
@@ -164,6 +177,9 @@ def _balanced_slices(text: str, n: int, limit: int) -> list[str]:
                 break
         slices.extend([""] * (n - 1 - len(slices)))
         slices.append(" ".join(words[idx:]))
+        if anchor == "end":
+            content = [piece for piece in slices if piece]
+            slices = [""] * (n - len(content)) + content
         return slices
     size = -(-len(text) // n)  # ceil division
     bounds = [0]
@@ -230,8 +246,10 @@ def fit_message(
             grown, grown_repeated = _assemble(texts, translated, n + 1, cfg)
             fits = grown and all(len(part) <= CHATBOX_LIMIT for part in grown)
             if fits and len(grown_repeated) > len(repeated):
-                return grown
-        return parts
+                return _end_anchored(
+                    texts, translated, grown_repeated, n + 1, cfg, grown
+                )
+        return _end_anchored(texts, translated, repeated, n, cfg, parts)
     # Degenerate input that no slice count could balance: split EACH
     # language's own text independently rather than the flat joined string
     # (whose ``.split()`` would treat the "\n" separator as just more
@@ -240,6 +258,29 @@ def fit_message(
     parts = []
     for text in texts:
         parts.extend(_split_words(text, CHATBOX_LIMIT))
+    return parts
+
+
+def _end_anchored(
+    texts: list[str],
+    translated: list[bool],
+    repeated: set[int],
+    n: int,
+    cfg: OscConfig,
+    parts: list[str],
+) -> list[str]:
+    """`parts` with any sliced translation moved to the last parts, if it fits.
+
+    A translation with fewer words than parts leaves the trailing ones blank,
+    and the last part is the one still on screen once the queue drains, so a
+    translation missing from it is one the reader never ends up with. Applied
+    only after the part count is settled, and only when every part still fits.
+    """
+    if all(i in repeated for i, is_tr in enumerate(translated) if is_tr):
+        return parts
+    moved = _join(texts, translated, repeated, n, cfg, anchored=True)
+    if moved and all(len(part) <= CHATBOX_LIMIT for part in moved):
+        return moved
     return parts
 
 
@@ -276,18 +317,35 @@ def _assemble(
         candidate = repeated | {i}
         if all(
             len(part) <= CHATBOX_LIMIT
-            for part in _join(texts, candidate, n, cfg)
+            for part in _join(texts, translated, candidate, n, cfg)
         ):
             repeated = candidate
-    return _join(texts, repeated, n, cfg), repeated
+    return _join(texts, translated, repeated, n, cfg), repeated
 
 
 def _join(
-    texts: list[str], repeated: set[int], n: int, cfg: OscConfig
+    texts: list[str],
+    translated: list[bool],
+    repeated: set[int],
+    n: int,
+    cfg: OscConfig,
+    anchored: bool = False,
 ) -> list[str]:
-    """`n` parts, with the `repeated` texts whole in each and the rest sliced."""
+    """`n` parts, with the `repeated` texts whole in each and the rest sliced.
+
+    ``anchored`` moves a sliced translation's content to the LAST parts. Off
+    while a part count is being judged, because anchoring changes which
+    original slice a translation shares a part with, and a count that only fits
+    because of it would be chosen over a larger one that repeats the
+    translation outright, which measured better.
+    """
     sliced = {
-        i: _balanced_slices(text, n, CHATBOX_LIMIT)
+        i: _balanced_slices(
+            text,
+            n,
+            CHATBOX_LIMIT,
+            anchor="end" if anchored and translated[i] else "start",
+        )
         for i, text in enumerate(texts)
         if i not in repeated
     }
