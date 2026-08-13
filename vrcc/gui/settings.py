@@ -43,7 +43,7 @@ from vrcc.gui import (
 )
 from vrcc.gui.model_labels import whisper_display_name
 from vrcc.gui.style import PALETTE, apply_font_scale, apply_theme_guarded, resolve_theme
-from vrcc.gui.widgets import combo_value, no_wheel
+from vrcc.gui.widgets import SegmentedControl, combo_value, no_wheel
 from vrcc.i18n import tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
@@ -450,12 +450,6 @@ class SettingsDialog(QDialog):
             self._loading = False
         self._changed()
 
-    @staticmethod
-    def _set_combo_text(combo: QComboBox, text: str) -> None:
-        idx = combo.findText(text)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
-
     def _update_language_limited_items(self) -> None:
         """Grey out voice models that can't serve the selected spoken
         language. "auto" keeps models that detect the language within their
@@ -473,10 +467,10 @@ class SettingsDialog(QDialog):
                     not spec.reports_language and self._cfg.translate.enabled
                 )
             else:
-                enabled = (
-                    spec.languages is None
-                    or languages.get(source).whisper in spec.languages
-                )
+                # Through covers(), not a second reading of spec.languages:
+                # this greying and the spoken-language combo's are meant to be
+                # mirrors, and only covers() also reads english_only.
+                enabled = model_prompts.covers(spec, languages.get(source).whisper)
             item = model.item(i)
             if item is not None:
                 item.setEnabled(enabled)
@@ -492,4 +486,4 @@ class SettingsDialog(QDialog):
             return tr(_MODEL_LANGUAGE_TIP, name=name, language=source)
         if not spec.auto_language:
             return tr(_MODEL_AUTO_TIP, name=name)
-        return tr(model_prompts._AUTO_LOCKED_TIP, name=name)
+        return tr(model_prompts.AUTO_LOCKED_TIP, name=name)

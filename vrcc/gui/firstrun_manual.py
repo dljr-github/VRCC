@@ -53,7 +53,10 @@ def on_choose_manually(wizard) -> None:
     whisper, mt = recommend.best_downloaded(
         wizard._dm, translate=cfg.translate.enabled, factor=wizard._factor,
         tier="cpu" if wizard._cpu_chosen() else wizard.tier,
-        languages=wizard._spoken_codes(), vram_mb=wizard._vram_mb)
+        languages=wizard._spoken_codes(), vram_mb=wizard._vram_mb,
+        compute=recommend.resolved_compute_type(
+            cfg.stt.compute_type, cfg.stt.device_index
+        ))
     if not whisper or not (mt or not cfg.translate.enabled):
         warn_need_model(wizard, has_whisper=whisper is not None)
         return

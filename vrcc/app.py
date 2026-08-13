@@ -15,7 +15,12 @@ from vrcc.audio.source import MicSource
 from vrcc.core import calibrate, hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, default_paths
-from vrcc.core.engine_stack import apply_hear_others, build_engine_stack
+from vrcc.core.engine_stack import (
+    EngineOwners,
+    apply_hear_others,
+    build_engine_stack,
+    start_hear_others_guarded,
+)
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
 from vrcc.core.logs import setup_logging
@@ -46,30 +51,9 @@ def _make_source_with_denoise(config, device_cfg: str) -> MicSource:
     return MicSource(_resolve_audio_device(device_cfg), denoiser=denoiser)
 
 
-def _start_heard_guarded(stack, config, bus: EventBus) -> None:
-    """Start the speaker-capture stream, if the user turned it on.
-
-    Never fatal: captioning what you hear is an extra, and losing it must not
-    take the microphone down with it. A failure inside the capture thread is
-    already handled there; this covers a start() that raises outright.
-    """
-    if stack.heard is None:
-        return
-    try:
-        apply_hear_others(stack, config)
-    except Exception:
-        logger.warning(
-            "could not start captioning what you hear; the microphone is "
-            "unaffected", exc_info=True,
-        )
-        bus.publish(
-            AppError("HEARD_START_FAILED", "Could not listen to your speakers.")
-        )
-
-
-def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, pipeline) -> None:
+def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, owners) -> None:
     """Mark each engine kind that failed at startup, and unhook a dead
-    translator from ``pipeline``.
+    translator from every consumer of it.
 
     Marking it lets re-picking the SAME configured model in Settings run a real
     swap instead of no-opping into the startup-dead engine, since the reloader
@@ -89,7 +73,7 @@ def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, pipeli
             continue
         loaded[kind] = _FAILED
         if kind == "mt":
-            pipeline.set_mt(None)
+            owners.set_mt(None)
 
 
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
@@ -200,6 +184,9 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         calibrate.cached_factor(store.config)
 
     stack = build_engine_stack(store, bus, paths)
+    # Every holder of the shared engines, not just the pipeline: a swap that
+    # reached one of two consumers left the other calling an unloaded engine.
+    owners = EngineOwners(stack.pipeline, stack.heard)
 
     # Flipped once _start_pipeline_guarded succeeds; _status_after_swap reads
     # it so a green swap never claims "Capturing" over a never-started pipeline.
@@ -240,7 +227,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             # capture the swap already started. Runs for a dead translator too,
             # which no longer stops capture, so re-picking it still swaps.
             _retire_failed_engines(
-                loader.failed_kinds, reloader._loaded, startup_ids, stack.pipeline
+                loader.failed_kinds, reloader._loaded, startup_ids, owners
             )
             if not success:
                 logger.warning(
@@ -254,7 +241,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
                         False, tr("{name} failed to load", name=tr("voice model"))
                     )
                 return
-            _start_heard_guarded(stack, store.config, bus)
+            start_hear_others_guarded(stack, store.config, bus)
             if not _start_pipeline_guarded(stack.pipeline, bus):
                 # The AppError already flashed the status bar; a dead mic kills
                 # the core function, so also say it loudly. App stays up: fix
@@ -336,7 +323,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     }
 
     reloader = _Reloader(
-        pipeline=stack.pipeline,
+        pipeline=owners,
         build=_build_engine,
         load=_load_engine,
         set_swapping=stack.pipeline.set_swapping,
@@ -435,6 +422,8 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             store.config.mute_sync, store.config.osc.ip, bus
         ),
         mute=stack.mute,
+        heard=stack.heard,
+        hear_others=lambda: apply_hear_others(stack, store.config),
     )
     window = make_window()
     window.show()

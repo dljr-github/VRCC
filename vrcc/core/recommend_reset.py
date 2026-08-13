@@ -15,9 +15,13 @@ from vrcc.core import calibrate
 # Fields reset_to_recommended() restores, with the value it restores them to.
 # Anything absent is a personal choice the recommender has no opinion about
 # (target languages, spoken language, microphone, OSC address, appearance).
-# translate.beam_size is restored in the body, where the config module is
-# already imported. It belongs here: the load migration only reaches configs
-# written before schema 2, so a beam narrowed after that has no other way back.
+# translate.beam_size and stt.temperature are restored in the body, where the
+# config module is already imported. translate.beam_size belongs here because
+# the load migration only reaches configs written before schema 2, so a beam
+# narrowed after that has no other way back. stt.temperature belongs here
+# because the mode bundles carry only the fields that differ between them, so
+# apply_profile never writes it: a hand-raised temperature would otherwise
+# survive a reset that promises to restore the search settings.
 _RECOMMENDED_ENGINE_FIELDS = {
     "stt": {"device": "auto", "device_index": 0, "compute_type": "auto",
             "cpu_threads": 0, "num_workers": 1},
@@ -38,13 +42,14 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
     language. Returns the values it settled on, for the caller to show.
     """
     from vrcc.core import recommend
-    from vrcc.core.config import TranslateConfig, apply_profile
+    from vrcc.core.config import SttConfig, TranslateConfig, apply_profile
 
     for section_name, fields in _RECOMMENDED_ENGINE_FIELDS.items():
         section = getattr(cfg, section_name)
         for field, value in fields.items():
             setattr(section, field, value)
     cfg.translate.beam_size = TranslateConfig().beam_size
+    cfg.stt.temperature = SttConfig().temperature
 
     languages = spoken_whisper_codes(cfg)
     index = cfg.stt.device_index
@@ -63,8 +68,12 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
 
     factor = calibrate.cached_factor(cfg)
     vram_mb = recommend.detected_vram_mb(cfg.stt.device_index)
+    compute = recommend.resolved_compute_type(
+        cfg.stt.compute_type, cfg.stt.device_index
+    )
     whisper, mt = recommend.preset_for_choice(
-        choice, tier=tier, languages=languages, factor=factor, vram_mb=vram_mb
+        choice, tier=tier, languages=languages, factor=factor,
+        vram_mb=vram_mb, compute=compute,
     )
     if dm is not None:
         # A recommended model that is not downloaded would leave the app
@@ -72,6 +81,7 @@ def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
         have_whisper, have_mt = recommend.best_downloaded(
             dm, translate=cfg.translate.enabled, tier=tier,
             languages=languages, factor=factor, vram_mb=vram_mb,
+            compute=compute,
         )
         whisper = have_whisper or whisper
         mt = have_mt or mt

@@ -40,14 +40,10 @@ def _human(size_mb: float) -> str:
 
 
 def _resolved_compute(compute_type: str, device_index: int) -> str:
-    """What the engines will actually run at, resolved the way
-    :func:`vrcc.core.hardware.resolve` resolves it for them: a pinned value
-    wins, otherwise the best type the card supports."""
-    if compute_type != "auto":
-        return compute_type
-    return hardware.best_compute_type(
-        "cuda", device_index, cc=hardware.compute_capability(device_index)
-    )
+    """What the engines will actually run at. One implementation with the
+    ranking's, in ``recommend``, because the two size against the same table
+    and disagreeing puts a fit warning on a row the recommender just picked."""
+    return recommend.resolved_compute_type(compute_type, device_index)
 
 
 def vram_warning(

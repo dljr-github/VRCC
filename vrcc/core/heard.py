@@ -10,15 +10,12 @@ a smaller dedicated path than with a flag threaded through the existing one:
 It never reaches VRChat. This class holds no chatbox, no sender and no OSC of
 any kind, so "other people's words are never broadcast under your name" is a
 property of the construction rather than a branch someone could invert later.
-The room already heard them; what the user lacks is understanding, not a relay.
 
 It never runs two decodes at once. The STT and MT engines are SHARED with the
 main pipeline rather than duplicated, under locks the caller passes in, because
 a second copy of large-v3-turbo costs another 2.5 GB of VRAM and a 12 GB card
 has no room for it. The cost is latency instead of memory: when both streams
-speak together, one waits. Conversation alternates most of the time, so that is
-usually free, and when it is not, a late caption beats a card that cannot load
-the model.
+speak together, one waits.
 
 Source language is always detected. You cannot know in advance what someone
 else will speak, which is the whole reason for the feature.
@@ -57,11 +54,9 @@ _QUEUE_MAX = 4
 _AUTO = "auto"
 
 # How long after the user stops speaking their voice may still be arriving on
-# the loopback, covering the monitoring path's own delay. The utterance's whole
-# capture window is checked as well, so this does NOT also have to cover
-# vad.finalize_silence_ms (600 ms by default, 800 in the quality profile, and
-# settable to 5 s in Advanced) the way a single end-of-utterance comparison
-# would have.
+# the loopback, covering the monitoring path's own delay. It does not have to
+# cover vad.finalize_silence_ms (600 ms by default, up to 5 s in Advanced)
+# because _handle checks the utterance's whole capture window.
 _SELF_ECHO_GRACE_S = 1.0
 
 # Microphone loudness that counts as the user making a sound. Deliberately low:
@@ -109,6 +104,11 @@ class HeardStream:
         self._queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAX)
         self._thread: threading.Thread | None = None
         self._running = False
+        # Identity of the current run. A join that times out (a decode can hold
+        # the shared STT lock for seconds) leaves a worker alive, and comparing
+        # this token is how that worker learns it is no longer the one: it
+        # publishes nothing and exits rather than racing its replacement.
+        self._run_token: object | None = None
         self.dropped = 0
 
     # -- lifecycle ---------------------------------------------------------
@@ -129,6 +129,35 @@ class HeardStream:
     def bus(self):
         return self._bus
 
+    def set_stt(self, engine) -> None:
+        """Point the stream at the voice engine the pipeline now holds.
+
+        The engines are shared, and only the pipeline is told when one is
+        swapped. Without this the stream keeps the object the reloader already
+        unloaded, every decode raises into :meth:`_work`'s handler, and the
+        feature goes silent for the rest of the session with its toggle still
+        lit. Taken under the shared lock, so the swap cannot land while a
+        decode is running on the engine about to be unloaded.
+        """
+        with self._stt_lock:
+            self._stt = engine
+
+    def set_mt(self, engine) -> None:
+        """Point the stream at the translator the pipeline now holds. Also the
+        path by which translation switched on after launch reaches it."""
+        with self._mt_lock:
+            self._mt = engine
+
+    def reconfigure_vad(self, cfg) -> None:
+        """Adopt new VAD timings, as the main pipeline's segmenter does.
+
+        Its own segmenter means its own precomputed frame counts, and left
+        behind they silently diverged: the same silence ended a microphone
+        utterance but not a speaker one, and this stream's echo grace is
+        reasoned about in terms of the finalize timing it was no longer using.
+        """
+        self._segmenter.reconfigure(cfg)
+
     def set_source(self, source) -> None:
         """Swap the capture source. Only while stopped: the running one owns a
         thread reading a device. Lets a speaker change take effect without a
@@ -146,14 +175,22 @@ class HeardStream:
             return
         self._running = True
         self._segmenter.reset()
+        # A fresh queue per run. What was queued before the user switched this
+        # off is stale by the time they switch it back on, and captioning it
+        # as if it had just been said is the backlog _QUEUE_MAX exists to
+        # prevent.
+        self._queue = queue.Queue(maxsize=_QUEUE_MAX)
+        token = self._run_token = object()
         self._thread = threading.Thread(
-            target=self._work, name="HeardStream", daemon=True
+            target=self._work, args=(token, self._queue),
+            name="HeardStream", daemon=True,
         )
         self._thread.start()
         self._source.start(self._on_frame)
 
     def stop(self) -> None:
         self._running = False
+        self._run_token = None
         try:
             self._source.stop()
         except Exception:
@@ -193,49 +230,70 @@ class HeardStream:
                 continue
             if not isinstance(event, SegFinal):
                 continue
+            # Both stamped at capture. captured_at lets the echo check ask
+            # about the whole window rather than only the instant it was
+            # dequeued, and spoke_at freezes what the microphone was doing
+            # while this utterance was being captured: read later it would also
+            # catch the user's REPLY, which is normal turn-taking and would
+            # suppress the other person systematically.
+            item = (event.samples, time.monotonic(), self._user_spoke_at)
             try:
-                # Stamped at capture, so the check below can ask about the
-                # whole window rather than only the instant it was dequeued.
-                self._queue.put_nowait((event.samples, time.monotonic()))
+                self._queue.put_nowait(item)
             except queue.Full:
                 # Oldest first: a caption of what was said a minute ago is
                 # worse than not captioning it.
                 self.dropped += 1
-                logger.debug("heard queue full; dropping an utterance")
+                logger.debug("heard queue full; dropping the oldest utterance")
+                try:
+                    self._queue.get_nowait()
+                    self._queue.put_nowait(item)
+                except (queue.Empty, queue.Full):
+                    # The worker drained or refilled it in between; either way
+                    # the backlog is no longer this frame's problem.
+                    pass
 
     # -- worker ------------------------------------------------------------
 
-    def _work(self) -> None:
-        while self._running:
-            item = self._queue.get()
-            if item is None or not self._running:
+    def _work(self, token: object, q: queue.Queue) -> None:
+        while self._run_token is token:
+            item = q.get()
+            if item is None or self._run_token is not token:
                 continue
             try:
-                self._handle(*item)
+                self._handle(token, *item)
             except Exception:
                 logger.warning("heard utterance failed", exc_info=True)
 
-    def _handle(self, samples: np.ndarray, captured_at: float) -> None:
+    def _handle(
+        self, token: object, samples: np.ndarray, captured_at: float, spoke_at: float
+    ) -> None:
         # The whole capture window, not just its end. The segmenter will not
         # close an utterance until finalize_silence_ms of silence, so a reply
         # arriving sooner is welded onto the user's own speech and an
         # end-of-utterance check would pass the merged audio through.
         window_start = captured_at - len(samples) / SAMPLE_RATE
-        if self._user_spoke_at >= window_start - _SELF_ECHO_GRACE_S:
+        if spoke_at >= window_start - _SELF_ECHO_GRACE_S:
             self._suppressed += 1
             logger.debug("dropped a heard utterance that overlapped your speech")
             return
         with self._stt_lock:
-            # detect_language: this stream must never inherit the user's
-            # configured spoken language. Someone who tells VRCC they speak
-            # English would otherwise have every Japanese speaker in the room
-            # decoded as English, which produces confident nonsense rather
-            # than an error. See this module's docstring.
-            result = self._stt.transcribe(samples, detect_language=True)
+            # This stream must never inherit the user's configured spoken
+            # language: an English speaker's setting would decode every
+            # Japanese speaker in the room as English, which produces
+            # confident nonsense rather than an error.
+            #
+            # Read inside the lock: a hot swap sets it to None here first, so
+            # an engine that is about to be unloaded is never entered.
+            engine = self._stt
+            if engine is None:
+                return
+            result = engine.transcribe(samples, detect_language=True)
         if result is None or not result.text.strip():
             return
 
         translations = self._translate(result)
+        if self._run_token is not token:
+            return  # switched off while this was decoding
         self._bus.publish(
             HeardPhrase(
                 text=result.text,
@@ -258,12 +316,24 @@ class HeardStream:
         source = from_whisper(result.language)
         if source is None:
             return []
-        targets = [get(name) for name in self._heard_targets() if name != source.display]
-        if not targets:
-            return []
         try:
+            # get() inside the try, not above it. It raises on a display name
+            # the registry does not know (a hand-edited config, a name a later
+            # build renamed), and outside the try that KeyError unwinds past
+            # the publish below, costing the transcription as well as the
+            # translation.
+            targets = [
+                get(name)
+                for name in self._heard_targets()
+                if name != source.display
+            ]
+            if not targets:
+                return []
             with self._mt_lock:
-                return self._mt.translate(result.text, source, targets)
+                engine = self._mt
+                if engine is None:
+                    return []
+                return engine.translate(result.text, source, targets)
         except Exception:
             logger.warning("heard translation failed", exc_info=True)
             return []

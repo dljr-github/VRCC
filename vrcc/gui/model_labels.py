@@ -13,10 +13,9 @@ from vrcc.i18n import tr, tr_noop
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS, collapses_onto
 
-# Identity only. The quality ladder lives in _MT_LEAD_INS; carrying it here
-# too meant two hand-synced copies, and they drifted the moment the
-# preference order moved: the badged row read "small" while the only
-# ladder in the name column pointed at the family that had been demoted.
+# Identity only. The quality ladder lives in _MT_LEAD_INS; a second copy here
+# has to be hand-synced with it, and drifts as soon as the preference order
+# moves, leaving the badged row and the name column naming different models.
 _MT_DISPLAY_NAMES: dict[str, str] = {
     "nllb-600M-int8": tr_noop("NLLB 600M"),
     "nllb-1.3B-int8": tr_noop("NLLB 1.3B"),

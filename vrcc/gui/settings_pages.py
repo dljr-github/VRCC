@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
     QLineEdit,
-    QPushButton,
     QSlider,
     QWidget,
 )
@@ -29,13 +28,11 @@ from vrcc.core.languages import LANGUAGES
 from vrcc.gui import (
     model_prompts,
     settings_audio,
-    settings_heard,
-    settings_mode,
     settings_reset,
 )
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
-from vrcc.gui.widgets import combo_value, fill_spoken_languages, set_combo_value, SegmentedControl, no_wheel
-from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
+from vrcc.gui.widgets import combo_value, fill_spoken_languages, set_combo_value, no_wheel
+from vrcc.i18n import tr, tr_noop
 
 from vrcc.gui.settings_simple import build_simple_page  # noqa: F401  (re-export)
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vrcc.gui import mt_prompts
+from vrcc.gui.widgets import set_combo_text
 from vrcc.i18n import tr
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ def load_targets(w: MainWindow, cfg) -> None:
         if slot < len(pairs):
             asked, display = pairs[slot]
             w._target_intent[slot] = asked
-            w._set_combo_text(combo, display)
+            set_combo_text(combo, display)
             if check is not None:
                 check.setChecked(True)
         else:
@@ -94,7 +95,7 @@ def seed_free_target(w: MainWindow, slot: int) -> None:
     for i in range(combo.count()):
         item = model.item(i)
         if combo.itemText(i) not in taken and (item is None or item.isEnabled()):
-            w._set_combo_text(combo, combo.itemText(i))
+            set_combo_text(combo, combo.itemText(i))
             return
 
 

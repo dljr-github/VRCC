@@ -12,8 +12,9 @@ stays hand-ordered. Both feed the per-tier walk in :func:`best_downloaded`.
 
 from __future__ import annotations
 
-from vrcc.core.bench_tables import BEAM_BENCH, STT_BENCH, STT_VRAM_MB
+from vrcc.core.bench_tables import BEAM_BENCH, STT_BENCH, stt_vram_table
 from vrcc.core.hardware import (
+    best_compute_type,
     can_run_cuda,
     compute_capability,
     total_vram_bytes,
@@ -35,7 +36,7 @@ _VRAM_NOMINAL_SLACK = 1024 ** 3 // 2
 _VRAM_HIGH_BYTES = 16 * 1024 ** 3 - _VRAM_NOMINAL_SLACK
 
 # Capacity is not speed, and a 16 GB card can be a decade old: a Tesla P100 or
-# P40 clears the VRAM bar comfortably. The floor is compute capability 7.0
+# P40 clears the VRAM bar. The floor is compute capability 7.0
 # (Volta), the first architecture with tensor cores, because best_compute_type
 # hands every card below Blackwell "int8_float16" and there is no fast hardware
 # for that path before then. This is a statement about what the engines ask the
@@ -62,9 +63,8 @@ _LATENCY_GATE_S = {"cpu": 1.0, "gpu": 0.6}
 # model and VRChat, so a third each is the split. The voice model is sized
 # against STT_VRAM_MB, whose note explains why a checkpoint size cannot stand
 # in for a measured peak; MT_VRAM_MB is what the second third covers.
-# The fallback is a third of the 8 GB gpu_low used to top out at, for when VRAM
-# cannot be read (no pynvml, or the import-time ranking, which must not touch
-# NVML).
+# The fallback is a third of 8 GB, for when VRAM cannot be read (no pynvml, or
+# the import-time ranking, which must not touch NVML).
 _GPU_LOW_VRAM_SHARE = 3
 _GPU_LOW_FALLBACK_BUDGET_MB = 8 * 1024 // _GPU_LOW_VRAM_SHARE
 
@@ -79,14 +79,38 @@ def vram_budget_mb(total_mb: int) -> int:
     return total_mb // _GPU_LOW_VRAM_SHARE
 
 
+def resolved_compute_type(compute_type: str = "auto", device_index: int = 0) -> str:
+    """What the engines will actually run at, resolved the way
+    :func:`vrcc.core.hardware.resolve` resolves it for them: a pinned value
+    wins, otherwise the best type the card supports.
+
+    Here rather than beside the fit warning that first needed it, because the
+    ranking has to size against the same table: a card on compute capability 12
+    has no int8 kernels and always pays the float16 peak, and the two reading
+    different tables put "Recommended for your PC" and "may be too large for
+    your graphics card" on one row.
+    """
+    if compute_type != "auto":
+        return compute_type
+    if not can_run_cuda():
+        # No card to size against, and asking CTranslate2 what a CUDA device
+        # supports on a machine without one is a probe for an answer nothing
+        # reads: the VRAM gate only applies on the gpu_low tier.
+        return "float32"
+    return best_compute_type(
+        "cuda", device_index, cc=compute_capability(device_index)
+    )
+
+
 def _rank_whisper(
     tier: str,
     specs=WHISPER_MODELS,
     bench=STT_BENCH,
-    vram=STT_VRAM_MB,
+    vram=None,
     languages: tuple[str, ...] | None = None,
     factor: float = 1.0,
     vram_mb: int | None = None,
+    compute: str = "int8",
 ) -> list[str]:
     """Best-first STT ids for ``tier``, derived from the benchmark table.
 
@@ -104,23 +128,30 @@ def _rank_whisper(
     in the leading partition, and models that cannot (english_only mismatch,
     a code outside ``languages``) always trail.
 
+    ``compute`` picks WHICH measured VRAM peak the budget is applied to: the
+    same model costs 1.13x to 1.67x more at float16 than at int8_float16, and a
+    card on compute capability 12 or above has no int8 kernels, so it always
+    pays the higher one. It defaults to the int8 table for the import-time,
+    machine-blind ``WHISPER_PREFERENCE``; a caller that knows the card passes
+    :func:`resolved_compute_type`, which is the same value the Settings fit
+    warning sizes against.
+
     Within each partition, models inside the tier's latency budget (and, on
     ``gpu_low``, inside the VRAM budget) rank by (WER band, latency): WER
     differences under ~0.3 percentage points are ties and the faster model
     wins. Over-budget models follow, fastest first (least-bad fallback),
     then unmeasured ids by size.
 
-    An unmeasured model never leads, whatever languages it names. That rule
-    used to have an exception: STT_BENCH's WER is LibriSpeech *English*, so for
-    another spoken language a model naming that language looked like a better
-    prior than a measured generalist, and sense-voice-small (the only
-    unmeasured id) led every CJK pick on every tier. It benchmarks extremely
-    well on read speech, exact on all five sherpa-onnx reference clips, but
-    field testing on real VRChat speech put faster-whisper ahead, and casual
-    conversation over game audio is the workload this app has. A clean-speech
-    prior that loses in the field is not a prior worth leading with. It stays
-    in the registry and stays pickable; it just no longer outranks a model
-    whose numbers we have.
+    An unmeasured model never leads, whatever languages it names. The
+    temptation to except one is real: STT_BENCH's WER is LibriSpeech *English*,
+    so for another spoken language a model naming that language reads like a
+    better prior than a measured generalist, and sense-voice-small (the only
+    unmeasured id) would lead every CJK pick on every tier. It benchmarks
+    extremely well on read speech, exact on all five sherpa-onnx reference
+    clips, but field testing on real VRChat speech put faster-whisper ahead,
+    and casual conversation over game audio is the workload this app has. A
+    clean-speech prior that loses in the field is not a prior worth leading
+    with. It stays in the registry and stays pickable.
     """
     if tier not in _TIERS:
         raise KeyError(tier)
@@ -131,6 +162,7 @@ def _rank_whisper(
     # apart with every test still green.
     budget_mb = (_GPU_LOW_FALLBACK_BUDGET_MB if vram_mb is None
                  else vram_budget_mb(vram_mb))
+    peaks = stt_vram_table(compute) if vram is None else vram
 
     def order(ids: list[str]) -> list[str]:
         usable, over_budget, unmeasured = [], [], []
@@ -142,7 +174,7 @@ def _rank_whisper(
             wer, latency = (row[0], row[2]) if on_gpu else (row[1], row[3] * factor)
             # An id with no measured footprint is not gated: a guess is what
             # this replaced. STT_VRAM_MB's note covers which ids and why.
-            peak = vram.get(mid)
+            peak = peaks.get(mid)
             fits = tier != "gpu_low" or peak is None or peak <= budget_mb
             if latency <= gate and fits:
                 usable.append((int(wer * 1000) // 3, latency, mid))
@@ -304,7 +336,7 @@ def default_device_choice(index: int = 0) -> str:
 def preset_for_choice(
     device_choice: str, tier: str | None = None,
     languages: tuple[str, ...] | None = None, factor: float = 1.0,
-    vram_mb: int | None = None,
+    vram_mb: int | None = None, compute: str = "int8",
 ) -> tuple[str, str]:
     """Preset (whisper id, mt id) for an explicit run-device choice.
 
@@ -324,12 +356,12 @@ def preset_for_choice(
         if tier is None:
             tier = detect_tier()
         resolved = "gpu_low" if tier == "cpu" else tier
-    return preset_for_tier(resolved, languages or (), factor, vram_mb)
+    return preset_for_tier(resolved, languages or (), factor, vram_mb, compute)
 
 
 def preset_for_tier(
     tier: str, languages: tuple[str, ...] = (), factor: float = 1.0,
-    vram_mb: int | None = None,
+    vram_mb: int | None = None, compute: str = "int8",
 ) -> tuple[str, str]:
     """(whisper id, mt id) for an already-resolved tier, reranked for the
     spoken languages and this machine. ``PRESETS[tier]`` is the same answer for
@@ -342,7 +374,10 @@ def preset_for_tier(
     the ranking is ten rows and one sort.
     """
     return (
-        _rank_whisper(tier, languages=languages, factor=factor, vram_mb=vram_mb)[0],
+        _rank_whisper(
+            tier, languages=languages, factor=factor, vram_mb=vram_mb,
+            compute=compute,
+        )[0],
         _MT_PRESET[tier],
     )
 
@@ -410,7 +445,7 @@ def recommended_profile(
 def best_downloaded(
     dm, *, translate: bool, tier: str | None = None,
     languages: tuple[str, ...] | None = None, factor: float = 1.0,
-    vram_mb: int | None = None,
+    vram_mb: int | None = None, compute: str = "int8",
 ) -> tuple[str | None, str | None]:
     """Best already-downloaded (whisper id, mt id) for ``tier``.
 
@@ -421,7 +456,9 @@ def best_downloaded(
     """
     if tier is None:
         tier = detect_tier()
-    pref = _rank_whisper(tier, languages=languages, factor=factor, vram_mb=vram_mb)
+    pref = _rank_whisper(
+        tier, languages=languages, factor=factor, vram_mb=vram_mb, compute=compute
+    )
     whisper = next((mid for mid in pref if dm.is_whisper_downloaded(mid)), None)
     mt = None
     if translate:

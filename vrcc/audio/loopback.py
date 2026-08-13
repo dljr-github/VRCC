@@ -1,24 +1,20 @@
 """Capture what the speakers are playing, so VRCC can caption other people.
 
-An :class:`~vrcc.audio.source.AudioSource` backed by WASAPI loopback, which is
-what lets the app transcribe the voices coming OUT of VRChat rather than the one
-going in. PortAudio cannot do this: sounddevice exposes no loopback flag and an
-output device refuses to open as an input, so this backend uses ``soundcard``
-(WASAPI via ctypes, no rebuild) while the microphone keeps its PortAudio path.
+An :class:`~vrcc.audio.source.AudioSource` backed by WASAPI loopback. PortAudio
+cannot do this: sounddevice exposes no loopback flag and an output device
+refuses to open as an input, so this backend uses ``soundcard`` (WASAPI via
+ctypes, no rebuild) while the microphone keeps its PortAudio path.
 
-Two consequences of that library worth knowing here. Its recorder is blocking
-rather than callback-driven, so capture runs on its own thread instead of being
-handed frames by the driver. And WASAPI is COM, so the capture thread has to
-join an apartment itself: ``soundcard`` initialises COM at import on the
-IMPORTING thread only, and a worker that skips :func:`_com_initialize` fails
-with CO_E_NOTINITIALIZED (0x800401f0) at the first device call, at runtime
-rather than at import.
+Its recorder is blocking rather than callback-driven, so capture runs on its
+own thread. WASAPI is COM, so the capture thread has to join an apartment
+itself: ``soundcard`` initialises COM at import on the IMPORTING thread only,
+and a worker that skips :func:`_com_initialize` fails with CO_E_NOTINITIALIZED
+(0x800401f0) at the first device call.
 
-What this captures is the whole output device, not VRChat's voice channel.
-Windows offers no per-application voice tap, so world audio, music and any other
-app land in the same stream. The VAD and the transcription quality gates reject
-some of it, but a video player showing dialogue will transcribe cheerfully. That
-is a property of the platform, not a bug to fix here.
+This captures the whole output device, not VRChat's voice channel. Windows
+offers no per-application voice tap, so world audio, music and any other app
+land in the same stream. The VAD and the quality gates reject some of it, but
+audio from a video player or a stream is transcribed too.
 """
 
 from __future__ import annotations
@@ -121,8 +117,8 @@ class LoopbackSource:
         self._device = device
         # Called with (error code, detail) when capture cannot run. The failure
         # happens on the worker thread, so it can never reach a try/except
-        # around start(), and without this the feature is simply dead with
-        # nothing on screen: the whole reason this bug survived five sessions.
+        # around start(); without it the feature is dead with nothing on
+        # screen.
         self._on_failure = on_failure
         # Defaults to soundcard's recorder; tests inject a fake exposing the
         # same record(numframes) context manager.
@@ -155,7 +151,11 @@ class LoopbackSource:
             thread.join(timeout=2.0)
 
     def _fail(self, code: str, detail: str) -> None:
-        if self._on_failure is None:
+        # A stop the caller asked for is not a failure, whichever exit path
+        # notices it. A speaker change tears this source down and starts
+        # another, and reporting the teardown would switch the setting off and
+        # unpick the toggle over the capture that had just replaced it.
+        if self._on_failure is None or self._stop.is_set():
             return
         try:
             self._on_failure(code, detail)
@@ -197,38 +197,49 @@ class LoopbackSource:
                 _com_uninitialize()
 
     def _capture(self, on_frame, rechunker) -> None:
+        # The `with` is inside the try, not around it. recorder() only builds
+        # the object: it is __enter__ that starts the WASAPI stream, so
+        # exclusive-mode contention and an endpoint that refuses 16 kHz mono
+        # both raise there rather than from _open(), and outside the try they
+        # would kill this thread with nothing on screen.
         try:
-            recorder = self._open()
+            with self._open() as rec:
+                self._read_loop(rec, on_frame, rechunker)
         except Exception as exc:
             logger.warning(
-                "could not open loopback capture for %r; captioning what you "
-                "hear is off for this session",
+                "loopback capture for %r ended in an error; captioning what "
+                "you hear is off for this session",
                 self._device, exc_info=True,
             )
-            self._fail("HEARD_DEVICE_FAILED", f"could not open the output device: {exc}")
-            return
+            self._fail("HEARD_DEVICE_FAILED", f"the output device failed: {exc}")
 
+    def _read_loop(self, rec, on_frame, rechunker) -> None:
         consecutive = 0
-        with recorder as rec:
-            while not self._stop.is_set():
+        while not self._stop.is_set():
+            try:
+                block = rec.record(numframes=_READ_FRAMES)
+                consecutive = 0
+            except Exception as exc:
+                self.read_errors += 1
+                consecutive += 1
+                logger.warning("loopback read failed", exc_info=True)
+                if consecutive >= _MAX_CONSECUTIVE_ERRORS:
+                    logger.warning(
+                        "giving up on loopback capture after %d consecutive "
+                        "read failures", consecutive
+                    )
+                    # Every way this thread ends without the caller asking has
+                    # to say so, or the toggle sits lit beside a dead stream.
+                    self._fail(
+                        "HEARD_DEVICE_FAILED",
+                        f"the output device stopped delivering audio: {exc}",
+                    )
+                    return
+                continue
+            for frame in rechunker.push(_to_mono(np.asarray(block))):
                 try:
-                    block = rec.record(numframes=_READ_FRAMES)
-                    consecutive = 0
+                    on_frame(frame)
                 except Exception:
-                    self.read_errors += 1
-                    consecutive += 1
-                    logger.warning("loopback read failed", exc_info=True)
-                    if consecutive >= _MAX_CONSECUTIVE_ERRORS:
-                        logger.warning(
-                            "giving up on loopback capture after %d consecutive "
-                            "read failures", consecutive
-                        )
-                        return
-                    continue
-                for frame in rechunker.push(_to_mono(np.asarray(block))):
-                    try:
-                        on_frame(frame)
-                    except Exception:
-                        # One bad frame must not end capture, the same contract
-                        # MicSource's callback keeps.
-                        logger.warning("loopback on_frame raised", exc_info=True)
+                    # One bad frame must not end capture, the same contract
+                    # MicSource's callback keeps.
+                    logger.warning("loopback on_frame raised", exc_info=True)

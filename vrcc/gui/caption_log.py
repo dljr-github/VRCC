@@ -256,7 +256,7 @@ def render_row_html(
         f'<span style="color:{c["muted"]}; font-size:{fs}px;">{row.time_label}</span>'
         f"</td>"
         f'<td style="vertical-align:top;">'
-        f'<span style="font-weight: normal; color:{c["text"]};">{_esc(row.original)}</span>'
+        f'<span style="font-weight: normal; color:{body_color};">{_esc(row.original)}</span>'
         f"{trans}"
         f"</td>"
         f'<td width="{status_w}" style="vertical-align:top; text-align:right; '

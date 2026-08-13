@@ -52,6 +52,7 @@ _TARGET_LABEL = tr_noop("Show it in")
 _TARGET_AUTO = tr_noop("The language I speak")
 _SPEAKER_DEFAULT = tr_noop("Default speakers")
 _NO_SPEAKERS = tr_noop("No speakers found")
+_MISSING_SPEAKER = tr_noop("{name} (not found on this PC)")
 
 
 def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
@@ -124,3 +125,10 @@ def _fill_speakers(combo: QComboBox, selected: str) -> None:
     index = combo.findData(selected)
     if index >= 0:
         combo.setCurrentIndex(index)
+        return
+    # A stored name this machine cannot offer (headset unplugged, portable
+    # install carried to another PC) gets an entry of its own. Falling back to
+    # "Default speakers" would show a device the config does not name, and
+    # picking it would be a no-op because the index never changed.
+    combo.addItem(tr(_MISSING_SPEAKER, name=selected), selected)
+    combo.setCurrentIndex(combo.count() - 1)

@@ -25,11 +25,11 @@ def fill_spoken_languages(combo, auto_label: str, auto_value: str, languages) ->
     """Fill a spoken-language combo, carrying each entry's STORED value in the
     data role.
 
-    Only the auto entry's label differs from its value, and that is the point:
-    it used to render as the raw config string "auto", lowercase, among Title
-    Case language names, while Settings showed the same concept translated.
-    Every entry carries data so readers use one rule rather than special-casing
-    the odd one out.
+    Only the auto entry's label differs from its value, which is what keeps it
+    from rendering as the raw config string "auto", lowercase, among Title Case
+    language names while Settings shows the same concept translated. Every
+    entry carries data so readers use one rule rather than special-casing the
+    odd one out.
     """
     combo.addItem(auto_label, auto_value)
     for display in languages:
@@ -45,6 +45,16 @@ def combo_value(combo) -> str:
 
 def set_combo_value(combo, value: str) -> None:
     index = combo.findData(value)
+    if index >= 0:
+        combo.setCurrentIndex(index)
+
+
+def set_combo_text(combo, text: str) -> None:
+    """Select the entry whose LABEL is ``text``, silently doing nothing when
+    no entry carries it. The twin of :func:`set_combo_value` for combos whose
+    label is the stored value; each window used to carry its own copy of this,
+    and the copies were free to drift."""
+    index = combo.findText(text)
     if index >= 0:
         combo.setCurrentIndex(index)
 

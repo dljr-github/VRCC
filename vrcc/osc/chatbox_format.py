@@ -138,14 +138,11 @@ def _balanced_slices(text: str, n: int, limit: int) -> list[str]:
     slices.
 
     Fewer words than slices simply leaves the trailing slices blank, so a text
-    that runs out early fades rather than repeating. A translation short enough
-    to travel whole never reaches here at all: :func:`_assemble` repeats it in
-    every part instead, which is what gets it read.
+    that runs out early fades rather than repeating.
     """
     words = text.split()
-    # Only split a spaceless run too big for one slice; a shorter one is
-    # better served whole, and _assemble has already taken that route where it
-    # fits (see _is_spaceless).
+    # A spaceless run within its per-part share is better carried whole, which
+    # _assemble already does where it fits.
     spaceless = _is_spaceless(text) and len(text) > limit // n
     if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []

@@ -13,7 +13,7 @@ import logging
 from typing import Callable
 
 from PySide6.QtCore import QByteArray
-from PySide6.QtWidgets import QComboBox, QMainWindow, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.gui import main_heard, main_targets, model_prompts, status_render
@@ -34,7 +34,7 @@ from vrcc.gui.main_parts import (
     build_top_bar,
 )
 from vrcc.gui.style import PALETTE, resolve_theme
-from vrcc.gui.widgets import set_combo_value
+from vrcc.gui.widgets import set_combo_text, set_combo_value
 from vrcc.i18n import tr, tr_noop
 
 logger = logging.getLogger("vrcc.gui.main_window")
@@ -101,7 +101,7 @@ class MainWindow(QMainWindow):
         # Latest engine states, rendered together in the status bar.
         self._engine_states: dict[str, str] = {}
         # Engine kinds already shown a failure modal, cleared when one goes
-        # ready again. Without it a kind that retries stacks one dialog a try.
+        # ready again.
         self._engine_failures_reported: set[str] = set()
         # Per-utterance caption rows with delivery status (pure model, re-rendered).
         self._caption_model = CaptionModel()
@@ -193,11 +193,7 @@ class MainWindow(QMainWindow):
         # shared config with no bus event; re-derive the capture label.
         self._render_capture_status()
 
-    @staticmethod
-    def _set_combo_text(combo: QComboBox, text: str) -> None:
-        idx = combo.findText(text)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
+    _set_combo_text = staticmethod(set_combo_text)
 
     # -- bridge signal wiring ----------------------------------------------
 
@@ -307,8 +303,7 @@ class MainWindow(QMainWindow):
                 tr("{name} could not stay on the GPU. Switched to CPU (slower).", name=name)
             )
         if event.state == "ready":
-            # A kind that recovers may fail again later and deserves to be heard
-            # a second time.
+            # A recovered engine can fail again, and that failure deserves a dialog.
             self._engine_failures_reported.discard(event.engine)
         if event.state == "failed":
             # Capture is the voice model's business alone. A dead translator
@@ -347,10 +342,9 @@ class MainWindow(QMainWindow):
     def _on_app_error(self, event) -> None:
         # All AppErrors are transient status text (5 s); the only modal alert is
         # a failed engine (in _on_engine_state). The raw code+message go to the
-        # log so diagnostics are never lost, and never to the status bar: a code
-        # with no sentence of its own used to render as "WHAT_IS_THIS: ct2
-        # assertion failed at src/layers/attention.cc:88", which tells a user
-        # nothing and points them nowhere.
+        # log so diagnostics are never lost, and never to the status bar: a bare
+        # code with no sentence of its own tells a user nothing and points them
+        # nowhere.
         logger.warning("AppError %s: %s", event.code, event.message)
         friendly = _FRIENDLY_ERRORS.get(event.code, _FRIENDLY_ERRORS["HANDLER_ERROR"])
         self._flash_status(tr(friendly))
@@ -453,8 +447,7 @@ class MainWindow(QMainWindow):
     def _on_send_clicked(self) -> None:
         text = self._text_input.text()
         if not text.strip():
-            # Whitespace only: there is nothing to send, and leaving it in the
-            # box makes the press look ignored. Clearing is the answer.
+            # Whitespace only: leaving it in the box makes the press look ignored.
             self._text_input.clear()
             return
         # Only clear the input if the pipeline accepted the message; otherwise

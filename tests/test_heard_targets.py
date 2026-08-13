@@ -47,7 +47,10 @@ def test_their_own_language_is_never_a_translation_target():
 
     cfg = AppConfig()
     cfg.audio.hear_others_language = "Japanese"
-    stt = _Stt(language="Japanese")
+    # The CODE an engine reports, not the display name. With the name here the
+    # test was green for the wrong reason: _translate gives up at from_whisper
+    # before the source-equals-target rule it claims to guard is ever reached.
+    stt = _Stt(language="ja")
     mt = _Mt()
     stream, source, bus = _stream(cfg=cfg, stt=stt, mt=mt)
     try:

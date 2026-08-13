@@ -41,7 +41,13 @@ from vrcc.gui import (
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.model_labels import mt_license_note
 from vrcc.gui.style import PALETTE, resolve_theme
-from vrcc.gui.widgets import SegmentedControl, arrow_svg, icon_label, no_wheel
+from vrcc.gui.widgets import (
+    SegmentedControl,
+    arrow_svg,
+    icon_label,
+    no_wheel,
+    set_combo_text,
+)
 from vrcc.i18n import tr, tr_noop
 
 logger = logging.getLogger("vrcc.gui.firstrun")
@@ -339,11 +345,7 @@ class FirstRunWizard(QDialog):
 
     # -- language picker -----------------------------------------------------
 
-    @staticmethod
-    def _set_combo_text(combo: QComboBox, text: str) -> None:
-        idx = combo.findText(text)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
+    _set_combo_text = staticmethod(set_combo_text)
 
     def _on_target_changed(self, text: str) -> None:
         self._store.config.translate.targets = [text]

@@ -261,7 +261,7 @@ def test_auto_greying_tooltips_name_the_two_different_reasons(qapp, tmp_path):
         from vrcc.gui.model_labels import whisper_display_name
 
         assert _item_tip(combo, "parakeet-tdt-0.6b-v3") == model_prompts.tr(
-            model_prompts._AUTO_LOCKED_TIP,
+            model_prompts.AUTO_LOCKED_TIP,
             name=whisper_display_name("parakeet-tdt-0.6b-v3"),
         )
 

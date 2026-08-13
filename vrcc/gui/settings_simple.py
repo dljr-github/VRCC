@@ -1,15 +1,7 @@
 """The Simple settings page.
 
-Split from ``settings_pages`` for the file-length cap, and because this page
-alone needs grouping. It was one flat column of unrelated rows, which put two
-language pickers a few rows apart with nothing to say which was which: one
-chooses the language other people's speech is shown in, the other chooses the
-language VRCC's own interface is written in. In an app whose whole subject is
-languages, a row labelled only "Language" is the least helpful name available.
-
-So the rows are gathered under headings, and every control that depends on a
-tick above it sits inside that tick's section rather than at the same indent as
-everything else. Nothing here changes what any control does.
+Split from ``settings_pages`` for the file-length cap. Rows are grouped under
+headings, and a control that depends on a tick sits inside that tick's section.
 """
 
 from __future__ import annotations
@@ -164,9 +156,7 @@ def _build_my_captions(dlg: "SettingsDialog", form: QFormLayout) -> None:
 
 
 def _build_app(dlg: "SettingsDialog", form: QFormLayout) -> None:
-    # Unlike the other fields it can't retint live widgets (tr() runs at
-    # construction), so SettingsDialog rebuilds the main window on close when it
-    # changed. Data is the code; labels are each language's own name, so a user
+    # Data is the language code; labels are each language's own name, so a user
     # stuck in the wrong language can still find theirs.
     ui_lang = no_wheel(QComboBox())
     ui_lang.addItem(tr("Auto (match my system)"), "auto")

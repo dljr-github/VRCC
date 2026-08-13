@@ -492,3 +492,4 @@ def test_module_does_not_import_faster_whisper_eagerly():
 
     # faster_whisper is imported lazily inside load(), never at module top level.
     assert not hasattr(engine_mod, "faster_whisper")
+

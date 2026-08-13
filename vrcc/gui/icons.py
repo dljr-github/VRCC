@@ -71,10 +71,12 @@ def x_svg(color: str) -> str:
 
 
 # Human sentences for known AppError codes; the status bar shows these, the log
-# keeps the raw code+message (see MainWindow._on_app_error). Unknown codes
-# render raw.
+# keeps the raw code+message (see MainWindow._on_app_error). A code with no
+# entry here shows HANDLER_ERROR's sentence, so every code a publisher can emit
+# needs one or the user is told an internal error happened.
 FRIENDLY_ERRORS = {
     "PIPELINE_NOT_RUNNING": tr_noop("Engines are still loading. Try again in a moment."),
+    "PIPELINE_BUSY": tr_noop("Still catching up. Try again in a moment."),
     "MIC_OPEN_FAILED": tr_noop("Could not open the microphone. Check Settings > Audio."),
     "MUTE_SYNC_REQUIRES_LOCALHOST": tr_noop(
         "Mute sync is off: it only works when OSC points at this machine (127.0.0.1)."

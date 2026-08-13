@@ -27,8 +27,7 @@ _RESET_BTN = tr_noop("Recommended setup for this PC")
 _RESET_TIP = tr_noop("Pick the models and settings that suit this machine.")
 _RESET_TITLE = tr_noop("Use the recommended setup?")
 # "search settings" covers translate.beam_size, which reset_to_recommended
-# restores. It used to be reached through the performance mode and so was
-# covered by naming that; since the mode stopped writing it, a dialog that
+# restores and the performance mode does not write, so a dialog that
 # enumerates what Yes will change has to name it itself. The timing fields the
 # performance mode carries in are named for the same reason: a body that says
 # "device, thread and search settings" while also rewriting how long a pause

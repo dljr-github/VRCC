@@ -46,7 +46,7 @@ _LANGUAGE_LOCKED_TIP = tr_noop(
 # Tooltip on "auto" when the model detects the spoken language but cannot
 # report it (the onnx-asr backend) and translation is on: the ways out are a
 # concrete language or turning translation off, not only a model switch.
-_AUTO_LOCKED_TIP = tr_noop(
+AUTO_LOCKED_TIP = tr_noop(
     "{name} cannot tell the translator which language you speak. "
     "Pick your language, or turn translation off."
 )
@@ -114,6 +114,9 @@ def _machine(cfg) -> dict[str, object]:
     return {
         "factor": calibrate.stored_factor(cfg),
         "vram_mb": recommend.detected_vram_mb(cfg.stt.device_index),
+        "compute": recommend.resolved_compute_type(
+            cfg.stt.compute_type, cfg.stt.device_index
+        ),
     }
 
 
@@ -275,7 +278,7 @@ def grey_unsupported_languages(combo, model_id: str, *, translating: bool = Fals
             item.setEnabled(detects and reports)
             if detects and not reports:
                 item.setToolTip(
-                    tr(_AUTO_LOCKED_TIP, name=whisper_display_name(model_id))
+                    tr(AUTO_LOCKED_TIP, name=whisper_display_name(model_id))
                 )
             else:
                 item.setToolTip("" if detects else tip)

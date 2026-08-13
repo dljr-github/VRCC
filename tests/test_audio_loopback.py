@@ -241,3 +241,48 @@ def test_every_reported_code_has_a_sentence_a_user_can_act_on():
 
     for code in ("HEARD_NO_LIBRARY", "HEARD_DEVICE_FAILED"):
         assert code in FRIENDLY_ERRORS, code
+
+
+def test_a_recorder_that_fails_to_start_is_reported():
+    """soundcard's recorder() only builds the object: __enter__ is what starts
+    the WASAPI stream, so exclusive-mode contention and an endpoint that
+    refuses 16 kHz mono raise there. Outside the try that killed the capture
+    thread with nothing on screen."""
+    class _RefusingRecorder(_FakeRecorder):
+        def __enter__(self):
+            raise OSError("could not start the stream")
+
+    reported = []
+    src = LoopbackSource(
+        recorder_factory=lambda _device: _RefusingRecorder(),
+        on_failure=lambda code, detail: reported.append((code, detail)),
+    )
+    try:
+        src.start(lambda _frame: None)
+        deadline = time.monotonic() + 2.0
+        while not reported and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        src.stop()
+
+    assert reported and reported[0][0] == "HEARD_DEVICE_FAILED"
+    assert "could not start the stream" in reported[0][1]
+
+
+def test_giving_up_on_a_dead_device_is_reported():
+    """Every way this thread ends without the caller asking has to say so, or
+    the toggle sits lit beside a stream that is not running."""
+    reported = []
+    src = LoopbackSource(
+        recorder_factory=lambda _device: _FakeRecorder(raises=OSError("gone")),
+        on_failure=lambda code, detail: reported.append((code, detail)),
+    )
+    try:
+        src.start(lambda _frame: None)
+        deadline = time.monotonic() + 2.0
+        while not reported and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        src.stop()
+
+    assert reported and reported[0][0] == "HEARD_DEVICE_FAILED"

@@ -105,6 +105,9 @@ class ModelsDialog(QDialog):
             recommend.spoken_whisper_codes(cfg),
             calibrate.stored_factor(cfg),
             recommend.detected_vram_mb(cfg.stt.device_index),
+            recommend.resolved_compute_type(
+                cfg.stt.compute_type, cfg.stt.device_index
+            ),
         )
 
     def _compute_fit_notes(self) -> dict[str, str]:
@@ -219,9 +222,9 @@ class ModelsDialog(QDialog):
         root.addWidget(scroll, 1)
 
         footer = QHBoxLayout()
-        # Says why Close and the row buttons are off during a download. Without
-        # it the window refused to close and disabled everything with no
-        # explanation on screen, which reads as a hang.
+        # Says why Close and the row buttons are off during a download. A
+        # window that will not close, with everything disabled and no reason on
+        # screen, reads as a hang.
         self._status = QLabel()
         self._status.setWordWrap(True)
         self._status.setStyleSheet(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from vrcc.audio.segmenter import Segmenter
 from vrcc.audio.source import AudioSource, MicSource
@@ -24,6 +25,9 @@ from vrcc.stt import create_stt_engine
 from vrcc.stt.engine import SttEngine
 from vrcc.translate.engine import TranslateEngine
 from vrcc.translate.registry import MT_MODELS
+
+if TYPE_CHECKING:
+    from vrcc.core.heard import HeardStream
 
 logger = logging.getLogger("vrcc.core.engine_stack")
 
@@ -165,10 +169,8 @@ def _build_heard(cfg, bus, pipeline, stt_engine, mt_engine):
 def apply_hear_others(stack: EngineStack, cfg) -> None:
     """Start or stop the speaker-capture stream to match config.
 
-    Called from the main-window toggle and after Settings closes, so turning it
-    on never needs a relaunch. The source is rebuilt on every start because a
-    LoopbackSource is bound to one device for its lifetime, which is how a
-    speaker change takes effect.
+    The source is rebuilt on every start because a LoopbackSource is bound to
+    one device for its lifetime, so a speaker change only takes effect here.
     """
     heard = stack.heard
     if heard is None:
@@ -182,11 +184,9 @@ def apply_hear_others(stack: EngineStack, cfg) -> None:
         heard.stop()
 
     def on_failure(code: str, detail: str) -> None:
-        # From the capture thread. Switch the setting back off so the toggle
-        # cannot sit on "on" beside a stream that is not running, which is
-        # what made this feature look like it did nothing at all. The code
-        # carries a sentence of its own in FRIENDLY_ERRORS; detail is for the
-        # log, where the underlying exception text belongs.
+        # Runs on the capture thread. Switch the setting back off so the toggle
+        # cannot sit on "on" beside a stream that is not running. The code has a
+        # sentence in FRIENDLY_ERRORS; detail is for the log.
         cfg.audio.hear_others_enabled = False
         heard.bus.publish(AppError(code, detail))
 
@@ -194,3 +194,69 @@ def apply_hear_others(stack: EngineStack, cfg) -> None:
         LoopbackSource(cfg.audio.hear_others_device or None, on_failure=on_failure)
     )
     heard.start()
+
+
+def start_hear_others_guarded(stack: EngineStack, cfg, bus: EventBus) -> None:
+    """Start the speaker-capture stream at launch, if the user turned it on.
+
+    Never fatal: captioning what you hear is an extra, and losing it must not
+    take the microphone down with it. A failure inside the capture thread is
+    already handled there; this covers a start() that raises outright.
+    """
+    if stack.heard is None:
+        return
+    try:
+        apply_hear_others(stack, cfg)
+    except Exception as exc:
+        logger.warning(
+            "could not start captioning what you hear; the microphone is "
+            "unaffected", exc_info=True,
+        )
+        # The code the capture thread uses for the same outcome, rather than
+        # one of its own: it is the code that carries a sentence a user can
+        # act on, and the one the main window watches to put the toggle back
+        # down. Switch the setting off here too, since nothing else will.
+        cfg.audio.hear_others_enabled = False
+        bus.publish(AppError("HEARD_DEVICE_FAILED", f"start failed: {exc}"))
+
+
+class EngineOwners:
+    """Route an engine hot-swap into every consumer of the shared engines.
+
+    :class:`~vrcc.core.reloading._Reloader` installs into one object, and for
+    most of this app's life that object was the pipeline. The heard stream is
+    a second holder of the same STT and MT engines, so a swap that reached only
+    the pipeline left it calling an engine the reloader had already unloaded:
+    every decode raised, the handler swallowed it, and captioning what you hear
+    went silent for the rest of the session with its toggle still lit.
+
+    Exposes exactly the four methods the reloader uses, so it drops in where
+    the pipeline did.
+    """
+
+    def __init__(self, pipeline, heard) -> None:
+        self._pipeline = pipeline
+        self._heard = heard
+
+    def detach_stt(self):
+        # The consumer first. It reads its engine under the same lock
+        # detach_stt takes, so clearing it here makes the wait inside
+        # detach_stt the last decode that engine can ever see.
+        if self._heard is not None:
+            self._heard.set_stt(None)
+        return self._pipeline.detach_stt()
+
+    def set_stt(self, engine) -> None:
+        self._pipeline.set_stt(engine)
+        if self._heard is not None:
+            self._heard.set_stt(engine)
+
+    def detach_mt(self):
+        if self._heard is not None:
+            self._heard.set_mt(None)
+        return self._pipeline.detach_mt()
+
+    def set_mt(self, engine) -> None:
+        self._pipeline.set_mt(engine)
+        if self._heard is not None:
+            self._heard.set_mt(engine)

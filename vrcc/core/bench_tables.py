@@ -129,8 +129,8 @@ MT_VRAM_MB: dict[str, int] = {
 # The same models at int8_float16, which is what every card below compute
 # capability 12 actually runs. Measured 2026-08-10 on the reference machine.
 # The gap is large (nllb-600M 2188 at float16 against 1372 here), so sizing a
-# 6 GB card off the float16 row put the gpu_low preset over a budget it
-# comfortably fits.
+# 6 GB card off the float16 row put the gpu_low preset over a budget it fits
+# with room to spare.
 MT_VRAM_INT8_MB: dict[str, int] = {
     "m2m100-418M-int8": 996,
     "m2m100-1.2B-int8": 2011,
