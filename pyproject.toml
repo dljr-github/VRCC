@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vrcc"
-version = "2.0.1"
+version = "2.1.0"
 description = "Live-caption your voice into the VRChat chatbox, translated locally via CTranslate2"
 requires-python = ">=3.10"
 dependencies = [
@@ -19,6 +19,11 @@ dependencies = [
     "huggingface_hub>=0.23",
     "numpy>=1.24",
     "sounddevice>=0.4.6",
+    # WASAPI loopback, for captioning what the speakers play (other people in
+    # VRChat). PortAudio cannot do it: sounddevice exposes no loopback flag and
+    # an output device refuses to open as an input, so the microphone keeps its
+    # PortAudio path and only this one capture uses soundcard.
+    "soundcard>=0.4.2",
     "soxr>=0.3",
     "python-osc>=1.8",
     "zeroconf>=0.120",

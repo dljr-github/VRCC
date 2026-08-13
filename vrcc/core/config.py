@@ -36,6 +36,18 @@ class AudioConfig(BaseModel):
     # damage set in.
     denoise_enabled: bool = False
     denoise_strength: float = Field(default=0.25, ge=0.0, le=1.0)
+    # Caption what the SPEAKERS play, so other people in VRChat can be read as
+    # well as heard. Off by default: it is a second transcription stream, and
+    # what it captures is the whole output device rather than VRChat's voice
+    # channel, so it is opt-in rather than a surprise. Empty device means the
+    # current default speaker, resolved at capture time so a headset swap is
+    # followed.
+    hear_others_enabled: bool = False
+    hear_others_device: str = ""
+    # Empty means whatever the user speaks, which is right for almost everyone.
+    # Set explicitly by someone who wants to read others in a language they are
+    # not captioning themselves in.
+    hear_others_language: str = ""
 
 
 class VadConfig(BaseModel):
@@ -96,7 +108,12 @@ class TranslateConfig(BaseModel):
     # own default), -1 = unlimited. Applied at Translator build time.
     max_queued_batches: int = 0
     targets: list[str] = Field(default_factory=lambda: ["Japanese"])  # display names, max 3
-    beam_size: int = 1
+    # Greedy decoding rewrites content it cannot translate: NLLB turned
+    # "Okay 1,2,3,4,5,6,7" into Chinese "现在,我们要做什么?" at beam 1 and
+    # copied the digits through correctly from beam 2 up. Measured cost of the
+    # wider beam is about 40 ms per utterance on GPU, against a chatbox that
+    # accepts a send every 1.3 s.
+    beam_size: int = 4
     repetition_penalty: float = 1.1
     no_repeat_ngram_size: int = 3
     extra_translate_kwargs: dict = Field(default_factory=dict)
@@ -121,6 +138,15 @@ class MuteSyncConfig(BaseModel):
     mode: Literal["pause", "ignore", "invert"] = "pause"
 
 
+class HardwareConfig(BaseModel):
+    # How many times slower than the machine STT_BENCH was measured on this
+    # one is, from vrcc.core.calibrate. 0.0 means never probed. Stored with the
+    # fingerprint it was measured under so a portable install carried to
+    # another PC re-probes instead of trusting a number from somewhere else.
+    cpu_factor: float = 0.0
+    cpu_factor_fingerprint: str = ""
+
+
 class GuiConfig(BaseModel):
     profile: Literal["latency", "quality"] = "latency"
     # Field kept so stored configs and callers keep loading; only one palette
@@ -136,8 +162,23 @@ class GuiConfig(BaseModel):
     update_check_enabled: bool = True
 
 
+# Bumped when a stored config needs rewriting rather than just loading.
+# 2: the Speed/Quality mode stopped writing translate.beam_size (see
+# _migrate_profile_written_mt_beam).
+_SCHEMA_VERSION = 2
+
+# The only two MT beam widths the mode bundles ever wrote. A stored config
+# holding one of them most likely recorded the mode rather than a decision
+# about translation, but the two are indistinguishable: 1 was also the shipping
+# default and both are inside the Advanced page's range, so a user who picked
+# one by hand is migrated along with everyone else. That is the intended trade,
+# because greedy MT decoding fabricates content and the alternative is leaving
+# every pre-schema-2 install on it.
+_PROFILE_WRITTEN_MT_BEAMS = (1, 3)
+
+
 class AppConfig(BaseModel):
-    schema_version: int = 1
+    schema_version: int = _SCHEMA_VERSION
     audio: AudioConfig = Field(default_factory=AudioConfig)
     vad: VadConfig = Field(default_factory=VadConfig)
     stt: SttConfig = Field(default_factory=SttConfig)
@@ -145,39 +186,42 @@ class AppConfig(BaseModel):
     osc: OscConfig = Field(default_factory=OscConfig)
     mute_sync: MuteSyncConfig = Field(default_factory=MuteSyncConfig)
     gui: GuiConfig = Field(default_factory=GuiConfig)
+    hardware: HardwareConfig = Field(default_factory=HardwareConfig)
 
 
 # Latency/Quality kwargs bundles: section -> {field: value}. Single source of
-# truth for the Speed/Quality profile controls.
+# truth for the Speed/Quality profile controls. Captions only: the bundles come
+# from STT beam measurements (recommend.BEAM_BENCH), which say nothing about
+# translation, so translate.beam_size is not theirs to set.
+#
+# Every field here must DIFFER between the two bundles. min_utterance_ms and
+# max_utterance_s were identical in both, so flipping the mode overwrote a
+# hand-tuned value and gave nothing back for it. "Reset tuning to defaults"
+# still restores them (settings_reset._RESET_FIELDS), which is the control that
+# should own a field the mode has no opinion about.
 PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     "latency": {
         "vad": {
             "speculative_silence_ms": 250,
             "finalize_silence_ms": 600,
-            "min_utterance_ms": 500,
             "pre_roll_ms": 150,
-            "max_utterance_s": 28.0,
         },
-        "stt": {"beam_size": 1, "temperature": 0.0},
-        "translate": {"beam_size": 1},
+        "stt": {"beam_size": 1},
     },
     "quality": {
         "vad": {
             "speculative_silence_ms": 350,
             "finalize_silence_ms": 800,
-            "min_utterance_ms": 500,
             "pre_roll_ms": 200,
-            "max_utterance_s": 28.0,
         },
-        "stt": {"beam_size": 5, "temperature": 0.0},
-        "translate": {"beam_size": 3},
+        "stt": {"beam_size": 5},
     },
 }
 
 
 def apply_profile(config: AppConfig, profile: str) -> None:
     """Apply the ``profile`` bundle from :data:`PROFILES` to ``config`` in place
-    and record it in ``config.gui.profile``. beam_size fields take effect next
+    and record it in ``config.gui.profile``. The STT beam_size takes effect next
     utterance; VAD timings apply on next launch. Raises ``KeyError`` if unknown.
     """
     preset = PROFILES[profile]
@@ -186,6 +230,41 @@ def apply_profile(config: AppConfig, profile: str) -> None:
         for field_name, value in fields.items():
             setattr(section, field_name, value)
     config.gui.profile = profile  # type: ignore[assignment]
+
+
+def profile_overrides(config: AppConfig) -> list[tuple[str, str]]:
+    """``(section, field)`` for every bundle field whose current value came from
+    neither profile, so it can only have been set by hand.
+
+    What makes warning on these cheap enough to be worth doing: someone flipping
+    Speed and Quality to compare always matches one bundle or the other, so they
+    never appear here and never see a prompt. Only a genuinely hand-tuned value
+    triggers one, and that is exactly the value a flip would destroy.
+    """
+    return [
+        (section_name, field_name)
+        for section_name, fields in PROFILES["latency"].items()
+        for field_name, latency_value in fields.items()
+        if getattr(getattr(config, section_name), field_name)
+        not in (latency_value, PROFILES["quality"][section_name][field_name])
+    ]
+
+
+def _migrate_profile_written_mt_beam(config: AppConfig, stored_version: int) -> None:
+    """Adopt the current MT beam default for a config the mode control wrote.
+
+    Until schema 2 the Speed/Quality bundles set ``translate.beam_size`` to 1 or
+    3. Because the stored file carries every field, leaving those values alone
+    would keep existing users on the greedy decoding this default moved away
+    from, and the fix would reach new installs only. Any width outside
+    :data:`_PROFILE_WRITTEN_MT_BEAMS` survives untouched; the two inside it are
+    migrated even when the user chose them, for the reason recorded there.
+    Setting either again from the Advanced page sticks, since this runs once.
+    """
+    if stored_version >= 2:
+        return
+    if config.translate.beam_size in _PROFILE_WRITTEN_MT_BEAMS:
+        config.translate.beam_size = TranslateConfig().beam_size
 
 
 # Section name -> model class, in the same order as AppConfig's fields.
@@ -197,6 +276,7 @@ _SECTION_MODELS: dict[str, type[BaseModel]] = {
     "osc": OscConfig,
     "mute_sync": MuteSyncConfig,
     "gui": GuiConfig,
+    "hardware": HardwareConfig,
 }
 
 
@@ -329,7 +409,17 @@ class ConfigStore:
                 continue
             data[name] = self._load_section(name, model_cls, section_raw)
 
-        return AppConfig(**data)
+        config = AppConfig(**data)
+        stored_version = data.get("schema_version", 1)
+        _migrate_profile_written_mt_beam(config, stored_version)
+        # Never write a version backwards: stamping our own number on a file
+        # from a newer build would make that build re-run its migration over
+        # data it has already migrated. Only the NUMBER survives the round
+        # trip, not the data. _load_section filters to model_fields and
+        # _build_config skips unknown sections, so anything the newer build
+        # added is already gone by the time this line runs.
+        config.schema_version = max(stored_version, _SCHEMA_VERSION)
+        return config
 
     def _load_section(
         self, name: str, model_cls: type[BaseModel], section_raw: dict[str, Any]

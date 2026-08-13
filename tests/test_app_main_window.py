@@ -86,16 +86,17 @@ def test_main_window_profile_toggle_applies_kwargs_bundle(qapp, tmp_path):
         cfg = store.config
         assert cfg.stt.beam_size == 1  # latency default
 
+        mt_beam = cfg.translate.beam_size
+
         window._on_profile_toggled(True)  # Quality mode ON
         assert cfg.stt.beam_size == 5
-        assert cfg.translate.beam_size == 3
         assert cfg.vad.speculative_silence_ms == 350
         assert cfg.vad.finalize_silence_ms == 800
         assert cfg.gui.profile == "quality"
 
         window._on_profile_toggled(False)  # back to Latency
         assert cfg.stt.beam_size == 1
-        assert cfg.translate.beam_size == 1
+        assert cfg.translate.beam_size == mt_beam  # the mode never touches MT
         assert cfg.vad.speculative_silence_ms == 250
         assert cfg.vad.finalize_silence_ms == 600
         assert cfg.gui.profile == "latency"
@@ -360,7 +361,8 @@ def test_reload_from_config_resyncs_toolbar(qapp, tmp_path):
         # Simulate the Settings dialog editing a shared field, then closing.
         store.config.stt.source_language = "auto"
         window.reload_from_config()
-        assert window._source_combo.currentText() == "auto"
+        # The label is translated; the stored value is what must round-trip.
+        assert window._source_combo.currentData() == "auto"
     finally:
         window.close()
         window.deleteLater()

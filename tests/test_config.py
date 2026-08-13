@@ -28,7 +28,7 @@ def _wait_until(predicate, timeout=2.0, interval=0.01):
 
 def test_app_config_defaults_match_spec():
     cfg = AppConfig()
-    assert cfg.schema_version == 1
+    assert cfg.schema_version == 2
     assert cfg.audio == AudioConfig()
     assert cfg.vad == VadConfig()
     assert cfg.stt == SttConfig()
@@ -411,7 +411,6 @@ def test_apply_profile_quality_applies_bundle_and_records_choice():
 
     assert cfg.stt.beam_size == 5
     assert cfg.stt.temperature == 0.0
-    assert cfg.translate.beam_size == 3
     assert cfg.vad.speculative_silence_ms == 350
     assert cfg.vad.finalize_silence_ms == 800
     assert cfg.vad.pre_roll_ms == 200
@@ -426,11 +425,25 @@ def test_apply_profile_latency_restores_defaults():
     apply_profile(cfg, "latency")
 
     assert cfg.stt.beam_size == 1
-    assert cfg.translate.beam_size == 1
     assert cfg.vad.speculative_silence_ms == 250
     assert cfg.vad.finalize_silence_ms == 600
     assert cfg.vad.pre_roll_ms == 150
     assert cfg.gui.profile == "latency"
+
+
+def test_apply_profile_leaves_translate_beam_alone():
+    # The mode control is derived from STT beam measurements, so it has no
+    # standing to set the MT beam: greedy MT mistranslates digit runs.
+    from vrcc.core.config import apply_profile
+
+    # A width neither bundle ever wrote, and not the default either: comparing
+    # the default against the default would still pass if the bundles started
+    # setting it again.
+    cfg = AppConfig()
+    cfg.translate.beam_size = 7
+    for profile in ("quality", "latency"):
+        apply_profile(cfg, profile)
+        assert cfg.translate.beam_size == 7
 
 
 def test_apply_profile_unknown_profile_raises():

@@ -143,13 +143,21 @@ class OnnxAsrEngine:
 
     # -- transcription ---------------------------------------------------------
 
-    def transcribe(self, samples: np.ndarray) -> SttResult | None:
+    def transcribe(
+        self, samples: np.ndarray, detect_language: bool = False
+    ) -> SttResult | None:
         """Transcribe ``samples`` (mono float32, 16 kHz) into an :class:`SttResult`.
 
         Returns ``None`` for empty text. The transducers auto-detect within
         their set but don't report it, so ``language`` echoes the configured
         source ("en" when set to auto, the MT source fallback). Raises
         ``RuntimeError`` if called before :meth:`load`.
+
+        ``detect_language`` is accepted for parity with :class:`SttEngine`, so
+        one caller can serve either engine, and reports "en" rather than the
+        user's configured language: these decoders cannot report what they
+        heard, and echoing a language nobody has evidence for would have the
+        translator work from a source it invented.
         """
         if self._model is None:
             raise RuntimeError(
@@ -166,7 +174,10 @@ class OnnxAsrEngine:
             return None
 
         source = self._cfg.source_language
-        language = "en" if source == "auto" else get(source).whisper
+        if detect_language or source == "auto":
+            language = "en"
+        else:
+            language = get(source).whisper
         # No confidence/no-speech signals from these decoders: neutral values
         # that always pass SttConfig's gates (VAD is the effective gate).
         return SttResult(

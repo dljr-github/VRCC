@@ -16,6 +16,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from vrcc.core.config import ConfigStore, default_paths
+from vrcc.gui.widgets import set_combo_value
 from vrcc.gui import settings as settings_mod
 from vrcc.gui.settings import SettingsDialog
 
@@ -50,7 +51,10 @@ def _item_enabled(combo, model_id):
 
 
 def _lang_enabled(combo, text):
-    idx = combo.findText(text)
+    # By stored value: the auto entry renders translated, so findText misses it.
+    idx = combo.findData(text)
+    if idx < 0:
+        idx = combo.findText(text)
     assert idx >= 0, text
     return combo.model().item(idx).isEnabled()
 
@@ -80,7 +84,7 @@ def test_language_limited_models_grey_with_source_language(qapp, tmp_path):
         # auto without translation: models that detect the language within
         # their set stay enabled (Parakeet); models that can't detect at all
         # grey out (distil would force English).
-        dlg._source_combo.setCurrentText("auto")
+        set_combo_value(dlg._source_combo, "auto")
         assert _item_enabled(combo, "parakeet-tdt-0.6b-v3")
         assert not _item_enabled(combo, "distil-small.en")
     finally:
@@ -96,7 +100,7 @@ def test_auto_source_greys_onnx_models_while_translating(qapp, tmp_path):
     dlg = SettingsDialog(store)
     try:
         combo = dlg._model_combo
-        dlg._source_combo.setCurrentText("auto")
+        set_combo_value(dlg._source_combo, "auto")
         assert not _item_enabled(combo, "parakeet-tdt-0.6b-v3")
         assert not _item_enabled(combo, "distil-small.en")
         assert _item_enabled(combo, "small")  # detects AND reports
@@ -140,7 +144,7 @@ def test_source_languages_grey_for_european_model(qapp, tmp_path):
         assert not _lang_enabled(src, "Japanese")  # outside it
         assert _lang_enabled(src, "auto")          # detects, and no translator to mislead
         # The disabled entry carries an explanatory tooltip naming the model.
-        item = src.model().item(src.findText("Japanese"))
+        item = src.model().item(src.findData("Japanese"))
         assert item.toolTip().strip()
     finally:
         dlg.close()
@@ -156,7 +160,7 @@ def test_auto_entry_greys_for_onnx_model_while_translating(qapp, tmp_path):
         assert not _lang_enabled(src, "auto")
         # The tooltip explains the reporting gap and both ways out; it is not
         # the generic cannot-transcribe tip.
-        tip = src.model().item(src.findText("auto")).toolTip()
+        tip = src.model().item(src.findData("auto")).toolTip()
         assert "cannot tell the translator" in tip
         assert "turn translation off" in tip
         assert _lang_enabled(src, "French")  # explicit picks stay open
@@ -210,6 +214,59 @@ def test_unknown_model_id_restricts_no_language(qapp, tmp_path):
         src = dlg._source_combo
         for text in ("auto", "English", "Japanese", "French"):
             assert _lang_enabled(src, text), text
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def _item_tip(combo, model_id):
+    idx = combo.findData(model_id)
+    assert idx >= 0
+    return combo.model().item(idx).toolTip()
+
+
+def test_greyed_model_entries_say_why_and_how_out(qapp, tmp_path):
+    # The mirror of the spoken-language greying, which explains every entry it
+    # disables. A greyed model with no tooltip leaves the user guessing.
+    store = _store(tmp_path)
+    store.config.translate.enabled = False
+    dlg = SettingsDialog(store)
+    try:
+        combo = dlg._model_combo
+        dlg._source_combo.setCurrentText("Japanese")
+        tip = _item_tip(combo, "parakeet-tdt-0.6b-v3")
+        assert "Parakeet" in tip
+        assert "Japanese" in tip
+        assert "spoken language" in tip  # names the way out
+        assert _item_tip(combo, "small") == ""  # an offered model explains nothing
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_auto_greying_tooltips_name_the_two_different_reasons(qapp, tmp_path):
+    store = _store(tmp_path)  # translation defaults on
+    store.config.stt.source_language = "auto"
+    dlg = SettingsDialog(store)
+    try:
+        combo = dlg._model_combo
+        set_combo_value(dlg._source_combo, "auto")
+        # distil cannot detect the language at all...
+        assert "cannot detect" in _item_tip(combo, "distil-small.en")
+        # ...while Parakeet detects it but cannot tell the translator which.
+        # That tooltip is borrowed verbatim from the spoken-language combo:
+        # the ways out (a concrete language, translation off) are the same
+        # whichever side the user is looking at.
+        from vrcc.gui import model_prompts
+        from vrcc.gui.model_labels import whisper_display_name
+
+        assert _item_tip(combo, "parakeet-tdt-0.6b-v3") == model_prompts.tr(
+            model_prompts.AUTO_LOCKED_TIP,
+            name=whisper_display_name("parakeet-tdt-0.6b-v3"),
+        )
+
+        dlg._translate_check.setChecked(False)
+        assert _item_tip(combo, "parakeet-tdt-0.6b-v3") == ""  # offered again
     finally:
         dlg.close()
         dlg.deleteLater()

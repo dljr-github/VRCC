@@ -368,6 +368,43 @@ def test_mt_translation_failure_falls_back_to_original_text():
     assert env.chatbox.submits[0] == ("hello world", 1)
 
 
+def test_mt_failure_with_sending_off_still_resolves_the_caption_row():
+    # With "send to VRChat" off the fallback submit is a no-op, so no
+    # ChatboxSent follows it. The caption row is on "translating…" and the
+    # empty PhraseTranslated is the only event left that can move it off.
+    config = AppConfig()
+    config.osc.send_to_vrchat = False
+    env = make_pipeline(config=config, mt=FakeMt(raises=RuntimeError("mt boom")))
+    translated = collect(env.bus, PhraseTranslated)
+    with running(env.pipeline):
+        env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
+        assert _wait_until(lambda: len(translated) == 1)
+    assert env.chatbox.submits == []  # nothing was sent, as configured
+    assert translated[0].utterance_id == 1
+    assert translated[0].original == "hello world"
+    assert translated[0].translations == ()
+
+
+def test_unmatched_detected_language_resolves_the_caption_row():
+    # "auto" detecting a language the registry has no entry for skips
+    # translation entirely; with sending off that path published nothing the
+    # row could resolve on either.
+    config = AppConfig()
+    config.osc.send_to_vrchat = False
+    config.stt.source_language = "auto"
+    env = make_pipeline(
+        config=config, stt=FakeStt(result=make_result(language="qqq"))
+    )
+    translated = collect(env.bus, PhraseTranslated)
+    errors = collect(env.bus, AppError)
+    with running(env.pipeline):
+        env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
+        assert _wait_until(lambda: len(translated) == 1)
+    assert any(e.code == "SOURCE_LANG_UNSUPPORTED" for e in errors)
+    assert translated[0].translations == ()
+    assert env.mt.calls == []  # the translator was never asked
+
+
 def test_chatbox_failure_with_translation_disabled_publishes_chatbox_error():
     # chatbox.submit raising in the STT worker's direct-submit branch must
     # be classified CHATBOX_SEND_FAILED (not STT_JOB_FAILED) and must still

@@ -18,37 +18,24 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from vrcc.core import recommend
+from vrcc.core import calibrate, recommend
 from vrcc.gui.bridge import BusBridge
 from vrcc.i18n import tr
-from vrcc.gui import model_fit
+from vrcc.gui import firstrun_languages, model_fit
+from vrcc.gui.model_row import ModelRow
 from vrcc.gui.model_labels import fmt_size, mt_display_name, whisper_display_name, model_blurb
 from vrcc.gui.style import PALETTE, resolve_theme
-from vrcc.gui.widgets import Card, IconButton, icon_label, mic_svg
+from vrcc.gui.widgets import Card, icon_label, mic_svg
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
 logger = logging.getLogger("vrcc.gui.models_dialog")
-
-
-def _trash_svg(color: str) -> str:
-    return (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" '
-        f'viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" '
-        'stroke-linecap="round" stroke-linejoin="round">'
-        '<polyline points="3 6 5 6 21 6"/>'
-        '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'
-        '<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
-        '<line x1="10" y1="11" x2="10" y2="17"/>'
-        '<line x1="14" y1="11" x2="14" y2="17"/></svg>'
-    )
 
 
 def _globe_svg(color: str) -> str:
@@ -59,131 +46,6 @@ def _globe_svg(color: str) -> str:
         '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>'
         '<path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20"/></svg>'
     )
-
-
-class _ModelRow(QWidget):
-    """One model's row: name (+ recommended badge), blurb, and a single
-    contextual action area with its own progress bar. The dialog owns the
-    state; :meth:`render` just reflects it. ``kind`` is ``"whisper"`` or
-    ``"mt"``; ``model_id`` matches ``DownloadProgress`` events.
-    """
-
-    def __init__(
-        self, kind: str, model_id: str, spec, name: str, blurb: str, size_text: str,
-        colors: dict, on_download, on_delete, parent=None, scale: float = 1.0,
-    ) -> None:
-        super().__init__(parent)
-        self.kind = kind
-        self.model_id = model_id
-        self.spec = spec
-        self.display_name = name
-        self._on_download = on_download
-        self._on_delete = on_delete
-
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 6, 0, 6)
-        row.setSpacing(10)
-
-        # -- left: name (+ recommended badge) and the muted descriptor --------
-        left = QVBoxLayout()
-        left.setSpacing(2)
-        name_row = QHBoxLayout()
-        name_row.setSpacing(6)
-        name_lbl = QLabel(name)
-        name_lbl.setStyleSheet("font-weight: 600; background: transparent;")
-        name_row.addWidget(name_lbl)
-        self._badge = QLabel(tr("Recommended for your PC"))
-        accent = colors["accent"]
-        self._badge.setStyleSheet(
-            f"color: {accent}; border: 1px solid {accent}; border-radius: 8px; "
-            f"padding: 0 6px; font-size: {round(10 * scale)}px; background: transparent;")
-        self._badge.setVisible(False)
-        name_row.addWidget(self._badge)
-        name_row.addStretch(1)
-        left.addLayout(name_row)
-        if blurb:
-            blurb_lbl = QLabel(blurb)
-            blurb_lbl.setWordWrap(True)
-            blurb_lbl.setStyleSheet(
-                f"color: {colors['muted']}; font-size: {round(12 * scale)}px; "
-                "background: transparent;"
-            )
-            left.addWidget(blurb_lbl)
-        row.addLayout(left, 1)
-
-        # -- right: exactly one of these shows at a time ----------------------
-        self._progress = QProgressBar()
-        self._progress.setFixedWidth(170)
-        self._progress.setTextVisible(True)
-        self._progress.setVisible(False)
-        row.addWidget(self._progress)
-
-        self._download_btn = QPushButton(tr("Download · {size}", size=size_text))
-        self._download_btn.setToolTip(tr("Download this model"))
-        self._download_btn.clicked.connect(lambda: self._on_download(self))
-        self._download_btn.setVisible(False)
-        row.addWidget(self._download_btn)
-
-        self._inuse_pill = QLabel(tr("In use"))
-        self._inuse_pill.setStyleSheet(f"color: {colors['good']}; font-weight: 600; background: transparent;")
-        self._inuse_pill.setVisible(False)
-        row.addWidget(self._inuse_pill)
-
-        # Shown for a downloaded, non-active model: read-only, no action.
-        self._downloaded_pill = QLabel(tr("Downloaded"))
-        self._downloaded_pill.setStyleSheet(f"color: {colors['muted']}; background: transparent;")
-        self._downloaded_pill.setVisible(False)
-        row.addWidget(self._downloaded_pill)
-
-        self._trash_btn = IconButton(
-            _trash_svg(colors["muted"]), tr("Delete download"), fallback_text="Del"
-        )
-        self._trash_btn.setFixedSize(30, 30)
-        self._trash_btn.clicked.connect(lambda: self._on_delete(self))
-        self._trash_btn.setVisible(False)
-        row.addWidget(self._trash_btn)
-
-    # -- rendering -----------------------------------------------------------
-
-    def render(
-        self, *, downloaded: bool, active: bool, downloading: bool, recommended: bool = False
-    ) -> None:
-        """Show exactly one contextual action. ``recommended`` (the tier
-        preset) drives the badge; ``active`` drives the "In use" pill -- the
-        two are independent (a model can be active without being the preset)."""
-        self._badge.setVisible(recommended)
-        self._progress.setVisible(downloading)
-        self._download_btn.setVisible(not downloading and not downloaded)
-        self._inuse_pill.setVisible(not downloading and downloaded and active)
-        self._downloaded_pill.setVisible(not downloading and downloaded and not active)
-        self._trash_btn.setVisible(not downloading and downloaded)
-
-    def set_actions_enabled(self, enabled: bool) -> None:
-        """Enable/disable the interactive buttons (the download-in-flight guard)."""
-        self._download_btn.setEnabled(enabled)
-        self._trash_btn.setEnabled(enabled)
-
-    # -- progress ------------------------------------------------------------
-
-    def begin_progress(self, *, indeterminate: bool) -> None:
-        if indeterminate:
-            # faster-whisper's download exposes no byte-progress hook, so a
-            # %-bar would sit frozen at 0%. Use a busy/indeterminate bar.
-            self._progress.setRange(0, 0)
-            self._progress.setFormat(tr("Downloading…"))
-        else:
-            self._progress.setRange(0, 100)
-            self._progress.setValue(0)
-            self._progress.setFormat("%p%")
-
-    def set_progress_value(self, pct: int) -> None:
-        if self._progress.maximum() > 0:  # ignore for the busy/indeterminate bar
-            self._progress.setValue(pct)
-
-    def reset_progress(self) -> None:
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._progress.setFormat("%p%")
 
 
 class ModelsDialog(QDialog):
@@ -198,8 +60,11 @@ class ModelsDialog(QDialog):
         super().__init__(parent)
         self._dm = download_manager
         self._bridge = bridge
-        # The config store is read-only here (the currently-active model, for the
-        # "In use" pill); selecting which model to use lives in Settings.
+        # Read for the active model behind the "In use" pill; selecting which
+        # model to use still lives in Settings. Written by the language picker
+        # below, which sets stt.spoken_languages and through them
+        # stt.source_language, so a caller that opens this window has to re-sync
+        # whatever else shows those two fields.
         self._store = config_store
         self._downloading_id: str | None = None
         # Resolved once at construction (theme + text size are restart-applied).
@@ -212,23 +77,16 @@ class ModelsDialog(QDialog):
         # preset, not the active model. Also reranked by spoken_languages, so
         # this agrees with the wizard's recommendation for the same tier and
         # languages instead of only the tier.
-        tier = (
-            recommend.tier_for_config(config_store.config)
-            if config_store is not None
-            else recommend.detect_tier()
-        )
-        codes = (
-            recommend.spoken_whisper_codes(config_store.config)
-            if config_store is not None
-            else ()
-        )
-        self._recommended_ids = recommend.preset_for_tier(tier, codes)
+        # The machine factor is read, never probed, so opening this dialog
+        # stays free; an unprobed config ranks at reference speed.
+        self._recommended_ids = self._recommendation()
+        self._fit_notes = self._compute_fit_notes()
 
         self.setWindowTitle(tr("Models"))
         self.resize(660, 620)
 
-        self._rows: list[_ModelRow] = []
-        self._row_by_id: dict[str, _ModelRow] = {}
+        self._rows: list[ModelRow] = []
+        self._row_by_id: dict[str, ModelRow] = {}
         self._build_ui()
         self._render_all()
 
@@ -236,6 +94,51 @@ class ModelsDialog(QDialog):
         self._op_finished.connect(self._on_op_finished)
 
     # -- construction --------------------------------------------------------
+
+    def _recommendation(self) -> tuple[str, str]:
+        """The preset this machine and these languages should use."""
+        cfg = self._store.config if self._store is not None else None
+        if cfg is None:
+            return recommend.preset_for_tier(recommend.detect_tier())
+        return recommend.preset_for_tier(
+            recommend.tier_for_config(cfg),
+            recommend.spoken_whisper_codes(cfg),
+            calibrate.stored_factor(cfg),
+            recommend.detected_vram_mb(cfg.stt.device_index),
+            recommend.resolved_compute_type(
+                cfg.stt.compute_type, cfg.stt.device_index
+            ),
+        )
+
+    def _compute_fit_notes(self) -> dict[str, str]:
+        """Graphics-card warnings, resolved once: neither the card nor the
+        configured device can change while this window is open, and a
+        per-render probe would cost an NVML lookup per row on every tick."""
+        if self._store is None:
+            return {}
+        return model_fit.fit_notes(self._store.config)
+
+    def _on_spoken_changed(self) -> None:
+        """Re-badge for the languages just ticked, and persist them.
+
+        Order matches the wizard's: the recommendation depends on the
+        languages, and the derived source language depends on the model.
+
+        The model handed to resolve_source_language is the ACTIVE one, not the
+        recommended one. This window only badges a recommendation; it never
+        installs it, so judging what the source language may become against a
+        model that is not running would set a source the running model cannot
+        serve. The wizard passes its recommendation because it writes it to
+        cfg.stt.model in the same breath.
+        """
+        cfg = self._store.config
+        cfg.stt.spoken_languages = firstrun_languages.checked_in(self._spoken_list)
+        self._recommended_ids = self._recommendation()
+        firstrun_languages.resolve_source_language(
+            cfg, cfg.stt.spoken_languages, cfg.stt.model, cfg.translate.enabled,
+        )
+        self._render_all()
+        self._store.save_soon()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -267,6 +170,37 @@ class ModelsDialog(QDialog):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(12)
 
+        # Which voice model suits a user depends on what they speak, and the
+        # wizard is the only place that ever asked. Someone who skipped it, or
+        # who starts speaking another language, would otherwise be stuck on the
+        # language-blind pick with nowhere to correct it.
+        if self._store is not None:
+            heading = QLabel(tr("Pick your languages"))
+            heading.setStyleSheet(
+                f"font-weight: 700; font-size: {round(14 * self._scale)}px; "
+                f"color: {self._p['text']}; background: transparent;"
+            )
+            col.addWidget(heading)
+            spoken_label = QLabel(tr("You speak (tick every language you use)"))
+            spoken_label.setStyleSheet(
+                f"color: {self._p['muted']}; background: transparent;"
+            )
+            col.addWidget(spoken_label)
+            self._spoken_list = firstrun_languages.build_picker(
+                self._scale, self._store.config, self._on_spoken_changed
+            )
+            col.addWidget(self._spoken_list)
+            # Unticking everything is allowed, and nothing on screen said what
+            # VRCC does then, so an empty list read as "no language at all".
+            # Text set in _render_spoken_hint from the source that ends up in
+            # force, not from a prediction of it.
+            self._spoken_hint = QLabel()
+            self._spoken_hint.setWordWrap(True)
+            self._spoken_hint.setStyleSheet(
+                f"color: {self._p['warn']}; background: transparent;"
+            )
+            col.addWidget(self._spoken_hint)
+
         col.addWidget(
             self._build_card(
                 mic_svg(self._p["accent"]),
@@ -288,13 +222,22 @@ class ModelsDialog(QDialog):
         root.addWidget(scroll, 1)
 
         footer = QHBoxLayout()
-        footer.addStretch(1)
-        close_btn = QPushButton(tr("Close"))
-        close_btn.clicked.connect(self.reject)
-        footer.addWidget(close_btn)
+        # Says why Close and the row buttons are off during a download. A
+        # window that will not close, with everything disabled and no reason on
+        # screen, reads as a hang.
+        self._status = QLabel()
+        self._status.setWordWrap(True)
+        self._status.setStyleSheet(
+            f"color: {self._p['muted']}; background: transparent;"
+        )
+        self._status.setVisible(False)
+        footer.addWidget(self._status, 1)
+        self._close_btn = QPushButton(tr("Close"))
+        self._close_btn.clicked.connect(self.reject)
+        footer.addWidget(self._close_btn)
         root.addLayout(footer)
 
-    def _build_card(self, icon_svg: str, header: str, role: str, rows: list[_ModelRow]) -> Card:
+    def _build_card(self, icon_svg: str, header: str, role: str, rows: list[ModelRow]) -> Card:
         card = Card(colors=self._p)
         head_row = QHBoxLayout()
         head_row.setSpacing(6)
@@ -315,7 +258,7 @@ class ModelsDialog(QDialog):
             card.body.addWidget(row)
         return card
 
-    def _voice_rows(self) -> list[_ModelRow]:
+    def _voice_rows(self) -> list[ModelRow]:
         rows = []
         for spec in WHISPER_MODELS.values():
             row = self._make_row(
@@ -325,7 +268,7 @@ class ModelsDialog(QDialog):
             rows.append(row)
         return rows
 
-    def _translation_rows(self) -> list[_ModelRow]:
+    def _translation_rows(self) -> list[ModelRow]:
         rows = []
         for spec in MT_MODELS.values():
             row = self._make_row(
@@ -335,8 +278,8 @@ class ModelsDialog(QDialog):
             rows.append(row)
         return rows
 
-    def _make_row(self, kind, model_id, spec, name, blurb, size_text) -> _ModelRow:
-        row = _ModelRow(
+    def _make_row(self, kind, model_id, spec, name, blurb, size_text) -> ModelRow:
+        row = ModelRow(
             kind, model_id, spec, name, blurb, size_text, self._p,
             self._download, self._delete, scale=self._scale,
         )
@@ -346,12 +289,12 @@ class ModelsDialog(QDialog):
 
     # -- state ---------------------------------------------------------------
 
-    def _is_downloaded(self, row: _ModelRow) -> bool:
+    def _is_downloaded(self, row: ModelRow) -> bool:
         if row.kind == "whisper":
             return self._dm.is_whisper_downloaded(row.model_id)
         return self._dm.is_mt_downloaded(row.spec)
 
-    def _is_active(self, row: _ModelRow) -> bool:
+    def _is_active(self, row: ModelRow) -> bool:
         """Whether config currently points the app at this model."""
         if self._store is None:
             return False
@@ -360,9 +303,18 @@ class ModelsDialog(QDialog):
             return row.model_id == cfg.stt.model
         return row.model_id == cfg.translate.model
 
-    def _is_recommended(self, row: _ModelRow) -> bool:
+    def _is_recommended(self, row: ModelRow) -> bool:
         whisper_id, mt_id = self._recommended_ids
         return row.model_id == (whisper_id if row.kind == "whisper" else mt_id)
+
+    def _row_note(self, row: ModelRow) -> str:
+        """What this row warns about before the user spends a download."""
+        if self._store is None:
+            return ""
+        return model_fit.row_note(
+            self._store.config, row.kind, row.model_id, row.display_name,
+            self._fit_notes,
+        )
 
     def _render_all(self) -> None:
         """Re-render every row and apply the download-in-flight action guard."""
@@ -374,13 +326,54 @@ class ModelsDialog(QDialog):
                 downloading=row.model_id == downloading,
                 recommended=self._is_recommended(row),
             )
+            row.set_note(self._row_note(row))
             # While any download runs, every row's actions are disabled; the
             # running row shows only its progress bar.
             row.set_actions_enabled(downloading is None)
+        if self._store is not None:
+            self._render_spoken_hint()
+        self._render_status(downloading)
+
+    def _render_spoken_hint(self) -> None:
+        """With nothing ticked, name the language VRCC is left listening for.
+
+        Read off the config after resolve_source_language has had its say
+        rather than restating that function's rule, so this cannot claim a
+        source the engines are not running.
+        """
+        empty = not firstrun_languages.checked_in(self._spoken_list)
+        if empty:
+            source = self._store.config.stt.source_language
+            self._spoken_hint.setText(
+                tr("No language ticked, so VRCC tries to detect what it hears.")
+                if source == "auto"
+                else tr(
+                    "No language ticked, so VRCC keeps listening for {language}.",
+                    language=source,
+                )
+            )
+        self._spoken_hint.setVisible(empty)
+
+    def _render_status(self, downloading: str | None) -> None:
+        """Explain the download lock, or clear it."""
+        row = self._row_by_id.get(downloading) if downloading else None
+        if row is None:
+            self._status.setVisible(False)
+        else:
+            self._status.setText(
+                tr(
+                    "Downloading {name}. A big model can take several minutes. "
+                    "A download cannot be stopped once it starts, so Close and "
+                    "the other buttons wait until this one finishes.",
+                    name=row.display_name,
+                )
+            )
+            self._status.setVisible(True)
+        self._close_btn.setEnabled(row is None)
 
     # -- download ------------------------------------------------------------
 
-    def _download(self, row: _ModelRow) -> None:
+    def _download(self, row: ModelRow) -> None:
         if self._downloading_id is not None or self._is_downloaded(row):
             return
         msg = model_fit.disk_warning(getattr(self._dm, "models_dir", None), row.spec.size_mb)
@@ -394,7 +387,7 @@ class ModelsDialog(QDialog):
                 return
         self._start_download(row)
 
-    def _start_download(self, row: _ModelRow) -> None:
+    def _start_download(self, row: ModelRow) -> None:
         self._downloading_id = row.model_id
         # Only faster-whisper downloads lack byte progress; MT and onnx-asr
         # snapshots publish real percentages.
@@ -448,7 +441,7 @@ class ModelsDialog(QDialog):
 
     # -- delete --------------------------------------------------------------
 
-    def _delete(self, row: _ModelRow) -> None:
+    def _delete(self, row: ModelRow) -> None:
         if self._downloading_id is not None or not self._is_downloaded(row):
             return
         warning = ""
@@ -480,6 +473,9 @@ class ModelsDialog(QDialog):
     # Refuses to close while `_downloading_id` is set (Close/Esc/titlebar X all
     # route through reject()/closeEvent), else the daemon download thread could
     # outlive the dialog and its completion emit would hit a deleted QObject.
+    # Neither downloader (snapshot_download, faster-whisper's download_model)
+    # takes a cancel token, so there is nothing to offer but the wait; the
+    # footer status says so while Esc and the X keep being swallowed here.
 
     def reject(self) -> None:  # noqa: N802 -- Qt override
         if self._downloading_id is not None:

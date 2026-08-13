@@ -56,9 +56,13 @@ def _capture_question(monkeypatch, answer):
     return asked
 
 
-def _lang_enabled(combo, text):
-    idx = combo.findText(text)
-    assert idx >= 0, text
+def _lang_enabled(combo, value):
+    """Look the entry up by its STORED value, not its label: the auto entry
+    renders translated, so findText would miss it."""
+    idx = combo.findData(value)
+    if idx < 0:
+        idx = combo.findText(value)
+    assert idx >= 0, value
     return combo.model().item(idx).isEnabled()
 
 

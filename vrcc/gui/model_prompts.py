@@ -12,7 +12,7 @@ offer functions build a dialog and the greying edits a combo.
 
 from __future__ import annotations
 
-from vrcc.core import recommend
+from vrcc.core import calibrate, recommend
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.model_labels import whisper_display_name
 from vrcc.i18n import tr, tr_noop
@@ -20,11 +20,14 @@ from vrcc.stt.registry import WHISPER_MODELS
 
 _AUTO = "auto"
 
-# Hedged on purpose ("usually"): relative CPU/GPU speed varies by machine; on
-# the reference box the int8 exports measured no faster on CUDA than CPU.
+# Hedged on purpose ("usually"): relative processor/card speed varies by
+# machine; on the reference box the int8 exports measured no faster on CUDA than
+# on the processor. Worded to the house rule model_fit states ("graphics card"
+# and "processor", never "VRAM" or "GPU").
 _CPU_OFFER = tr_noop(
-    "{name} usually runs about as fast on the CPU as on the GPU, "
-    "and GPU mode takes VRAM away from VRChat. Use the CPU for this model?"
+    "{name} usually runs about as fast on your processor as on your graphics "
+    "card, and it leaves the graphics card free for VRChat. Use the processor "
+    "for this model?"
 )
 
 _SWITCH_OFFER = tr_noop("{name} cannot transcribe {language}. Switch to {other}?")
@@ -43,7 +46,7 @@ _LANGUAGE_LOCKED_TIP = tr_noop(
 # Tooltip on "auto" when the model detects the spoken language but cannot
 # report it (the onnx-asr backend) and translation is on: the ways out are a
 # concrete language or turning translation off, not only a model switch.
-_AUTO_LOCKED_TIP = tr_noop(
+AUTO_LOCKED_TIP = tr_noop(
     "{name} cannot tell the translator which language you speak. "
     "Pick your language, or turn translation off."
 )
@@ -70,7 +73,7 @@ def maybe_prefer_cpu(dlg, model_id: str) -> None:
 
     answer = QMessageBox.question(
         dlg,
-        tr("Use the CPU?"),
+        tr("Use the processor?"),
         tr(_CPU_OFFER, name=whisper_display_name(model_id)),
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.Yes,
@@ -93,12 +96,28 @@ def maybe_prefer_cpu(dlg, model_id: str) -> None:
     dlg._changed()
 
 
-def _covers(spec, code: str) -> bool:
+def covers(spec, code: str) -> bool:
     """Whether ``spec`` can transcribe the Whisper language ``code`` (the same
     english_only-on-top-of-languages reading recommend._rank_whisper uses)."""
     if spec.english_only and code != "en":
         return False
     return spec.languages is None or code in spec.languages
+
+
+def _machine(cfg) -> dict[str, object]:
+    """The machine-shaped ranking inputs, as best_downloaded keywords.
+
+    Omitting them ranks at reference speed with the conservative fixed VRAM
+    cap, which would let this nudge offer a model the wizard and the Settings
+    reset already ruled out for the same machine.
+    """
+    return {
+        "factor": calibrate.stored_factor(cfg),
+        "vram_mb": recommend.detected_vram_mb(cfg.stt.device_index),
+        "compute": recommend.resolved_compute_type(
+            cfg.stt.compute_type, cfg.stt.device_index
+        ),
+    }
 
 
 def propose_language_switch(cfg, dm, source_display: str) -> str | None:
@@ -116,7 +135,8 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
         if spec is None or spec.reports_language or not cfg.translate.enabled:
             return None
         candidate, _ = recommend.best_downloaded(
-            dm, translate=False, tier=recommend.tier_for_config(cfg), languages=None
+            dm, translate=False, tier=recommend.tier_for_config(cfg),
+            languages=None, **_machine(cfg),
         )
         if candidate is None or candidate == cfg.stt.model:
             return None
@@ -125,17 +145,18 @@ def propose_language_switch(cfg, dm, source_display: str) -> str | None:
             return None
         return candidate
     lang = LANGUAGES.get(source_display)
-    if spec is None or lang is None or _covers(spec, lang.whisper):
+    if spec is None or lang is None or covers(spec, lang.whisper):
         return None
     candidate, _ = recommend.best_downloaded(
         dm,
         translate=False,
         tier=recommend.tier_for_config(cfg),
         languages=(lang.whisper,),
+        **_machine(cfg),
     )
     if candidate is None or candidate == cfg.stt.model:
         return None
-    if not _covers(WHISPER_MODELS[candidate], lang.whisper):
+    if not covers(WHISPER_MODELS[candidate], lang.whisper):
         # Every downloaded model is equally unable; a swap would not help.
         return None
     return candidate
@@ -156,7 +177,7 @@ def unsupported_stored_language(cfg) -> bool:
             return True
         return not spec.reports_language and cfg.translate.enabled
     lang = LANGUAGES.get(cfg.stt.source_language)
-    return lang is not None and not _covers(spec, lang.whisper)
+    return lang is not None and not covers(spec, lang.whisper)
 
 
 def run_language_nudge(window) -> None:
@@ -246,7 +267,9 @@ def grey_unsupported_languages(combo, model_id: str, *, translating: bool = Fals
         item = item_model.item(i)
         if item is None:
             continue
-        text = combo.itemText(i)
+        # By data, not label: the auto entry renders translated.
+        value = combo.itemData(i)
+        text = combo.itemText(i) if value is None else value
         if text == _AUTO:
             detects = spec is None or spec.auto_language
             reports = not (
@@ -255,12 +278,12 @@ def grey_unsupported_languages(combo, model_id: str, *, translating: bool = Fals
             item.setEnabled(detects and reports)
             if detects and not reports:
                 item.setToolTip(
-                    tr(_AUTO_LOCKED_TIP, name=whisper_display_name(model_id))
+                    tr(AUTO_LOCKED_TIP, name=whisper_display_name(model_id))
                 )
             else:
                 item.setToolTip("" if detects else tip)
             continue
         lang = LANGUAGES.get(text)
-        enabled = spec is None or lang is None or _covers(spec, lang.whisper)
+        enabled = spec is None or lang is None or covers(spec, lang.whisper)
         item.setEnabled(enabled)
         item.setToolTip("" if enabled else tip)

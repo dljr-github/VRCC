@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 from tests.test_firstrun_ui import _FakeDownloadManager, _bridge, _store
-from vrcc.core import hardware, recommend
+from vrcc.core import calibrate, hardware, recommend
 from vrcc.stt.registry import WHISPER_MODELS
 
 
@@ -31,15 +31,23 @@ def _wizard(
 ):
     from vrcc.gui.firstrun import FirstRunWizard
 
-    monkeypatch.setattr(recommend, "detect_tier", lambda: tier)
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: tier)
     # Pin the VRAM-driven default so tests are deterministic on any machine.
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: default_choice)
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: default_choice)
+    # Pin the CPU calibration factor. It is measured from the machine running
+    # the tests, and it scales the latency gate that decides between "small"
+    # and "base": a slower runner (CI) legitimately ranks differently from a
+    # fast desktop. These tests are about language coverage driving the
+    # ranking, not about how quick the runner is.
+    monkeypatch.setattr(calibrate, "cached_factor", lambda cfg, remeasure=False: 1.0)
+
     # The cpu-tier wording depends on whether a CUDA device is visible; pin it.
     monkeypatch.setattr(hardware, "cuda_device_count", lambda: device_count)
     store = _store(tmp_path)
     dm = _FakeDownloadManager(tmp_path / "models")
     bridge = _bridge()
     return FirstRunWizard(store, dm, bridge), store, dm, bridge
+
 
 
 def _teardown(wiz, bridge) -> None:
@@ -309,8 +317,14 @@ def _tick(wiz, *displays: str, only: bool = False) -> None:
 def _wizard_with_language(tmp_path, monkeypatch, tier, language, default_choice="cpu"):
     from vrcc.gui.firstrun import FirstRunWizard
 
-    monkeypatch.setattr(recommend, "detect_tier", lambda: tier)
-    monkeypatch.setattr(recommend, "default_device_choice", lambda: default_choice)
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: tier)
+    monkeypatch.setattr(recommend, "default_device_choice", lambda index=0: default_choice)
+    # Pin the CPU calibration factor. It is measured from the machine running
+    # the tests, and it scales the latency gate that decides between "small"
+    # and "base": a slower runner (CI) legitimately ranks differently from a
+    # fast desktop. These tests are about language coverage driving the
+    # ranking, not about how quick the runner is.
+    monkeypatch.setattr(calibrate, "cached_factor", lambda cfg, remeasure=False: 1.0)
     monkeypatch.setattr(hardware, "cuda_device_count", lambda: 0)
     store = _store(tmp_path)
     store.config.stt.source_language = language
@@ -352,10 +366,10 @@ def test_firstrun_source_change_refreshes_recommendation(qapp, tmp_path, monkeyp
     try:
         assert wiz.recommended_whisper == "parakeet-tdt-0.6b-v3"
         # Japanese is outside Parakeet's set: the plan must re-rank live, and
-        # to the model that actually covers Japanese.
+        # to a model that actually covers Japanese.
         _tick(wiz, "Japanese", only=True)
         assert store.config.stt.source_language == "Japanese"
-        assert wiz.recommended_whisper == "sense-voice-small"
+        assert wiz.recommended_whisper == "small"
         assert "Parakeet" not in wiz._summary_label.text()
     finally:
         _teardown(wiz, bridge)
@@ -372,8 +386,8 @@ def test_firstrun_multiple_spoken_languages_need_one_model_for_all(
     try:
         _tick(wiz, "English", "Japanese", "Korean", only=True)
         assert store.config.stt.spoken_languages == ["English", "Japanese", "Korean"]
-        assert wiz.recommended_whisper == "sense-voice-small"
-        # Several languages means no single source to pin, and SenseVoice
+        assert wiz.recommended_whisper == "small"
+        # Several languages means no single source to pin, and faster-whisper
         # reports what it heard, so "auto" is safe for the translator.
         assert store.config.stt.source_language == "auto"
     finally:

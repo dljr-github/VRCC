@@ -478,3 +478,22 @@ def test_create_stt_engine_honours_an_explicit_model_id(tmp_path):
     cfg = _cfg(model="small")
     engine = create_stt_engine(cfg, tmp_path, EventBus(), model_id=SENSEVOICE_ID)
     assert isinstance(engine, SenseVoiceEngine)
+
+
+def test_every_voice_backend_accepts_detect_language():
+    """HeardStream calls transcribe(detect_language=True) on whichever engine
+    the user picked, so the argument is part of the shared contract, not one
+    backend's extra. SenseVoice shipped without it: every heard utterance
+    raised TypeError into a handler that logged and moved on, and the feature
+    produced nothing at all for anyone on that model.
+    """
+    import inspect
+
+    from vrcc.stt.engine import SttEngine
+    from vrcc.stt.onnx_asr import OnnxAsrEngine
+    from vrcc.stt.sensevoice import SenseVoiceEngine
+
+    for cls in (SttEngine, OnnxAsrEngine, SenseVoiceEngine):
+        params = inspect.signature(cls.transcribe).parameters
+        assert "detect_language" in params, cls.__name__
+        assert params["detect_language"].default is False, cls.__name__

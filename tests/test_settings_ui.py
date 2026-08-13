@@ -232,7 +232,8 @@ def test_model_fit_gets_resolved_device_not_raw_auto(qapp, tmp_path, monkeypatch
         monkeypatch.setattr(settings_mod.hardware, "can_run_cuda", lambda: False)
         seen = []
 
-        def record(size_mb, device="auto"):
+        def record(size_mb, device="auto", model_id=None, device_index=0,
+                   compute_type="auto"):
             seen.append(device)
             return None
 
