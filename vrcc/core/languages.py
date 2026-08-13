@@ -111,6 +111,21 @@ def match_caption_language(locale: str | None) -> str | None:
     return None
 
 
+def from_whisper(code: str | None) -> Language | None:
+    """The `Language` a Whisper/ONNX language code names, or ``None``.
+
+    Engines report the language they DETECTED as a code ("ja"), while
+    :func:`get` and every config field key on the display name ("Japanese").
+    Feeding one to the other is silent: `get` raises `KeyError`, a caller that
+    catches it reads as "unknown language" and skips translation forever. Both
+    directions exist so neither side has to know the other's spelling.
+    """
+    if not code:
+        return None
+    display = _BY_WHISPER.get(code)
+    return LANGUAGES[display] if display is not None else None
+
+
 def get(display: str) -> Language:
     """Look up a `Language` by display name; raises `KeyError` (naming the bad
     value and pointing at `LANGUAGES.keys()`) if unknown.

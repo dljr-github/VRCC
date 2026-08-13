@@ -45,7 +45,7 @@ import numpy as np
 from vrcc.audio.segmenter import SegFinal, SegLevel
 from vrcc.audio.source import SAMPLE_RATE
 from vrcc.core.events import HeardLevel, HeardPhrase
-from vrcc.core.languages import get
+from vrcc.core.languages import from_whisper, get
 
 logger = logging.getLogger("vrcc.core.heard")
 
@@ -226,7 +226,12 @@ class HeardStream:
             logger.debug("dropped a heard utterance that overlapped your speech")
             return
         with self._stt_lock:
-            result = self._stt.transcribe(samples)
+            # detect_language: this stream must never inherit the user's
+            # configured spoken language. Someone who tells VRCC they speak
+            # English would otherwise have every Japanese speaker in the room
+            # decoded as English, which produces confident nonsense rather
+            # than an error. See this module's docstring.
+            result = self._stt.transcribe(samples, detect_language=True)
         if result is None or not result.text.strip():
             return
 
@@ -245,10 +250,12 @@ class HeardStream:
         cfg = self._config.translate
         if self._mt is None or not cfg.enabled:
             return []
-        try:
-            source = get(result.language) if result.language != _AUTO else None
-        except KeyError:
-            source = None
+        # from_whisper, not get: engines report the language they detected as
+        # a code, and get() keys on display names, so every utterance raised
+        # KeyError, was caught here, and returned no translations at all. The
+        # transcription still appeared, which is why it read as "translation is
+        # just slow" rather than as a failure.
+        source = from_whisper(result.language)
         if source is None:
             return []
         targets = [get(name) for name in self._heard_targets() if name != source.display]

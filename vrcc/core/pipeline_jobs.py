@@ -262,11 +262,7 @@ def resolve_source_language(p: "Pipeline", detected_whisper: str) -> "Language |
     src_cfg = p._config.stt.source_language
     if src_cfg != "auto":
         return languages.get(src_cfg)
-    # "auto": map the detected Whisper code to the first matching Language.
-    for lang in languages.LANGUAGES.values():
-        if lang.whisper == detected_whisper:
-            return lang
-    return None
+    return languages.from_whisper(detected_whisper)
 
 
 # -- MT job processing -------------------------------------------------------

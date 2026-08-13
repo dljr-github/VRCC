@@ -68,18 +68,26 @@ class _Segmenter:
 
 
 class _Stt:
-    def __init__(self, text="konnichiwa", language="Japanese"):
+    """A whisper code for `language`, because that is what both real engines
+    return. It used to hold the display name "Japanese", which no engine ever
+    produces, and that single unrealistic value hid a defect that stopped every
+    heard caption from being translated."""
+
+    def __init__(self, text="konnichiwa", language="ja"):
         from vrcc.stt.engine import SttResult
 
         self._result = SttResult(
             text=text, language=language, avg_logprob=-0.2, no_speech_prob=0.01
         )
         self.calls = 0
+        self.detect_language_calls = 0
         self.concurrent = 0
         self.max_concurrent = 0
 
-    def transcribe(self, samples):
+    def transcribe(self, samples, detect_language=False):
         self.calls += 1
+        if detect_language:
+            self.detect_language_calls += 1
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)
         time.sleep(0.01)
@@ -253,7 +261,7 @@ def test_a_backlog_drops_the_oldest_rather_than_growing():
 
 def test_a_failing_transcription_does_not_end_the_stream():
     class _Boom(_Stt):
-        def transcribe(self, samples):
+        def transcribe(self, samples, detect_language=False):
             self.calls += 1
             if self.calls == 1:
                 raise RuntimeError("decode failed")

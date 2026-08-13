@@ -140,8 +140,16 @@ class SttEngine:
 
     # -- transcription ---------------------------------------------------------
 
-    def transcribe(self, samples: np.ndarray) -> SttResult | None:
+    def transcribe(
+        self, samples: np.ndarray, detect_language: bool = False
+    ) -> SttResult | None:
         """Transcribe ``samples`` (mono float32) into an :class:`SttResult`.
+
+        ``detect_language`` ignores the configured spoken language and lets the
+        model decide. One engine serves both the user's own speech, where the
+        configured language is a useful constraint, and speech captured from
+        the speakers, where it is someone else's and the constraint turns a
+        foreign sentence into confident nonsense.
 
         Returns ``None`` when it fails the quality gates (no text, length-weighted
         ``avg_logprob`` below ``cfg.avg_logprob_gate``, ``no_speech_prob`` above
@@ -156,6 +164,13 @@ class SttEngine:
             )
 
         kwargs = self._build_kwargs()
+        if detect_language:
+            kwargs["language"] = None
+            # The seed is a script hint derived from the same configured
+            # language, so leaving it would bias the decode it was just freed
+            # from, unless the user wrote the prompt themselves.
+            if not self._cfg.initial_prompt:
+                kwargs["initial_prompt"] = None
         segments, info = self._run_transcribe(samples, kwargs)
         return self._build_result(segments, info)
 
