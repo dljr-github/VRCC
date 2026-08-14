@@ -277,7 +277,7 @@ def test_choose_manually_does_not_overwrite_config(qapp, tmp_path, monkeypatch):
     from vrcc.core import recommend
     from vrcc.gui.firstrun import FirstRunWizard
 
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_high")
     store = _store(tmp_path)
     store.config.stt.model = "tiny"  # user's own pick, not the recommendation
     store.config.translate.model = "nllb-600M-int8"

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vrcc.core import recommend
+from vrcc.core import calibrate, recommend
 from vrcc.core.hardware import resolved_device
-from vrcc.gui import model_prompts, settings_live
+from vrcc.gui import model_prompts, settings_audio, settings_live
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
 from vrcc.i18n import tr, tr_noop
 
@@ -26,12 +26,24 @@ _AUTO_CPU_TEXT = tr_noop("Auto: using your processor")
 _RESET_BTN = tr_noop("Recommended setup for this PC")
 _RESET_TIP = tr_noop("Pick the models and settings that suit this machine.")
 _RESET_TITLE = tr_noop("Use the recommended setup?")
+# "search settings" covers translate.beam_size, which reset_to_recommended
+# restores and the performance mode does not write, so a dialog that
+# enumerates what Yes will change has to name it itself. The timing fields the
+# performance mode carries in are named for the same reason: a body that says
+# "device, thread and search settings" while also rewriting how long a pause
+# ends a sentence is promising less than it does.
 _RESET_BODY = tr_noop(
     "This picks the voice and translation models for your hardware and spoken "
-    "language, returns the device and thread settings to automatic, and sets "
-    "the performance mode. Your languages, microphone, OSC address and "
-    "appearance stay as they are."
+    "language, returns the device, thread and search settings to their "
+    "recommended values, and sets the performance mode, which also rewrites "
+    "the pause timings on the Advanced page. Your "
+    "languages, microphone, OSC address and appearance stay as they are."
 )
+# Kept separate from _RESET_BODY rather than folded into its list: the reset
+# also puts both Precision rows back to automatic, and a body that enumerates
+# what Yes will change has to include them.
+_RESET_PRECISION = tr_noop("Both precision settings go back to automatic.")
+
 _RESET_MODELS = tr_noop("Voice model: {voice}. Translation model: {translate}.")
 
 _RESET_DEFAULTS_BTN = tr_noop("Reset tuning to defaults")
@@ -63,7 +75,10 @@ _RESET_FIELDS = {
         "condition_on_previous_text",
     ),
     "translate": ("beam_size", "repetition_penalty", "no_repeat_ngram_size"),
-    "gui": ("profile", "update_check_enabled"),
+    # profile only. update_check_enabled is a preference about reaching the
+    # network, not tuning, and resetting it silently switched "Check for
+    # updates" back on for anyone who had deliberately turned it off.
+    "gui": ("profile",),
 }
 
 # (dialog attr, config section, field) for the automatic-reset thread spins,
@@ -135,9 +150,19 @@ def confirm_and_reset(dlg: "SettingsDialog") -> None:
     headless (``apply`` / ``download_manager`` None)."""
     from PySide6.QtWidgets import QMessageBox
 
+    # Probe on the real config first. reset_to_recommended measures the machine
+    # when nothing is stored, and on a copy that measurement is thrown away: the
+    # apply would re-measure, and two readings of a noisy probe can land either
+    # side of the cliff that separates two models, so the dialog would name one
+    # model and install another. Answering No still leaves the machine probed.
+    #
+    # remeasure because this button means "decide again for this PC". A stored
+    # reading taken while the machine was busy reads slow and is otherwise kept
+    # for good, and this is the only place a user can correct it.
+    calibrate.cached_factor(dlg._cfg, remeasure=True)
     preview = dlg._cfg.model_copy(deep=True)
     outcome = recommend.reset_to_recommended(preview, dlg._download_manager)
-    body = tr(_RESET_BODY)
+    body = tr(_RESET_BODY) + " " + tr(_RESET_PRECISION)
     voice, translate = outcome["stt_model"], outcome["mt_model"]
     if voice and translate:
         body = body + "\n\n" + tr(
@@ -325,8 +350,8 @@ def _resync_reset_widgets(dlg: "SettingsDialog") -> None:
     if strength is not None:
         strength.setValue(int(round(cfg.audio.denoise_strength * 100)))
         # The resync runs under _loading, so the checkbox's toggled handler
-        # (which normally flips this) never fires: set it by hand.
-        strength.setEnabled(cfg.audio.denoise_enabled)
+        # (which normally flips the row) never fires: do it by hand.
+        settings_audio.denoise_strength_enabled(dlg, cfg.audio.denoise_enabled)
     gate = getattr(dlg, "_gate_check", None)
     if gate is not None:
         gate.setChecked(cfg.audio.energy_gate_enabled)

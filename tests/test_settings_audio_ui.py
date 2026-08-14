@@ -67,6 +67,50 @@ def test_denoise_toggle_writes_config(qapp, tmp_path):
         dlg.deleteLater()
 
 
+def test_denoise_strength_reads_like_its_siblings(qapp, tmp_path):
+    # It had no tooltip, no readout and no anchors, so 0 looked like "off"
+    # while the model still ran. Matches the noise slider two rows above.
+    store = _store(tmp_path)
+    store.config.audio.denoise_enabled = True
+    store.config.audio.denoise_strength = 0.4
+    dlg = SettingsDialog(store)
+    try:
+        assert dlg._denoise_low.text() == "Low"
+        assert dlg._denoise_high.text() == "High"
+        assert dlg._denoise_value_label.text() == "40%"
+        tip = dlg._denoise_strength.toolTip()
+        assert "Low still cleans" in tip  # says what Low is not
+
+        dlg._denoise_strength.setValue(70)
+        assert dlg._denoise_value_label.text() == "70%"
+        assert abs(store.config.audio.denoise_strength - 0.70) < 1e-6
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_denoise_row_greys_whole_with_the_checkbox(qapp, tmp_path):
+    store = _store(tmp_path)
+    store.config.audio.denoise_enabled = True
+    dlg = SettingsDialog(store)
+    try:
+        dlg._denoise_check.setChecked(False)
+        for widget in (
+            dlg._denoise_strength,
+            dlg._denoise_value_label,
+            dlg._denoise_low,
+            dlg._denoise_high,
+        ):
+            assert not widget.isEnabled()
+
+        dlg._denoise_check.setChecked(True)
+        assert dlg._denoise_low.isEnabled()
+        assert dlg._denoise_value_label.isEnabled()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
 def test_device_refresh_repopulates_without_changing_selection(qapp, tmp_path, monkeypatch):
     store = _store(tmp_path)
     store.load()

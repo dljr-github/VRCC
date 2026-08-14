@@ -50,6 +50,8 @@ class LiveApply:
         make_source: Callable[[str], "AudioSource"],
         make_mute: "Callable[[], MuteSync]",
         mute: "MuteSync | None" = None,
+        heard=None,
+        hear_others: "Callable[[], None] | None" = None,
     ) -> None:
         self._pipeline = pipeline
         self._segmenter = segmenter
@@ -59,6 +61,10 @@ class LiveApply:
         self._make_source = make_source
         self._make_mute = make_mute
         self._mute = mute
+        # The speaker-capture stream, when the user has one. It runs its own
+        # segmenter, so VAD edits have to reach it as well as the microphone's.
+        self._heard = heard
+        self._hear_others = hear_others
 
     @property
     def mute(self) -> "MuteSync | None":
@@ -112,8 +118,15 @@ class LiveApply:
         self._pipeline.set_source_denoise(cfg.denoise_enabled, cfg.denoise_strength)
 
     def apply_vad(self, cfg: "VadConfig") -> None:
-        """Apply new VAD timings/threshold; the next utterance adopts them."""
+        """Apply new VAD timings/threshold; the next utterance adopts them.
+
+        Every segmenter, not only the microphone's: the speaker capture runs
+        one of its own, and two streams segmenting on different rules is a
+        difference nothing on screen would explain.
+        """
         self._segmenter.reconfigure(cfg)
+        if self._heard is not None:
+            self._heard.reconfigure_vad(cfg)
 
     def apply_osc(self, cfg: "OscConfig") -> bool:
         """Retarget the chatbox client (ip/port) and retune its send rate.
@@ -169,3 +182,13 @@ class LiveApply:
         compute / thread changes keep the model id, so this forces the swap
         rather than no-opping on the unchanged id."""
         self._reload_engine(kind)
+
+    def apply_hear_others(self) -> None:
+        """Re-point the speaker capture at what config now says.
+
+        A capture source binds one output device for its lifetime, so the
+        stream has to be rebuilt for the picker on the Simple page to mean
+        anything; without this the choice held until the next launch. ``None``
+        when the composition root built no speaker stream."""
+        if self._hear_others is not None:
+            self._hear_others()

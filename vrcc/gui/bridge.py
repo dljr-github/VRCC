@@ -23,14 +23,18 @@ from vrcc.core.events import (
     MicLevel,
     MuteChanged,
     PhraseRecognized,
+    HeardLevel,
+    HeardPhrase,
     PhraseTranslated,
     UpdateCheckResult,
     VrchatDetected,
 )
 
-# Minimum spacing between forwarded MicLevel emits (~10 Hz). The segmenter
-# produces ~31 Hz; anything faster than this is dropped.
-_MIC_MIN_INTERVAL_S = 0.1
+# Minimum spacing between forwarded level emits (~10 Hz). A segmenter produces
+# ~31 Hz; anything faster than this is dropped. Both meters share the gate: two
+# ungated streams would put three times the traffic on the GUI thread that one
+# was tuned down to.
+_LEVEL_MIN_INTERVAL_S = 0.1
 
 
 class BusBridge(QObject):
@@ -52,19 +56,24 @@ class BusBridge(QObject):
     app_error = Signal(object)  # AppError
     vrchat_detected = Signal(object)  # VrchatDetected
     update_result = Signal(object)  # UpdateCheckResult
+    heard_phrase = Signal(object)  # HeardPhrase
+    heard_level = Signal(float, float)  # rms, vad_prob
 
     def __init__(self, bus: EventBus, clock: Callable[[], float] = time.monotonic) -> None:
         super().__init__()
         self._bus = bus
         self._clock = clock
-        # Monotonic time of the last forwarded MicLevel; None until the first (always emits).
-        self._last_mic_emit: float | None = None
+        # Monotonic time of the last forwarded level event per meter; None until
+        # the first (always emits).
+        self._last_level_emit: dict[str, float] = {}
 
         # Keep the unsubscribe callables so detach() can undo every wiring.
         self._unsubs: list[Callable[[], None]] = [
             bus.subscribe(MicLevel, self._on_mic_level),
             bus.subscribe(PhraseRecognized, self.phrase_recognized.emit),
             bus.subscribe(PhraseTranslated, self.phrase_translated.emit),
+            bus.subscribe(HeardPhrase, self.heard_phrase.emit),
+            bus.subscribe(HeardLevel, self._on_heard_level),
             bus.subscribe(ChatboxSent, self.chatbox_sent.emit),
             bus.subscribe(MuteChanged, self.mute_changed.emit),
             bus.subscribe(DownloadProgress, self.download_progress.emit),
@@ -74,14 +83,23 @@ class BusBridge(QObject):
             bus.subscribe(UpdateCheckResult, self.update_result.emit),
         ]
 
+    def _on_heard_level(self, event) -> None:
+        self._emit_level("heard", self.heard_level, event)
+
     def _on_mic_level(self, event: MicLevel) -> None:
-        """Time-gate MicLevel to ~10 Hz. Runs on the segmenter thread; the
-        subsequent ``emit`` queues onto the GUI thread."""
+        self._emit_level("mic", self.mic_level, event)
+
+    def _emit_level(self, meter: str, signal, event) -> None:
+        """Time-gate a level event to ~10 Hz, then unpack it for the meter.
+        Runs on a segmenter thread; the subsequent ``emit`` queues onto the GUI
+        thread. Each meter keeps its own clock, so one stream falling silent
+        does not hold the other's next frame."""
         now = self._clock()
-        if self._last_mic_emit is not None and (now - self._last_mic_emit) < _MIC_MIN_INTERVAL_S:
+        last = self._last_level_emit.get(meter)
+        if last is not None and (now - last) < _LEVEL_MIN_INTERVAL_S:
             return
-        self._last_mic_emit = now
-        self.mic_level.emit(event.rms, event.vad_prob)
+        self._last_level_emit[meter] = now
+        signal.emit(event.rms, event.vad_prob)
 
     def detach(self) -> None:
         """Unsubscribe every handler from the bus. Idempotent."""

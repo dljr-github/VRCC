@@ -55,7 +55,9 @@ class _Collector(QObject):
         self.engine: list[object] = []
         self.error: list[object] = []
         self.update_result: list[object] = []
+        self.heard: list[tuple[float, float]] = []
         bridge.mic_level.connect(self._on_mic)
+        bridge.heard_level.connect(self._on_heard)
         bridge.phrase_recognized.connect(self.recognized.append)
         bridge.phrase_translated.connect(self.translated.append)
         bridge.chatbox_sent.connect(self.chatbox.append)
@@ -67,6 +69,9 @@ class _Collector(QObject):
 
     def _on_mic(self, rms: float, vad: float) -> None:
         self.mic.append((rms, vad))
+
+    def _on_heard(self, rms: float, vad: float) -> None:
+        self.heard.append((rms, vad))
 
 
 class _FakeClock:
@@ -312,3 +317,36 @@ def test_main_window_constructs(qapp, tmp_path):
         window.close()
         window.deleteLater()
         QCoreApplication.processEvents()
+
+
+def test_heard_level_is_throttled_like_the_microphone(qapp):
+    """The speakers meter shares the mic meter's widget and its frame rate, so
+    it needs the same gate: two ungated segmenters put three times the traffic
+    on the GUI thread that one was tuned down to."""
+    from vrcc.core.events import HeardLevel
+
+    bus = EventBus()
+    bridge = BusBridge(bus, clock=_FakeClock([1000.0]))
+    c = _Collector(bridge)
+
+    events = [HeardLevel(rms=0.01 * i, vad_prob=0.5) for i in range(5)]
+    _publish_all(bus, events)
+
+    _pump_until(lambda: len(c.heard) >= 1)
+    QCoreApplication.processEvents()
+    assert len(c.heard) == 1
+
+
+def test_the_two_meters_do_not_share_one_gate(qapp):
+    """One clock for both would let a busy speaker stream swallow the mic
+    meter's frames, and each stream's own rate is what its meter shows."""
+    from vrcc.core.events import HeardLevel
+
+    bus = EventBus()
+    bridge = BusBridge(bus, clock=_FakeClock([1000.0]))
+    c = _Collector(bridge)
+
+    _publish_all(bus, [MicLevel(rms=0.02, vad_prob=0.5), HeardLevel(rms=0.03, vad_prob=0.5)])
+
+    _pump_until(lambda: len(c.mic) >= 1 and len(c.heard) >= 1)
+    assert len(c.mic) == 1 and len(c.heard) == 1

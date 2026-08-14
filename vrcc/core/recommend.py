@@ -1,61 +1,47 @@
 """Hardware-tier detection and benchmark-derived model recommendations (Qt-free).
 
-Tiers: ``gpu_high`` (usable CUDA, >= 8 GB), ``gpu_low`` (< 8 GB / unknown),
-``cpu`` (no CUDA the install can actually drive).
-``WHISPER_PREFERENCE`` and the whisper half of ``PRESETS`` are derived at
-import time from the measured ``STT_BENCH`` table via :func:`_rank_whisper`,
-language-blind; :func:`preset_for_choice` and :func:`best_downloaded` take
-optional Whisper language codes to rerank for the languages the user says they
-speak (:func:`spoken_whisper_codes` reads them off a config).
-``MT_PREFERENCE`` stays hand-ordered (no MT measurements yet). Both feed the
-per-tier best-first walk in :func:`best_downloaded`.
+Tiers: ``gpu_high`` (usable CUDA, >= 16 GB, tensor cores), ``gpu_low``
+(smaller, older or unknown), ``cpu`` (no CUDA the install can drive). ``WHISPER_PREFERENCE`` and
+the whisper half of ``PRESETS`` are derived at import time from the measured
+``STT_BENCH`` table via :func:`_rank_whisper`, language-blind;
+:func:`preset_for_choice` and :func:`best_downloaded` take optional Whisper
+language codes to rerank for the languages the user says they speak
+(:func:`spoken_whisper_codes` reads them off a config). ``MT_PREFERENCE``
+stays hand-ordered. Both feed the per-tier walk in :func:`best_downloaded`.
 """
 
 from __future__ import annotations
 
-from vrcc.core.hardware import can_run_cuda, total_vram_bytes
+from vrcc.core.bench_tables import BEAM_BENCH, STT_BENCH, stt_vram_table
+from vrcc.core.hardware import (
+    best_compute_type,
+    can_run_cuda,
+    compute_capability,
+    total_vram_bytes,
+)
 from vrcc.stt.registry import WHISPER_MODELS
 from vrcc.translate.registry import MT_MODELS
 
-_VRAM_HIGH_BYTES = 8 * 1024 ** 3
+# VRChat's own recommended spec is 16 GB of VRAM, so a card below it is already
+# rationing for the game before VRCC asks for any. Only at or above that bar is
+# there headroom to hand the larger models. Same floor the wizard uses to
+# default to GPU at all (_GPU_DEFAULT_VRAM_BYTES): a card clears both or
+# neither.
+#
+# The bar sits under the nominal figure because NVML reports what the driver
+# leaves addressable, never the number on the box: 16 GB cards read 16303 to
+# 16380 MiB and the 32 GB reference card reads 32607 MiB. Comparing against a
+# round 16 GiB would put every shipping 16 GB card below its own bar.
+_VRAM_NOMINAL_SLACK = 1024 ** 3 // 2
+_VRAM_HIGH_BYTES = 16 * 1024 ** 3 - _VRAM_NOMINAL_SLACK
 
-# Measured with tools/bench_stt.py on LibriSpeech test-clean (100 utterances);
-# reference machine: Ryzen 9 9950X3D + RTX 5090, full run recorded in
-# benchmarks/rtx-5090-ryzen-9950x3d.json. WER is scored with the quality gates
-# opened, so it measures what the model recognized rather than what the gates
-# suppressed. A model added to the STT registry must be benchmarked with
-# tools/bench_stt.py and its row added here, or it ranks behind every measured
-# model in its partition. CPU latency is the load-sensitive column: it moved by
-# about a quarter between runs on a busy machine, so treat the ordering as the
-# signal and the absolute value as approximate.
-# id -> (wer_gpu, wer_cpu, gpu_median_s, cpu_median_s)
-STT_BENCH: dict[str, tuple[float, float, float, float]] = {
-    "tiny": (0.074, 0.079, 0.03, 0.13),
-    "base": (0.057, 0.059, 0.04, 0.25),
-    "small": (0.037, 0.037, 0.09, 0.74),
-    "medium": (0.027, 0.026, 0.17, 2.41),
-    "large-v3": (0.017, 0.018, 0.24, 3.90),
-    "large-v3-turbo": (0.017, 0.016, 0.07, 2.81),
-    "distil-large-v3.5": (0.024, 0.023, 0.06, 2.78),
-    "distil-small.en": (0.040, 0.040, 0.04, 0.64),
-    "parakeet-tdt-0.6b-v3": (0.023, 0.023, 0.21, 0.13),
-}
-
-# Beam 5 (the Quality mode) against beam 1 (Speed), same runs. Only whisper
-# models have a beam to widen: the onnx-asr decoders are greedy, which is why
-# the Mode control greys out for them. Models absent from a device's row were
-# not measured there because they already lag past the latency gate at beam 1.
-# id -> {device: (wer_beam5, median_beam5_s)}
-BEAM_BENCH: dict[str, dict[str, tuple[float, float]]] = {
-    "tiny": {"gpu": (0.071, 0.04), "cpu": (0.070, 0.14)},
-    "base": {"gpu": (0.047, 0.06), "cpu": (0.049, 0.26)},
-    "small": {"gpu": (0.035, 0.09), "cpu": (0.038, 0.78)},
-    "medium": {"gpu": (0.024, 0.18)},
-    "large-v3": {"gpu": (0.017, 0.26)},
-    "large-v3-turbo": {"gpu": (0.018, 0.07)},
-    "distil-large-v3.5": {"gpu": (0.023, 0.06)},
-    "distil-small.en": {"gpu": (0.041, 0.04), "cpu": (0.040, 0.81)},
-}
+# Capacity is not speed, and a 16 GB card can be a decade old: a Tesla P100 or
+# P40 clears the VRAM bar. The floor is compute capability 7.0
+# (Volta), the first architecture with tensor cores, because best_compute_type
+# hands every card below Blackwell "int8_float16" and there is no fast hardware
+# for that path before then. This is a statement about what the engines ask the
+# card to do, not an estimate of how quickly it would do it.
+_TENSOR_CORE_CC = (7, 0)
 
 # Quality is worth suggesting only when it buys a visible accuracy gain for a
 # latency cost the user would not notice. Below this WER improvement the two
@@ -73,19 +59,66 @@ _QUALITY_MAX_LATENCY_INCREASE_S = 0.05
 # budgets is what makes a caption feel detached from the sentence.
 _LATENCY_GATE_S = {"cpu": 1.0, "gpu": 0.6}
 
-# gpu_low shares < 8 GB VRAM with VRChat: float16 inflation of the CT2 int8
-# checkpoint sizes plus activations does not reliably fit past ~2 GB, so
-# larger models (large-v3 at 3090 MB) drop to the fallback group there.
-_GPU_LOW_MAX_MODEL_MB = 2000
+# A gpu_low card holds three things at once: the voice model, the translation
+# model and VRChat, so a third each is the split. The voice model is sized
+# against STT_VRAM_MB, whose note explains why a checkpoint size cannot stand
+# in for a measured peak; MT_VRAM_MB is what the second third covers.
+# The fallback is a third of 8 GB, for when VRAM cannot be read (no pynvml, or
+# the import-time ranking, which must not touch NVML).
+_GPU_LOW_VRAM_SHARE = 3
+_GPU_LOW_FALLBACK_BUDGET_MB = 8 * 1024 // _GPU_LOW_VRAM_SHARE
+
+
+def vram_budget_mb(total_mb: int) -> int:
+    """What a card of ``total_mb`` leaves the voice model.
+
+    Exported so the Settings fit warning applies the same rule this ranking
+    does. The two disagreeing is worse than either being wrong: it would offer
+    a model without comment that the recommender had just ruled out.
+    """
+    return total_mb // _GPU_LOW_VRAM_SHARE
+
+
+def resolved_compute_type(compute_type: str = "auto", device_index: int = 0) -> str:
+    """What the engines will actually run at, resolved the way
+    :func:`vrcc.core.hardware.resolve` resolves it for them: a pinned value
+    wins, otherwise the best type the card supports.
+
+    Here rather than beside the fit warning that first needed it, because the
+    ranking has to size against the same table: a card on compute capability 12
+    has no int8 kernels and always pays the float16 peak, and the two reading
+    different tables put "Recommended for your PC" and "may be too large for
+    your graphics card" on one row.
+    """
+    if compute_type != "auto":
+        return compute_type
+    if not can_run_cuda():
+        # No card to size against, and asking CTranslate2 what a CUDA device
+        # supports on a machine without one is a probe for an answer nothing
+        # reads: the VRAM gate only applies on the gpu_low tier.
+        return "float32"
+    return best_compute_type(
+        "cuda", device_index, cc=compute_capability(device_index)
+    )
 
 
 def _rank_whisper(
     tier: str,
     specs=WHISPER_MODELS,
     bench=STT_BENCH,
+    vram=None,
     languages: tuple[str, ...] | None = None,
+    factor: float = 1.0,
+    vram_mb: int | None = None,
+    compute: str = "int8",
 ) -> list[str]:
     """Best-first STT ids for ``tier``, derived from the benchmark table.
+
+    ``factor`` scales the CPU latency column to the machine actually running
+    (:func:`vrcc.core.calibrate.cached_factor`), because the table's latencies
+    describe one reference machine. It is never below 1.0, so it can only push
+    models past the gate, never pull them back inside it. The GPU column is
+    left alone: a CPU probe says nothing about a graphics card.
 
     Without ``languages``, unrestricted models (``spec.languages is None``)
     precede restricted ones: tier recommendation cannot know the user's
@@ -95,62 +128,63 @@ def _rank_whisper(
     in the leading partition, and models that cannot (english_only mismatch,
     a code outside ``languages``) always trail.
 
+    ``compute`` picks WHICH measured VRAM peak the budget is applied to: the
+    same model costs 1.13x to 1.67x more at float16 than at int8_float16, and a
+    card on compute capability 12 or above has no int8 kernels, so it always
+    pays the higher one. It defaults to the int8 table for the import-time,
+    machine-blind ``WHISPER_PREFERENCE``; a caller that knows the card passes
+    :func:`resolved_compute_type`, which is the same value the Settings fit
+    warning sizes against.
+
     Within each partition, models inside the tier's latency budget (and, on
-    ``gpu_low``, inside the VRAM size cap) rank by (WER band, latency): WER
+    ``gpu_low``, inside the VRAM budget) rank by (WER band, latency): WER
     differences under ~0.3 percentage points are ties and the faster model
     wins. Over-budget models follow, fastest first (least-bad fallback),
     then unmeasured ids by size.
 
-    One exception, for the case the benchmark cannot speak to: STT_BENCH's
-    WER is LibriSpeech *English*, so for any other spoken language it ranks
-    models on evidence about a language the user is not speaking. There, an
-    unmeasured model whose ``languages`` names what they speak is a better
-    prior than a measured generalist that merely does not exclude it, so it
-    leads its partition instead of trailing it for want of a row. English
-    keeps ranking purely on its measurements, and a restricted model that
-    *has* been measured competes on its numbers like anything else.
+    An unmeasured model never leads, whatever languages it names. The
+    temptation to except one is real: STT_BENCH's WER is LibriSpeech *English*,
+    so for another spoken language a model naming that language reads like a
+    better prior than a measured generalist, and sense-voice-small (the only
+    unmeasured id) would lead every CJK pick on every tier. It benchmarks
+    extremely well on read speech, exact on all five sherpa-onnx reference
+    clips, but field testing on real VRChat speech put faster-whisper ahead,
+    and casual conversation over game audio is the workload this app has. A
+    clean-speech prior that loses in the field is not a prior worth leading
+    with. It stays in the registry and stays pickable.
     """
+    if tier not in _TIERS:
+        raise KeyError(tier)
     on_gpu = tier != "cpu"
     gate = _LATENCY_GATE_S["gpu" if on_gpu else "cpu"]
-    unmeasured_specialists_lead = bool(languages) and set(languages) != {"en"}
-
-    def specializes(mid: str) -> bool:
-        """Unmeasured, and explicitly names every language being asked for.
-
-        The coverage check is load-bearing, not decoration: ``order`` runs over
-        the trailing partition too, where a restricted model is precisely one
-        that *cannot* serve these languages and must not be promoted.
-        """
-        covered = specs[mid].languages
-        return (
-            bench.get(mid) is None
-            and covered is not None
-            and set(languages) <= set(covered)
-        )
+    # Through vram_budget_mb, not the same arithmetic inline: this is the rule
+    # the Settings fit warning reads, and re-deriving it here let the two drift
+    # apart with every test still green.
+    budget_mb = (_GPU_LOW_FALLBACK_BUDGET_MB if vram_mb is None
+                 else vram_budget_mb(vram_mb))
+    peaks = stt_vram_table(compute) if vram is None else vram
 
     def order(ids: list[str]) -> list[str]:
-        usable, over_budget, unmeasured, specialists = [], [], [], []
+        usable, over_budget, unmeasured = [], [], []
         for mid in ids:
             row = bench.get(mid)
             if row is None:
-                if unmeasured_specialists_lead and specializes(mid):
-                    specialists.append(mid)
-                else:
-                    unmeasured.append(mid)
+                unmeasured.append(mid)
                 continue
-            wer, latency = (row[0], row[2]) if on_gpu else (row[1], row[3])
-            fits = tier != "gpu_low" or specs[mid].size_mb <= _GPU_LOW_MAX_MODEL_MB
+            wer, latency = (row[0], row[2]) if on_gpu else (row[1], row[3] * factor)
+            # An id with no measured footprint is not gated: a guess is what
+            # this replaced. STT_VRAM_MB's note covers which ids and why.
+            peak = peaks.get(mid)
+            fits = tier != "gpu_low" or peak is None or peak <= budget_mb
             if latency <= gate and fits:
                 usable.append((int(wer * 1000) // 3, latency, mid))
             else:
                 over_budget.append((latency, mid))
         usable.sort()
         over_budget.sort()
-        for group in (specialists, unmeasured):
-            group.sort(key=lambda m: specs[m].size_mb)
+        unmeasured.sort(key=lambda m: specs[m].size_mb)
         return (
-            specialists
-            + [t[-1] for t in usable]
+            [t[-1] for t in usable]
             + [t[-1] for t in over_budget]
             + unmeasured
         )
@@ -173,11 +207,23 @@ _TIERS = ("gpu_high", "gpu_low", "cpu")
 
 WHISPER_PREFERENCE: dict[str, list[str]] = {t: _rank_whisper(t) for t in _TIERS}
 
-# MT ids are still hand-picked per tier: no MT benchmark measurements exist
-# yet, so size is the only sizing signal (600M fits everywhere, 1.3B needs
-# the high tier's VRAM headroom). The hand-ordering is also deliberate, not
-# just a gap: a translation benchmark would average quality over target
-# languages a given user may never use (user decision 2026-07-09).
+# MT ids are hand-picked per tier: no full MT benchmark exists, so size leads
+# the sizing (600M fits everywhere, 1.3B needs the high tier's headroom, and
+# MT_VRAM_MB / MT_VRAM_INT8_MB record what each costs). The hand-ordering is
+# deliberate, not a gap: a translation benchmark would average quality over
+# target languages a given user may never use (user decision 2026-07-09).
+#
+# NLLB leads on measured caption quality: blind A/B over 60 VRChat-style
+# utterances into Japanese, Chinese and Korean, three independent judges, model
+# identity randomised per record, nllb-600M 108 wins to m2m100-418M's 37 with
+# 35 ties, and unanimous on 60 items to 16. It decodes faster too. An earlier
+# reading here had m2m100 ahead; that comparison was taken while the Speed
+# profile forced beam 1, which crippled NLLB specifically, and it does not
+# survive the schema 2 migration to beam 4.
+#
+# NLLB is CC-BY-NC-4.0 and m2m100 is MIT, so every tier's walk below keeps an
+# m2m100 reachable for a user whose use is commercial. How far down varies by
+# tier, since the walk is ordered by fit rather than by license.
 _MT_PRESET = {
     "gpu_high": "nllb-1.3B-int8",
     "gpu_low": "nllb-600M-int8",
@@ -198,8 +244,8 @@ MT_PREFERENCE: dict[str, list[str]] = {
         "m2m100-1.2B-int8", "nllb-600M-int8", "m2m100-418M-int8",
     ],
     "gpu_low": [
-        "nllb-600M-int8", "nllb-1.3B-int8", "m2m100-1.2B-int8",
-        "m2m100-418M-int8", "nllb-3.3B-int8", "madlad400-3b",
+        "nllb-600M-int8", "nllb-1.3B-int8", "m2m100-418M-int8",
+        "m2m100-1.2B-int8", "nllb-3.3B-int8", "madlad400-3b",
     ],
     "cpu": [
         "nllb-600M-int8", "m2m100-418M-int8", "nllb-1.3B-int8",
@@ -224,39 +270,73 @@ def _validate() -> None:
 _validate()
 
 
-def detect_tier() -> str:
+def detect_tier(index: int = 0) -> str:
     """Coarse hardware tier: no usable CUDA (:func:`can_run_cuda`, which a
-    visible device with no loadable cuBLAS fails) -> ``"cpu"``; usable CUDA
-    with >= 8 GB VRAM -> ``"gpu_high"``; < 8 GB or unknown -> ``"gpu_low"``.
+    visible device with no loadable cuBLAS fails) -> ``"cpu"``; usable CUDA with
+    >= 16 GB VRAM on a card new enough for the fp16 path -> ``"gpu_high"``;
+    anything smaller, older or unknown -> ``"gpu_low"``.
+
+    Demotion is gentle by design: ``gpu_low`` still leads with the same voice
+    model and sizes it against measured VRAM, so an old large card loses only
+    the bigger translation model.
     """
     if not can_run_cuda():
         return "cpu"
-    vram = total_vram_bytes()
-    if vram is not None and vram >= _VRAM_HIGH_BYTES:
+    vram = total_vram_bytes(index)
+    if vram is not None and vram >= _VRAM_HIGH_BYTES and _has_tensor_cores(index):
         return "gpu_high"
     return "gpu_low"
 
 
+def _has_tensor_cores(index: int = 0) -> bool:
+    """Whether card ``index`` is new enough for the fp16 path the engines use.
+
+    An unreadable capability (no pynvml) is not evidence of an old card, so it
+    passes: the VRAM bar still has to be cleared, and treating a missing reading
+    as a failure would demote every install without pynvml.
+    """
+    cc = compute_capability(index)
+    return cc is None or cc >= _TENSOR_CORE_CC
+
+
+def detected_vram_mb(index: int = 0) -> int | None:
+    """Total VRAM in MB for the ranking's budget, or ``None`` when it cannot be
+    read (which keeps the conservative fallback rather than guessing).
+
+    ``index`` is the CUDA device the models actually load onto
+    (``stt.device_index``): on a mixed multi-GPU box, sizing against card 0
+    would budget for a card the engine never touches.
+    """
+    vram = total_vram_bytes(index) if can_run_cuda() else None
+    return None if vram is None else vram // (1024 ** 2)
+
+
 # Cards with this much total VRAM can spare memory for near-instant captions
 # alongside VRChat; smaller cards default to CPU (user decision 2026-07-08).
-_GPU_DEFAULT_VRAM_BYTES = 16 * 1024**3
+# Bound to the tier bar rather than restated, so the two cannot drift into
+# defaulting a card to CPU while sizing it gpu_high.
+_GPU_DEFAULT_VRAM_BYTES = _VRAM_HIGH_BYTES
 
 
-def default_device_choice() -> str:
+def default_device_choice(index: int = 0) -> str:
     """Wizard default: ``"gpu"`` when CUDA is usable (:func:`can_run_cuda`)
-    and total VRAM >= 16 GB, else ``"cpu"``. VRAM alone is not enough: NVML
-    reads it from the display driver, which says nothing about whether this
-    install ships the CUDA runtime to drive the card."""
+    and card ``index`` has >= 16 GB, else ``"cpu"``. VRAM alone is not enough:
+    NVML reads it from the display driver, which says nothing about whether this
+    install ships the CUDA runtime to drive the card. ``index`` is
+    ``stt.device_index``, so a multi-GPU box judges the card the engines load
+    onto rather than whichever one enumerates first."""
     if not can_run_cuda():
         return "cpu"
-    vram = total_vram_bytes()
+    vram = total_vram_bytes(index)
     if vram is not None and vram >= _GPU_DEFAULT_VRAM_BYTES:
         return "gpu"
     return "cpu"
 
 
 def preset_for_choice(
-    device_choice: str, tier: str | None = None, languages: tuple[str, ...] | None = None
+    device_choice: str, tier: str | None = None,
+    languages: tuple[str, ...] | None = None, factor: float = 1.0,
+    vram_mb: int | None = None, compute: str = "int8",
 ) -> tuple[str, str]:
     """Preset (whisper id, mt id) for an explicit run-device choice.
 
@@ -276,28 +356,44 @@ def preset_for_choice(
         if tier is None:
             tier = detect_tier()
         resolved = "gpu_low" if tier == "cpu" else tier
-    return preset_for_tier(resolved, languages or ())
+    return preset_for_tier(resolved, languages or (), factor, vram_mb, compute)
 
 
-def preset_for_tier(tier: str, languages: tuple[str, ...] = ()) -> tuple[str, str]:
+def preset_for_tier(
+    tier: str, languages: tuple[str, ...] = (), factor: float = 1.0,
+    vram_mb: int | None = None, compute: str = "int8",
+) -> tuple[str, str]:
     """(whisper id, mt id) for an already-resolved tier, reranked for the
-    spoken languages. ``PRESETS[tier]`` is the language-blind case; a surface
-    that holds the user's languages (the Models window) uses this so its
-    recommendation matches the wizard's for the same tier and languages."""
-    if not languages:
-        return PRESETS[tier]
-    return _rank_whisper(tier, languages=languages)[0], _MT_PRESET[tier]
+    spoken languages and this machine. ``PRESETS[tier]`` is the same answer for
+    the language-blind reference-speed case; a surface holding the user's
+    languages (the Models window) uses this so its recommendation matches the
+    wizard's for the same inputs.
+
+    Always ranked rather than served from ``PRESETS`` on the default inputs: a
+    float-equality test on ``factor`` decided which of two code paths ran, and
+    the ranking is ten rows and one sort.
+    """
+    return (
+        _rank_whisper(
+            tier, languages=languages, factor=factor, vram_mb=vram_mb,
+            compute=compute,
+        )[0],
+        _MT_PRESET[tier],
+    )
 
 
 def tier_for_config(cfg) -> str:
     """Tier implied by the config's device choice: a forced-CPU config pins
-    the ``"cpu"`` tier; anything else follows the detected hardware."""
+    the ``"cpu"`` tier; anything else follows the hardware, judged on the card
+    ``stt.device_index`` names so this agrees with the VRAM budget."""
     if cfg.stt.device == "cpu":
         return "cpu"
-    return detect_tier()
+    return detect_tier(cfg.stt.device_index)
 
 
-def recommended_profile(model_id: str, device: str) -> str | None:
+def recommended_profile(
+    model_id: str, device: str, factor: float = 1.0
+) -> str | None:
     """Which performance mode suits ``model_id`` on ``device``, from the
     measured beam-1 (Speed) and beam-5 (Quality) runs.
 
@@ -307,6 +403,11 @@ def recommended_profile(model_id: str, device: str) -> str | None:
     greedy, and an unmeasured model or device has nothing to advise from.
     ``device`` is ``"cpu"`` or ``"cuda"``; anything else resolves to the GPU
     row, matching how the benchmark labels its devices.
+
+    ``factor`` scales the CPU rows the way :func:`_rank_whisper` does, and has
+    to be the same number: sizing a model for a slow machine and then judging
+    its beam against the reference machine's clock hands that machine the wide
+    beam precisely when it has no room for it.
     """
     spec = WHISPER_MODELS.get(model_id)
     if spec is None or spec.backend != "whisper":
@@ -316,7 +417,9 @@ def recommended_profile(model_id: str, device: str) -> str | None:
         return None
 
     on_cpu = device == "cpu"
-    speed_wer, speed_latency = (speed[1], speed[3]) if on_cpu else (speed[0], speed[2])
+    speed_wer, speed_latency = (
+        (speed[1], speed[3] * factor) if on_cpu else (speed[0], speed[2])
+    )
     gate = _LATENCY_GATE_S["cpu" if on_cpu else "gpu"]
 
     quality = BEAM_BENCH.get(model_id, {}).get("cpu" if on_cpu else "gpu")
@@ -326,6 +429,8 @@ def recommended_profile(model_id: str, device: str) -> str | None:
         return "latency" if speed_latency > gate else None
 
     quality_wer, quality_latency = quality
+    if on_cpu:
+        quality_latency *= factor
     if speed_latency <= 0 or quality_latency > gate:
         return "latency"
     if speed_wer - quality_wer < _QUALITY_MIN_WER_GAIN:
@@ -339,7 +444,8 @@ def recommended_profile(model_id: str, device: str) -> str | None:
 
 def best_downloaded(
     dm, *, translate: bool, tier: str | None = None,
-    languages: tuple[str, ...] | None = None,
+    languages: tuple[str, ...] | None = None, factor: float = 1.0,
+    vram_mb: int | None = None, compute: str = "int8",
 ) -> tuple[str | None, str | None]:
     """Best already-downloaded (whisper id, mt id) for ``tier``.
 
@@ -350,10 +456,8 @@ def best_downloaded(
     """
     if tier is None:
         tier = detect_tier()
-    pref = (
-        WHISPER_PREFERENCE[tier]
-        if not languages
-        else _rank_whisper(tier, languages=languages)
+    pref = _rank_whisper(
+        tier, languages=languages, factor=factor, vram_mb=vram_mb, compute=compute
     )
     whisper = next((mid for mid in pref if dm.is_whisper_downloaded(mid)), None)
     mt = None
@@ -365,97 +469,10 @@ def best_downloaded(
     return whisper, mt
 
 
-# Fields reset_to_recommended() restores, with the value it restores them to.
-# Anything absent is a personal choice the recommender has no opinion about
-# (target languages, spoken language, microphone, OSC address, appearance).
-_RECOMMENDED_ENGINE_FIELDS = {
-    "stt": {"device": "auto", "device_index": 0, "compute_type": "auto",
-            "cpu_threads": 0, "num_workers": 1},
-    "translate": {"device": "auto", "device_index": 0, "compute_type": "auto",
-                  "inter_threads": 1, "intra_threads": 0, "max_queued_batches": 0},
-}
-
-
-def reset_to_recommended(cfg, dm=None) -> dict[str, object]:
-    """Restore every setting the benchmarks have an opinion about, in place.
-
-    Picks the voice and translation models for this machine's tier and the
-    configured spoken language, preferring ones already downloaded so the app
-    can still caption afterwards; returns the device/compute/thread fields to
-    automatic; and applies the performance mode :func:`recommended_profile`
-    advises for the chosen model. Personal choices are left alone: target
-    languages, spoken language, microphone, OSC address, theme and interface
-    language. Returns the values it settled on, for the caller to show.
-    """
-    from vrcc.core.config import apply_profile
-
-    for section_name, fields in _RECOMMENDED_ENGINE_FIELDS.items():
-        section = getattr(cfg, section_name)
-        for field, value in fields.items():
-            setattr(section, field, value)
-
-    languages = spoken_whisper_codes(cfg)
-    choice = default_device_choice()
-    tier = "cpu" if choice == "cpu" else detect_tier()
-    if tier == "cpu" and choice != "cpu":
-        tier = "gpu_low"
-
-    # The wizard's CPU verdict (a small card should stay VRChat's) must bind
-    # the device too: "auto" resolves to cuda whenever CUDA is usable, which
-    # would run the CPU-tier models on the GPU the verdict chose to spare and
-    # compute the performance mode for the wrong device.
-    if choice == "cpu":
-        cfg.stt.device = "cpu"
-        cfg.translate.device = "cpu"
-
-    whisper, mt = preset_for_choice(choice, tier=tier, languages=languages)
-    if dm is not None:
-        # A recommended model that is not downloaded would leave the app
-        # unable to caption until it is; prefer what is already on disk.
-        have_whisper, have_mt = best_downloaded(
-            dm, translate=cfg.translate.enabled, tier=tier, languages=languages
-        )
-        whisper = have_whisper or whisper
-        mt = have_mt or mt
-
-    cfg.stt.model = whisper
-    # The MT pick is only meaningful while translation is on: overwriting the
-    # stored model while it is off would swap a possibly-downloaded choice for
-    # a possibly-missing preset the user never sees applied.
-    if mt is not None and cfg.translate.enabled:
-        cfg.translate.model = mt
-
-    device = "cpu" if choice == "cpu" else "cuda"
-    apply_profile(cfg, recommended_profile(whisper, device) or "latency")
-    return {"stt_model": whisper, "mt_model": mt, "profile": cfg.gui.profile}
-
-
-def _whisper_code(display_name: str) -> str | None:
-    """The Whisper code for a caption-language display name, or ``None`` when
-    the registry does not know it (a hand-edited config)."""
-    from vrcc.core.languages import LANGUAGES
-
-    lang = LANGUAGES.get(display_name)
-    return lang.whisper if lang is not None else None
-
-
-def spoken_whisper_codes(cfg) -> tuple[str, ...]:
-    """Whisper codes for the languages the user says they speak, deduplicated.
-
-    Prefers the wizard's explicit answer (``stt.spoken_languages``) and falls
-    back to the single stored source language, so a config written before that
-    question existed still reranks the way it always did. "auto" and unknown
-    names contribute nothing: an empty result keeps the recommendation
-    language-blind rather than guessing at one.
-
-    Deduplication matters -- Chinese Simplified and Traditional are separate
-    display languages sharing the Whisper code "zh", and a model covering
-    "zh" covers both as far as ranking is concerned.
-    """
-    names = cfg.stt.spoken_languages or [cfg.stt.source_language]
-    codes: list[str] = []
-    for name in names:
-        code = _whisper_code(name)
-        if code is not None and code not in codes:
-            codes.append(code)
-    return tuple(codes)
+# Imported last: recommend_reset imports from this module, so the names it
+# needs must already exist. Re-exported because reset_to_recommended and
+# spoken_whisper_codes were always part of this module's surface.
+from vrcc.core.recommend_reset import (  # noqa: E402,F401
+    reset_to_recommended,
+    spoken_whisper_codes,
+)

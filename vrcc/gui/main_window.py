@@ -13,13 +13,17 @@ import logging
 from typing import Callable
 
 from PySide6.QtCore import QByteArray
-from PySide6.QtWidgets import QComboBox, QMainWindow, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
-from vrcc import __version__
 from vrcc.core.config import ConfigStore, apply_profile
-from vrcc.gui import model_prompts, status_render
+from vrcc.gui import main_heard, main_targets, model_prompts, status_render
 from vrcc.gui.bridge import BusBridge
-from vrcc.gui.caption_log import CaptionModel, empty_state_html, render_rows_html
+from vrcc.gui.caption_log import (
+    CaptionModel,
+    empty_state_html,
+    empty_state_text,
+    render_row_html,
+)
 from vrcc.gui.icons import FRIENDLY_ERRORS as _FRIENDLY_ERRORS
 from vrcc.gui.icons import dots_svg as _dots_svg  # re-exported: tests import it from here
 from vrcc.gui.log_follow import LogFollower
@@ -30,6 +34,7 @@ from vrcc.gui.main_parts import (
     build_top_bar,
 )
 from vrcc.gui.style import PALETTE, resolve_theme
+from vrcc.gui.widgets import set_combo_text, set_combo_value
 from vrcc.i18n import tr, tr_noop
 
 logger = logging.getLogger("vrcc.gui.main_window")
@@ -59,6 +64,7 @@ class MainWindow(QMainWindow):
         download_manager=None,
         on_model_change=None,
         on_check_updates=None,
+        on_hear_others=None,
     ) -> None:
         super().__init__()
         self._bridge = bridge
@@ -78,6 +84,9 @@ class MainWindow(QMainWindow):
         self._on_open_settings = on_open_settings
         self._on_open_models = on_open_models
         self._on_check_updates = on_check_updates
+        # Starts/stops the speaker capture live (None when headless), so the
+        # toggle never needs a relaunch to take effect.
+        self._on_hear_others = on_hear_others
         # Kept for caller compat but no longer read: engines hot-swap mid-session,
         # so a launch-time "was MT built?" snapshot would wrongly suppress the
         # "translating…" row. Live config is the only correct source of truth.
@@ -86,8 +95,14 @@ class MainWindow(QMainWindow):
         # Guards config writes while we push config values INTO widgets during
         # construction, so setCurrentText/setValue don't echo back to disk.
         self._loading = True
+        # Re-entrancy guard: _rebuild_targets re-points a pill that cannot
+        # stand, and that edit would otherwise call it straight back in.
+        self._rebuilding = False
         # Latest engine states, rendered together in the status bar.
         self._engine_states: dict[str, str] = {}
+        # Engine kinds already shown a failure modal, cleared when one goes
+        # ready again.
+        self._engine_failures_reported: set[str] = set()
         # Per-utterance caption rows with delivery status (pure model, re-rendered).
         self._caption_model = CaptionModel()
 
@@ -112,6 +127,10 @@ class MainWindow(QMainWindow):
         root.addWidget(build_compose_row(self))
         self.setCentralWidget(central)
         self._log_follow = LogFollower(self._log)
+        # statusBar() builds the bar on first call, and building it takes its
+        # height out of the caption feed. Left lazy, the first status flash of
+        # a session shifts the feed under the user (measured 184px -> 162px).
+        self.statusBar()
 
         # The capture label is the honest "is the app working?" answer: it stays
         # red "Not listening" after any load/mic/engine failure, so a broken app
@@ -127,33 +146,16 @@ class MainWindow(QMainWindow):
     # -- target add/remove -------------------------------------------------
 
     def _add_target(self) -> None:
-        # Enable the lowest hidden target slot; its checkbox drives the rebuild.
-        for slot in range(1, _NUM_TARGET_SLOTS):
-            check = self._target_checks[slot]
-            if check is not None and not check.isChecked():
-                check.setChecked(True)
-                break
-        self._sync_target_visibility()
+        main_targets.add_target(self, _NUM_TARGET_SLOTS)
+
+    def _seed_free_target(self, slot: int) -> None:
+        main_targets.seed_free_target(self, slot)
 
     def _remove_target(self, slot: int) -> None:
-        check = self._target_checks[slot]
-        if check is not None:
-            check.setChecked(False)
-        self._sync_target_visibility()
+        main_targets.remove_target(self, slot, _NUM_TARGET_SLOTS)
 
     def _sync_target_visibility(self) -> None:
-        # Show a slot's pill iff its (hidden) checkbox is on; offer "+ Language"
-        # only while a slot is still free.
-        any_free = False
-        for slot in range(1, _NUM_TARGET_SLOTS):
-            check = self._target_checks[slot]
-            cont = self._target_conts[slot]
-            if check is None or cont is None:
-                continue
-            cont.setVisible(check.isChecked())
-            if not check.isChecked():
-                any_free = True
-        self._add_target_btn.setVisible(any_free)
+        main_targets.sync_target_visibility(self, _NUM_TARGET_SLOTS)
 
     # -- initial values from config ----------------------------------------
 
@@ -168,20 +170,19 @@ class MainWindow(QMainWindow):
         model_prompts.grey_unsupported_languages(
             self._source_combo, cfg.stt.model, translating=cfg.translate.enabled
         )
-        self._set_combo_text(self._source_combo, cfg.stt.source_language)
+        set_combo_value(self._source_combo, cfg.stt.source_language)
         # A stored language the greying just disabled would caption wrongly in
         # silence; offer a better downloaded model once construction settles.
         model_prompts.schedule_language_nudge(self)
 
-        targets = list(cfg.translate.targets)
-        for slot, combo in enumerate(self._target_combos):
-            check = self._target_checks[slot]
-            if slot < len(targets):
-                self._set_combo_text(combo, targets[slot])
-                if check is not None:
-                    check.setChecked(True)
-            elif check is not None:
-                check.setChecked(False)
+        main_targets.load_targets(self, cfg)
+
+        # Re-read on every reload, so ticking it in Settings moves the button
+        # and vice versa: two controls for one setting must never disagree.
+        self._hear_btn.setChecked(bool(cfg.audio.hear_others_enabled))
+        # setChecked is a no-op when the value already matches, so the label,
+        # fill and meter are set here rather than left to the toggle signal.
+        main_heard.set_toggle_state(self, bool(cfg.audio.hear_others_enabled))
 
         self._captioning_btn.setChecked(bool(self._pipeline.captioning_enabled))
         # setChecked only emits toggled on a state change, so sync the meter's
@@ -192,11 +193,7 @@ class MainWindow(QMainWindow):
         # shared config with no bus event; re-derive the capture label.
         self._render_capture_status()
 
-    @staticmethod
-    def _set_combo_text(combo: QComboBox, text: str) -> None:
-        idx = combo.findText(text)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
+    _set_combo_text = staticmethod(set_combo_text)
 
     # -- bridge signal wiring ----------------------------------------------
 
@@ -213,6 +210,8 @@ class MainWindow(QMainWindow):
             (b.app_error, self._on_app_error),
             (b.vrchat_detected, self._on_vrchat_detected),
             (b.update_result, self._on_update_result),
+            (b.heard_phrase, self._on_heard_phrase),
+            (b.heard_level, self._on_heard_level),
         )
 
     def _connect_bridge(self) -> None:
@@ -276,6 +275,15 @@ class MainWindow(QMainWindow):
         detected = bool(event.detected) if event is not None else None
         status_render.render_vrchat(self, detected)
 
+    def _on_heard_level(self, rms: float, _vad_prob: float) -> None:
+        main_heard.on_level(self, rms)
+
+    def _on_hear_others_toggled(self, checked: bool) -> None:
+        main_heard.on_toggled(self, checked)
+
+    def _on_heard_phrase(self, event) -> None:
+        main_heard.on_phrase(self, event)
+
     def _on_engine_state(self, event) -> None:
         # State drives the caption feed's loading message via _engine_states; it
         # is no longer shown as jargon text on the main screen.
@@ -294,10 +302,30 @@ class MainWindow(QMainWindow):
             self._flash_status(
                 tr("{name} could not stay on the GPU. Switched to CPU (slower).", name=name)
             )
+        if event.state == "ready":
+            # A recovered engine can fail again, and that failure deserves a dialog.
+            self._engine_failures_reported.discard(event.engine)
         if event.state == "failed":
-            self.set_capture_status(False, tr("{name} failed to load", name=name))
-            lower = tr(_ENGINE_NAMES_LOWER[event.engine]) if known else event.engine.title().lower()
-            body = tr("The {name} failed to start.", name=lower)
+            # Capture is the voice model's business alone. A dead translator
+            # leaves transcription running, so claiming "Not listening" would be
+            # a lie the user has no way to clear: no later event repaints it.
+            if event.engine == "stt":
+                self.set_capture_status(False, tr("{name} failed to load", name=name))
+            elif known:
+                self._flash_status(
+                    tr("{name} failed to load. Captions still work.", name=name)
+                )
+            # One engine can republish "failed" (a retried swap, a second
+            # warm-up), and a modal per attempt buries the screen in dialogs.
+            if event.engine in self._engine_failures_reported:
+                return
+            self._engine_failures_reported.add(event.engine)
+            if known:
+                lower = tr(_ENGINE_NAMES_LOWER[event.engine])
+                body = tr("The {name} failed to start.", name=lower)
+            else:
+                body = tr("A model failed to start.")
+            body += "\n\n" + tr("Open Models to re-download it, then restart VRCC.")
             if event.detail:
                 body += f"\n\n{event.detail}"
             QMessageBox.warning(self, tr("Model failed to load"), body)
@@ -312,15 +340,15 @@ class MainWindow(QMainWindow):
         self._flash_status(tr("Downloading {model_id}: {pct}%", model_id=event.model_id, pct=pct))
 
     def _on_app_error(self, event) -> None:
-        # All AppErrors are transient status text (5 s); the only modal alert is a
-        # failed engine (in _on_engine_state). Known codes show a human sentence;
-        # the raw code+message go to the log so diagnostics are never lost.
-        friendly = _FRIENDLY_ERRORS.get(event.code)
-        if friendly is not None:
-            logger.warning("AppError %s: %s", event.code, event.message)
-            self._flash_status(tr(friendly))
-        else:
-            self._flash_status(f"{event.code}: {event.message}")
+        # All AppErrors are transient status text (5 s); the only modal alert is
+        # a failed engine (in _on_engine_state). The raw code+message go to the
+        # log so diagnostics are never lost, and never to the status bar: a bare
+        # code with no sentence of its own tells a user nothing and points them
+        # nowhere.
+        logger.warning("AppError %s: %s", event.code, event.message)
+        friendly = _FRIENDLY_ERRORS.get(event.code, _FRIENDLY_ERRORS["HANDLER_ERROR"])
+        self._flash_status(tr(friendly))
+        main_heard.on_error(self, event.code)
 
     def _on_update_result(self, event) -> None:
         from vrcc.gui import updates_ui
@@ -329,25 +357,18 @@ class MainWindow(QMainWindow):
     # -- caption log helpers -----------------------------------------------
 
     def _render_log(self) -> None:
-        # Full re-render from the row model: caption events are low-frequency and
-        # the model is capped, so it's cheap. Scroll position belongs to the
-        # follower: pinned to the newest row while following, held in place
-        # while the user reads history (setHtml alone resets it to the top).
+        # Row HTML is handed over per row, not as one document: the follower
+        # writes only what changed, and holds the reading position across the
+        # model's cap eviction. Both belong to it, so this stays a pure
+        # model-to-markup step.
         rows = self._caption_model.rows()
-        colors = self._p
         if rows:
-            html = render_rows_html(rows, colors, self._scale)
-        else:
-            loading = self._engine_states.get("stt") in (None, "loading")
-            if loading:
-                msg, sub = tr("Getting the voice model ready…"), tr("usually takes a few seconds")
-            else:
-                msg, sub = (
-                    tr("Say something - captions appear here"),
-                    tr("then in your VRChat chatbox"),
-                )
-            html = empty_state_html(msg, sub, colors, self._scale)
-        self._log_follow.set_html(html)
+            self._log_follow.set_rows(
+                [(row.key, render_row_html(row, self._p, self._scale)) for row in rows]
+            )
+            return
+        msg, sub = empty_state_text(self._engine_states.get("stt"))
+        self._log_follow.set_html(empty_state_html(msg, sub, self._p, self._scale))
 
     # -- mute chip / status rendering --------------------------------------
 
@@ -393,33 +414,24 @@ class MainWindow(QMainWindow):
         self._rebuild_targets()
         model_prompts.run_language_nudge(self)
 
-    def _on_targets_changed(self, _text: str) -> None:
+    def _on_target_slot_changed(self, slot: int, text: str) -> None:
+        # The combo can be showing a substitute for what the user asked for, so
+        # only a real edit may overwrite the recorded intent.
+        if not self._loading and not self._rebuilding:
+            self._target_intent[slot] = text
         self._rebuild_targets()
 
     def _on_target_enabled_changed(self, _checked: bool) -> None:
         self._rebuild_targets()
 
     def _rebuild_targets(self) -> None:
-        if self._loading:
-            return
-        # Dedupe across slots (first-occurrence order) and drop any target equal
-        # to the source -- translating a language into itself just re-sends the original.
-        source = self._store.config.stt.source_language
-        targets: list[str] = []
-        for slot, combo in enumerate(self._target_combos):
-            check = self._target_checks[slot]
-            lang = combo.currentText()
-            enabled = check is None or check.isChecked()
-            if enabled and lang not in targets and lang != source:
-                targets.append(lang)
-        self._store.config.translate.targets = targets[:_NUM_TARGET_SLOTS]
-        self._store.save_soon()
+        main_targets.rebuild_targets(self, _NUM_TARGET_SLOTS)
 
     def _on_profile_toggled(self, checked: bool) -> None:
         if self._loading:
             return
-        # apply_profile writes the full bundle (STT/MT beam, VAD timings) + gui.profile;
-        # engines read beam sizes per job, so it takes effect on the next utterance.
+        # apply_profile writes the full bundle (STT beam, VAD timings) + gui.profile;
+        # the engine reads beam size per job, so it takes effect next utterance.
         apply_profile(self._store.config, "quality" if checked else "latency")
         self._store.save_soon()
 
@@ -435,6 +447,8 @@ class MainWindow(QMainWindow):
     def _on_send_clicked(self) -> None:
         text = self._text_input.text()
         if not text.strip():
+            # Whitespace only: leaving it in the box makes the press look ignored.
+            self._text_input.clear()
             return
         # Only clear the input if the pipeline accepted the message; otherwise
         # (engines still loading / failed) preserve the user's typed text.
@@ -449,13 +463,9 @@ class MainWindow(QMainWindow):
             self._on_check_updates()
 
     def _show_about(self) -> None:
-        blurb = tr("Live voice captioning and translation for the VRChat chatbox.")
-        credit = tr('Created by <a href="https://github.com/dljr-github">dljr-github</a>')
-        QMessageBox.about(
-            self,
-            tr("About VRCC"),
-            f"<p><b>VRCC</b> v{__version__}</p><p>{blurb}</p><p>{credit}</p>",
-        )
+        from vrcc.gui import updates_ui
+
+        updates_ui.show_about(self)
 
     # -- geometry persistence ----------------------------------------------
 

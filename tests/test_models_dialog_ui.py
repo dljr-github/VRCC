@@ -178,7 +178,7 @@ def test_recommended_badge_follows_tier_not_active_model(qapp, tmp_path, monkeyp
     follow the tier preset instead -- the "In use" pill alone marks active."""
     from vrcc.core import recommend
 
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "cpu")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "cpu")
     dlg, store, bridge, _dm = _dlg(tmp_path)
     try:
         cpu_whisper, _cpu_mt = recommend.PRESETS["cpu"]
@@ -201,7 +201,7 @@ def test_recommended_badge_follows_config_device_over_detected_tier(qapp, tmp_pa
     from vrcc.gui.bridge import BusBridge
     from vrcc.gui.models_dialog import ModelsDialog
 
-    monkeypatch.setattr(recommend, "detect_tier", lambda: "gpu_high")
+    monkeypatch.setattr(recommend, "detect_tier", lambda index=0: "gpu_high")
     store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
     store.config.stt.device = "cpu"
     store.config.stt.source_language = "auto"  # keep this device test language-blind
@@ -252,7 +252,7 @@ def test_models_dialog_recommends_sensevoice_for_cjk_speaker(qapp, tmp_path, mon
     bridge = BusBridge(EventBus())
     dlg = ModelsDialog(_FakeDM(tmp_path / "models"), bridge, config_store=store)
     try:
-        assert dlg._recommended_ids[0] == "sense-voice-small"
+        assert dlg._recommended_ids[0] == "small"
     finally:
         dlg.close(); dlg.deleteLater(); bridge.detach()
 

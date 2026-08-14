@@ -256,10 +256,13 @@ def test_fit_message_truncate_keeps_translation_when_original_is_long():
     assert "…" in parts[0]  # signals the ORIGINAL was shortened
 
 
-def test_fit_message_split_keeps_short_cjk_translation_in_last_part():
+def test_fit_message_split_repeats_short_cjk_translation_in_every_part():
     # Bug: a short spaceless CJK translation was treated as one
     # un-splittable "word" that greedily filled slice 0 and left "" for
     # every later part, so the translation vanished after the first ~2s.
+    # Anchoring it to the last part fixed the vanishing and broke arrival:
+    # parts drain one every 2s and a new utterance clears the queue. Repeating
+    # it satisfies both, which is why the assertion is now every part.
     cfg = make_cfg(overflow="split")
     original = " ".join(f"word{i}" for i in range(60))  # long: forces >1 part
     translation = "これはテストです"
@@ -268,7 +271,7 @@ def test_fit_message_split_keeps_short_cjk_translation_in_last_part():
 
     assert len(parts) >= 2
     assert all(len(part) <= CHATBOX_LIMIT for part in parts)
-    assert translation in parts[-1]  # the LAST, persisting part has it
+    assert all(translation in part for part in parts)
 
 
 def test_fit_message_split_degenerate_fallback_keeps_languages_separate():
@@ -364,3 +367,118 @@ def test_submit_single_chunk_message_has_zero_delay_after():
     items = list(sender._queue)
     assert len(items) == 1
     assert items[0][3] == 0.0
+
+
+def test_fit_message_split_spreads_a_spaceless_translation_too_big_for_one_slice():
+    # A Japanese sentence is ONE token to str.split(), so the word packer
+    # accepted it and dropped the whole translation into a single slice even
+    # when it could not fit there. Anchored to the end that is the LAST part,
+    # which arrives split_delay_s per part later and is what latest-wins
+    # coalescing discards first: measured 12% delivery at a conversational pace.
+    #
+    # Two translations, which is what makes a slice too small to hold either
+    # one whole. A translation that still fits one slice keeps riding there
+    # (test above), because the last part is what persists on screen.
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(22))
+    ja = (
+        "そのマップの二番目の部屋を歩いていたら、フレームレートが九まで"
+        "落ちてしまい、クライアントを再起動しました。"
+    )
+    zh = "我走过那张新地图的第二个房间时，帧率掉到了九，只好重启了客户端。"
+
+    parts = fit_message(original, [("JP", ja), ("ZH", zh)], cfg)
+
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+    # Nothing is lost, and the Japanese now advances with the parts instead of
+    # waiting for the last one.
+    assert all(ch in "".join(parts) for ch in ja)
+    assert any(ch in parts[0] for ch in ja)
+
+
+def test_fit_message_split_leaves_spaced_scripts_word_packed():
+    # Korean separates words, so it packs like English and must not be cut
+    # mid-word by the spaceless path.
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(22))
+    translation = "새 맵의 두 번째 방을 지나갈 때 프레임이 아홉까지 떨어져서 다시 시작했어요"
+
+    parts = fit_message(original, [("KR", translation)], cfg)
+
+    rejoined = " ".join(
+        piece for part in parts for piece in part.split("\n") if piece
+    )
+    for word in translation.split():
+        assert word in rejoined, word
+
+
+def test_fit_message_split_puts_an_unrepeatable_translation_in_the_first_part():
+    """A translation too long to ride whole in every part is sliced across them
+    in order, so the reader gets the opening of it immediately. It must not be
+    held back to the final part, which at a conversational pace is the one the
+    next utterance discards."""
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(30))
+    long_ja = "あ" * 130
+
+    parts = fit_message(original, [("JP", long_ja)], cfg)
+
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+    assert long_ja not in parts[0], "too long to repeat whole"
+    assert any(ch in parts[0] for ch in long_ja), "but its opening still leads"
+    assert "".join(
+        ch for part in parts for ch in part if ch == "あ"
+    ) == long_ja, "and none of it is lost"
+
+
+def test_fit_message_split_never_spends_more_than_three_parts_to_repeat():
+    """Repeating costs room, which can cost a part. Past the third nothing is
+    read at conversational pace, so the growth is capped there."""
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(24))
+
+    parts = fit_message(
+        original, [("JP", "はい"), ("ZH", "好的"), ("KR", "네")], cfg
+    )
+
+    assert len(parts) <= 3
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+
+
+def test_repeating_may_spend_one_extra_part_but_not_two():
+    """The grow branch: at a part count where nothing could be repeated whole,
+    one more part can make room, and that is worth it because a repeated
+    translation reaches the reader in the first part AND survives on screen.
+    Capped at _MAX_REPEAT_PARTS, since nothing past the third part is read at
+    conversational pace, so buying a fourth trades delivery for nothing.
+    """
+    from vrcc.osc import chatbox_format
+
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(48))
+    trs = [("JP", "あ" * 14), ("ZH", "好" * 20)]
+
+    capped = fit_message(original, trs, cfg)
+
+    previous = chatbox_format._MAX_REPEAT_PARTS
+    chatbox_format._MAX_REPEAT_PARTS = 99
+    try:
+        uncapped = fit_message(original, trs, cfg)
+    finally:
+        chatbox_format._MAX_REPEAT_PARTS = previous
+
+    assert len(capped) == 3
+    assert len(uncapped) == 4, "without the ceiling this keeps buying parts"
+    assert all(len(part) <= CHATBOX_LIMIT for part in capped)
+
+
+def test_growing_a_part_is_only_taken_when_it_buys_a_repeat():
+    """Otherwise every long message would cost an extra part for nothing."""
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(22))
+    long_ja = "あ" * 100  # too long to sit whole beside a share of the original
+
+    parts = fit_message(original, [("JP", long_ja)], cfg)
+
+    assert not any(long_ja in part for part in parts), "cannot be repeated"
+    assert len(parts) == 2, "so no extra part should have been spent"

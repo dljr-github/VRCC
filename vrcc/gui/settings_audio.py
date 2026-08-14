@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QSlider,
     QWidget,
@@ -34,6 +35,19 @@ logger = logging.getLogger("vrcc.gui.settings_audio")
 _AUTO = "auto"
 
 
+def denoise_strength_enabled(dlg: "SettingsDialog", enabled: bool) -> None:
+    """Grey the strength row with its checkbox, anchors and readout included:
+    a live slider beside a feature that is off gives feedback for a control
+    that does nothing."""
+    for widget in (
+        dlg._denoise_strength,
+        dlg._denoise_value_label,
+        dlg._denoise_low,
+        dlg._denoise_high,
+    ):
+        widget.setEnabled(bool(enabled))
+
+
 def build_denoise_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
     """Add a "Reduce background noise" checkbox and its strength slider."""
     dlg._denoise_check = QCheckBox(tr("Reduce background noise"))
@@ -45,18 +59,29 @@ def build_denoise_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
         )
     )
 
-    dlg._denoise_strength = QSlider(Qt.Orientation.Horizontal)
+    dlg._denoise_strength = no_wheel(QSlider(Qt.Orientation.Horizontal))
     dlg._denoise_strength.setRange(0, 100)
     dlg._denoise_strength.setValue(int(round(dlg._cfg.audio.denoise_strength * 100)))
+    # Low is not off: the model still runs and still shapes the audio. The
+    # checkbox above is the only way to leave the microphone untouched.
+    dlg._denoise_strength.setToolTip(
+        tr(
+            "How much of the cleaned-up audio is used. Low still cleans a "
+            "little; untick the box above to leave your microphone alone."
+        )
+    )
+    dlg._denoise_value_label = QLabel(_percent(dlg._denoise_strength.value()))
+    dlg._denoise_value_label.setStyleSheet(dlg._muted_style)
 
     def on_strength(v):
+        dlg._denoise_value_label.setText(_percent(v))
         if dlg._loading:
             return
         dlg._cfg.audio.denoise_strength = v / 100.0
         dlg._changed()
 
     def on_toggle(checked):
-        dlg._denoise_strength.setEnabled(bool(checked))
+        denoise_strength_enabled(dlg, checked)
         if dlg._loading:
             return
         dlg._cfg.audio.denoise_enabled = bool(checked)
@@ -64,10 +89,18 @@ def build_denoise_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
 
     dlg._denoise_strength.valueChanged.connect(on_strength)
     dlg._denoise_check.toggled.connect(on_toggle)
-    dlg._denoise_strength.setEnabled(dlg._cfg.audio.denoise_enabled)
+
+    row, dlg._denoise_low, dlg._denoise_high = dlg._anchored_slider(
+        dlg._denoise_strength, dlg._denoise_value_label
+    )
+    denoise_strength_enabled(dlg, dlg._cfg.audio.denoise_enabled)
 
     form.addRow(dlg._denoise_check)
-    form.addRow(tr("Noise reduction strength"), dlg._denoise_strength)
+    form.addRow(tr("Noise reduction strength"), row)
+
+
+def _percent(value: int) -> str:
+    return f"{value}%"
 
 
 def _fill_input_devices(dlg: "SettingsDialog", combo: QComboBox) -> None:

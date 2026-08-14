@@ -12,10 +12,15 @@ import os
 
 from vrcc import __version__
 from vrcc.audio.source import MicSource
-from vrcc.core import hardware
+from vrcc.core import calibrate, hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, default_paths
-from vrcc.core.engine_stack import build_engine_stack
+from vrcc.core.engine_stack import (
+    EngineOwners,
+    apply_hear_others,
+    build_engine_stack,
+    start_hear_others_guarded,
+)
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
 from vrcc.core.logs import setup_logging
@@ -44,6 +49,31 @@ def _make_source_with_denoise(config, device_cfg: str) -> MicSource:
     denoiser = Denoiser()
     denoiser.configure(config.audio.denoise_enabled, config.audio.denoise_strength)
     return MicSource(_resolve_audio_device(device_cfg), denoiser=denoiser)
+
+
+def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, owners) -> None:
+    """Mark each engine kind that failed at startup, and unhook a dead
+    translator from every consumer of it.
+
+    Marking it lets re-picking the SAME configured model in Settings run a real
+    swap instead of no-opping into the startup-dead engine, since the reloader
+    was seeded from config.
+
+    Unhooking matters because captions now start without the translator: the
+    engine object is still installed after its ``load()`` raised, ``mt_active``
+    still reads True, and every utterance would raise inside ``translate()``
+    and flash "the original text was sent instead" for the rest of the session.
+
+    Both are guarded on the kind still being on its startup id. One engine can
+    fail seconds before the other finishes loading, and a user swap won inside
+    that window must keep the live engine it installed.
+    """
+    for kind in failed_kinds:
+        if loaded.get(kind) != startup_ids[kind]:
+            continue
+        loaded[kind] = _FAILED
+        if kind == "mt":
+            owners.set_mt(None)
 
 
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
@@ -146,8 +176,17 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             bridge.detach()
             store.save_now()
             return 0
+    else:
+        # An install that already has its models never opens the wizard, which
+        # is the only other thing that probes. Without this the machine speed
+        # stays unmeasured for exactly the upgrading users, and every surface
+        # that reads it silently ranks them at reference speed.
+        calibrate.cached_factor(store.config)
 
     stack = build_engine_stack(store, bus, paths)
+    # Every holder of the shared engines, not just the pipeline: a swap that
+    # reached one of two consumers left the other calling an unloaded engine.
+    owners = EngineOwners(stack.pipeline, stack.heard)
 
     # Flipped once _start_pipeline_guarded succeeds; _status_after_swap reads
     # it so a green swap never claims "Capturing" over a never-started pipeline.
@@ -179,24 +218,30 @@ def run(portable: bool = False, verbose: bool = False) -> int:
                 startup_deferred.clear()
 
         def _finish_startup(self, success: bool) -> None:
+            # Mark each dead kind so re-picking the SAME configured model in
+            # Settings runs a real swap instead of no-opping into the
+            # startup-dead engine (the reloader was seeded from config). One
+            # engine can fail seconds before the other finishes loading, so
+            # guard against a user swap won inside that window: only seed a
+            # kind still on its startup id, and never paint a red status over a
+            # capture the swap already started. Runs for a dead translator too,
+            # which no longer stops capture, so re-picking it still swaps.
+            _retire_failed_engines(
+                loader.failed_kinds, reloader._loaded, startup_ids, owners
+            )
             if not success:
-                # Mark each dead kind so re-picking the SAME configured model
-                # in Settings runs a real swap instead of no-opping into the
-                # startup-dead engine (the reloader was seeded from config).
-                # One engine can fail seconds before the other finishes
-                # loading, so guard against a user swap won inside that
-                # window: only seed a kind still on its startup id, and never
-                # paint a red status over a capture the swap already started.
-                for kind in loader.failed_kinds:
-                    if reloader._loaded.get(kind) == startup_ids[kind]:
-                        reloader._loaded[kind] = _FAILED
                 logger.warning(
-                    "engines failed to load; capture not started "
+                    "voice model failed to load; capture not started "
                     "(open Models to re-download, then restart)"
                 )
                 if not pipeline_started[0]:
-                    window.set_capture_status(False, tr("an engine failed to load"))
+                    # Only the voice model reaches here now, so name it: a dead
+                    # translator no longer stops capture.
+                    window.set_capture_status(
+                        False, tr("{name} failed to load", name=tr("voice model"))
+                    )
                 return
+            start_hear_others_guarded(stack, store.config, bus)
             if not _start_pipeline_guarded(stack.pipeline, bus):
                 # The AppError already flashed the status bar; a dead mic kills
                 # the core function, so also say it loudly. App stays up: fix
@@ -278,7 +323,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     }
 
     reloader = _Reloader(
-        pipeline=stack.pipeline,
+        pipeline=owners,
         build=_build_engine,
         load=_load_engine,
         set_swapping=stack.pipeline.set_swapping,
@@ -345,6 +390,10 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         dlg = ModelsDialog(dm, bridge, config_store=store, parent=window)
         dlg.exec()
         dlg.deleteLater()
+        # The Models window edits the spoken languages, and through them
+        # stt.source_language, which the toolbar also shows and which decides
+        # the language greying. Same re-sync Settings does, for the same field.
+        window.reload_from_config()
 
     def make_window() -> MainWindow:
         return MainWindow(
@@ -354,6 +403,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             on_open_settings=open_settings,
             on_open_models=open_models,
             mt_available=stack.mt is not None,
+            on_hear_others=lambda _on: apply_hear_others(stack, store.config),
             download_manager=dm,
             on_model_change=on_model_change,
             on_check_updates=lambda: updater.check(announce_no_update=True),
@@ -372,6 +422,8 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             store.config.mute_sync, store.config.osc.ip, bus
         ),
         mute=stack.mute,
+        heard=stack.heard,
+        hear_others=lambda: apply_hear_others(stack, store.config),
     )
     window = make_window()
     window.show()
@@ -406,6 +458,8 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     finally:
         detector.stop()
         stack.pipeline.stop()
+        if stack.heard is not None:
+            stack.heard.stop()
         stack.chatbox.stop()
         # Covers both the startup coordinator and one LiveApply built lazily
         # when mute sync was enabled after launch (stack.mute is None then).

@@ -35,6 +35,10 @@ def live_specs(cfg, apply, text_size_hook: Callable[[], None]) -> tuple[Spec, ..
     ``apply`` (LiveApply). The palette is fixed, so theme is not a live group."""
     return (
         ("audio", (cfg.audio.device,), lambda: apply.apply_audio_device(cfg.audio.device)),
+        # The speaker capture binds its device for the source's lifetime, so
+        # the picker only takes effect through a rebuild.
+        ("heard", (cfg.audio.hear_others_enabled, cfg.audio.hear_others_device),
+         lambda: apply.apply_hear_others()),
         ("stt", tuple(getattr(cfg.stt, f) for f in _STT_ENGINE_FIELDS),
          lambda: apply.reload_engine("stt")),
         ("mt", tuple(getattr(cfg.translate, f) for f in _MT_ENGINE_FIELDS),

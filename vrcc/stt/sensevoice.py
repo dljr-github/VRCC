@@ -191,13 +191,21 @@ class SenseVoiceEngine:
 
     # -- transcription ---------------------------------------------------------
 
-    def transcribe(self, samples: np.ndarray) -> SttResult | None:
+    def transcribe(
+        self, samples: np.ndarray, detect_language: bool = False
+    ) -> SttResult | None:
         """Transcribe ``samples`` (mono float32, 16 kHz) into an :class:`SttResult`.
 
         Returns ``None`` for audio too short to make one filterbank frame and
         for empty text. ``language`` is the language the model reports, falling
         back to the configured source when the decode carries no usable tag.
         Raises ``RuntimeError`` if called before :meth:`load`.
+
+        ``detect_language`` feeds the model its own ``lang_auto`` slot instead
+        of the configured spoken language, for speech captured from the
+        speakers: that is someone else's, and constraining it to the user's
+        language turns a foreign sentence into confident nonsense. Every STT
+        backend takes this argument, so one caller can serve any of them.
         """
         if self._session is None:
             raise RuntimeError(
@@ -214,7 +222,9 @@ class SenseVoiceEngine:
             {
                 "x": features[None, :, :],
                 "x_length": np.array([features.shape[0]], dtype=np.int32),
-                "language": np.array([self._language_id()], dtype=np.int32),
+                "language": np.array(
+                    [self._language_id(detect_language)], dtype=np.int32
+                ),
                 "text_norm": np.array([self._text_norm_id], dtype=np.int32),
             },
         )[0]
@@ -273,17 +283,17 @@ class SenseVoiceEngine:
             if key in meta and whisper not in self._language_ids:
                 self._language_ids[whisper] = int(meta[key])
 
-    def _language_id(self) -> int:
+    def _language_id(self, detect: bool = False) -> int:
         """The model's language slot for the *currently configured* source
-        language, or its ``lang_auto`` slot when the source is "auto" or
-        outside the model's set.
+        language, or its ``lang_auto`` slot when ``detect`` is set, the source
+        is "auto", or the source is outside the model's set.
 
         Read per transcribe, not cached at load: the spoken-language combo
         writes straight to the live config without rebuilding the engine, so a
         cached slot would keep transcribing the previous language.
         """
         source = self._cfg.source_language
-        if source == "auto":
+        if detect or source == "auto":
             return self._auto_language_id
         return self._language_ids.get(get(source).whisper, self._auto_language_id)
 

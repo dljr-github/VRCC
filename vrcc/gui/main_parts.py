@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.icons import arrow_svg, dots_svg, gear_svg, mic_svg, x_svg
-from vrcc.gui.widgets import Card, IconButton, MicMeter, icon_label, no_wheel, svg_pixmap
+from vrcc.gui.widgets import combo_value, fill_spoken_languages, Card, IconButton, MicMeter, icon_label, no_wheel, svg_pixmap
 from vrcc.i18n import tr
 
 if TYPE_CHECKING:
@@ -72,9 +72,13 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     # -- language flow: You speak [src] -> They read [tgt] (+ up to 3) ----
     bar.addWidget(_flow_label(w, tr("You speak")))
     w._source_combo = no_wheel(QComboBox())
-    w._source_combo.addItems([_AUTO, *LANGUAGES.keys()])
+    fill_spoken_languages(
+        w._source_combo, tr("Auto (detect)"), _AUTO, LANGUAGES.keys()
+    )
     _compact_combo(w._source_combo)
-    w._source_combo.currentTextChanged.connect(w._on_source_changed)
+    w._source_combo.currentIndexChanged.connect(
+        lambda _i: w._on_source_changed(combo_value(w._source_combo))
+    )
     bar.addWidget(w._source_combo)
 
     bar.addWidget(
@@ -86,13 +90,21 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     # Each carries a hidden checkbox as the enabled-state source of truth.
     w._target_combos: list[QComboBox] = []
     w._target_checks: list[QCheckBox | None] = []
+    # Per slot, the language the user asked for, which is not always the one the
+    # combo shows: see MainWindow._rebuild_targets.
+    w._target_intent: list[str] = []
     w._target_conts: list[QWidget | None] = []
     for slot in range(_NUM_TARGET_SLOTS):
         combo = no_wheel(QComboBox())
         combo.addItems(list(LANGUAGES.keys()))
         _compact_combo(combo)
-        combo.currentTextChanged.connect(w._on_targets_changed)
+        # Slot-bound: the window records which pill the user edited, so a model
+        # that renders two languages alike cannot lose the one they asked for.
+        combo.currentTextChanged.connect(
+            lambda text, s=slot: w._on_target_slot_changed(s, text)
+        )
         w._target_combos.append(combo)
+        w._target_intent.append(combo.currentText())
         if slot == 0:
             w._target_checks.append(None)
             w._target_conts.append(None)
@@ -136,14 +148,28 @@ def build_top_bar(w: "MainWindow") -> QWidget:
     card.body.addLayout(actions)
 
     w._captioning_btn = QPushButton(tr("Start captioning"))
-    # One static mic icon; the label text alone carries the on/off state.
-    mic_pm = svg_pixmap(mic_svg(w._p["muted"]), 20)
+    # Text-coloured, not muted: the button fills with the accent when it is on
+    # and a muted grey glyph all but vanishes against it.
+    mic_pm = svg_pixmap(mic_svg(w._p["text"]), 20)
     if mic_pm is not None:
         w._captioning_btn.setIcon(QIcon(mic_pm))
     w._captioning_btn.setCheckable(True)
+    w._captioning_btn.setProperty("buttonRole", "toggle")
     w._captioning_btn.setToolTip(tr("Pause or resume captioning without closing VRCC."))
     w._captioning_btn.toggled.connect(w._on_captions_toggled)
     actions.addWidget(w._captioning_btn)
+
+    w._hear_btn = QPushButton(tr("Hear others"))
+    w._hear_btn.setCheckable(True)
+    w._hear_btn.setProperty("buttonRole", "toggle")
+    w._hear_btn.setToolTip(
+        tr(
+            "Caption what your speakers play, so you can read other people. "
+            "Shown here only, never sent to VRChat."
+        )
+    )
+    w._hear_btn.toggled.connect(w._on_hear_others_toggled)
+    actions.addWidget(w._hear_btn)
 
     actions.addStretch(1)
 
@@ -177,10 +203,29 @@ def build_status_strip(w: "MainWindow") -> QWidget:
     row.setContentsMargins(4, 0, 4, 0)
     row.setSpacing(8)
 
-    # Live mic level (animated while capturing, dimmed when paused).
+    # Two meters, each with its own label immediately after it. The label
+    # belongs to the meter on its left. An unlabelled second meter placed after
+    # a single "Microphone" label read as though that one word covered both.
+    #
+    # "You" and "Others" rather than "Microphone" and "Speakers": it is whose
+    # voice each meter shows that matters, the wording matches the "You speak"
+    # / "They read" row above, and the short words keep the strip inside the
+    # 680px window minimum that lets it sit in a VR overlay corner.
     w._mic_meter = MicMeter(colors=w._p)
     row.addWidget(w._mic_meter)
-    row.addWidget(_flow_label(w, tr("Microphone")))
+    row.addWidget(_flow_label(w, tr("You")))
+
+    # The speaker capture is the only way to see what that stream receives:
+    # silence here while VRChat is loud means the wrong output device, and
+    # movement here while only the user talks means their own voice is being
+    # played back into it. Hidden entirely while the feature is off, because a
+    # meter that can never move is a control that looks broken.
+    w._heard_meter = MicMeter(colors=w._p)
+    w._heard_meter.set_active(False)
+    w._heard_label = _flow_label(w, tr("Others"))
+    row.addWidget(w._heard_meter)
+    row.addWidget(w._heard_label)
+    set_heard_visible(w, False)
 
     row.addStretch(1)
 
@@ -196,6 +241,16 @@ def build_status_strip(w: "MainWindow") -> QWidget:
     row.addWidget(w._capture_label)
 
     return strip
+
+
+def set_heard_visible(w: "MainWindow", visible: bool) -> None:
+    """Show or hide the speakers meter and its label together.
+
+    They are one unit: a label with no meter, or a meter with no label, is
+    exactly the ambiguity this pair was split up to remove.
+    """
+    w._heard_meter.setVisible(visible)
+    w._heard_label.setVisible(visible)
 
 
 def build_caption_log(w: "MainWindow") -> QTextBrowser:

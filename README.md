@@ -8,7 +8,8 @@ Everything runs locally: speech recognition via
 (run as an ONNX export via [onnx-asr](https://github.com/istupakov/onnx-asr))
 for European languages, or
 [SenseVoice-Small](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
-for Chinese, Japanese, Korean and English; and machine translation via
+for Chinese, Japanese, Korean and English (available, not recommended); and
+machine translation via
 [CTranslate2](https://github.com/OpenNMT/CTranslate2)
 (NLLB / M2M100 / MADLAD models). No cloud services, no API keys.
 
@@ -197,8 +198,15 @@ Windows display language), and downloads them:
 | Your machine | Speech-to-text | Translation | Download |
 | ------------ | -------------- | ----------- | -------- |
 | NVIDIA GPU with 16 GB+ VRAM | `large-v3-turbo` | `nllb-1.3B-int8` | ~3 GB |
-| Otherwise, a language Parakeet covers | `parakeet-tdt-0.6b-v3` | `nllb-600M-int8` | ~1.3 GB |
-| Otherwise | whisper `small` | `nllb-600M-int8` | ~1.1 GB |
+| Any other NVIDIA GPU | `large-v3-turbo` | `nllb-600M-int8` | ~2.3 GB |
+| No GPU, a language Parakeet covers | `parakeet-tdt-0.6b-v3` | `nllb-600M-int8` | ~1.3 GB |
+| No GPU, any other language | whisper `small` | `nllb-600M-int8` | ~1.1 GB |
+
+Japanese, Korean and Chinese use the same models as everything else. Parakeet
+does not cover them, so a no-GPU machine takes whisper `small` rather than
+Parakeet. `sense-voice-small` is still available in the Models window and is
+much smaller (240 MB), but faster-whisper transcribed real VRChat speech more
+accurately in testing, so it is no longer recommended.
 
 The wizard shows what it picked and lets you switch the run device before
 downloading.
@@ -209,7 +217,9 @@ Other options range from whisper `tiny` (~75 MB) up to `large-v3` (~3 GB),
 plus NVIDIA's `parakeet-tdt-0.6b-v3` (~690 MB, very accurate and fast),
 limited to English + 24 other European languages (no Japanese/Korean/Chinese).
 MT models range from `m2m100-418M-int8` (~480 MB) up to `madlad400-3b`
-(~3.5 GB). Models can be added/removed later via the **Models** dialog.
+(~3.5 GB). NLLB leads the recommendations on measured caption quality; the
+M2M100 models are the permissive-license alternative (see
+[Model licenses](#model-licenses)). Models can be added/removed later via the **Models** dialog.
 See [Picking a model](#picking-a-model) below for measured accuracy and
 speed.
 
@@ -224,10 +234,20 @@ speed.
    inside VRChat's chatbox rate limit so continuous speech never triggers
    the in-game spam mute. Turn it down or off under **Settings → Voice
    recognition → Reduce background noise**.
-4. **Typed messages:** the text box at the bottom of the main window sends
+4. **Read other people:** tick **Settings → Simple → Caption what I hear**
+   to transcribe and translate the voices coming out of your speakers, so you
+   can follow someone speaking a language you don't read. Two things to know.
+   It captures the whole output device rather than VRChat's voice channel,
+   because Windows offers no per-app voice tap, so game and world audio are
+   transcribed too. And it is shown only in the VRCC window: other people's
+   words are never sent to the chatbox, since the room already heard them and
+   relaying it would republish their speech under your name. Without a
+   graphics card it shares one voice model with your own captions, so both
+   get slower.
+5. **Typed messages:** the text box at the bottom of the main window sends
    typed text through the same translate → chatbox path (useful when you'd
    rather not speak).
-5. **Mute sync:** when enabled, muting yourself in VRChat makes VRCC stop
+6. **Mute sync:** when enabled, muting yourself in VRChat makes VRCC stop
    listening entirely (configurable to ignore or invert). Speech made
    while muted is never captured, so unmuting mid-sentence captions only
    what you say after the unmute. This uses VRChat's OSCQuery discovery
@@ -250,14 +270,23 @@ chosen in the main window.
 
 **Settings → Simple → Mode** switches between two presets:
 
-- **Speed** (default): greedy decoding (beam 1) and short silence
-  thresholds. Captions appear fastest.
-- **Quality**: beam 5 STT / beam 3 MT and slightly longer silence
-  thresholds. Noticeably better phrasing, a few hundred milliseconds
-  slower.
+- **Speed** (default): greedy decoding (beam 1), and it finalises a caption
+  after 600 ms of silence. Captions appear fastest.
+- **Quality**: beam 5, and it waits 800 ms. Noticeably better phrasing, about
+  200 ms slower per caption.
 
-Parakeet always decodes at full accuracy, so the Mode control is greyed
-out while it is the active voice model. The individual
+Mode changes captions only. Translation keeps its own search width under
+**Settings → Translation → Advanced (fine-tuning)**, because the measurements
+behind these presets cover speech recognition and say nothing about
+translation.
+
+Switching mode rewrites the pause timings on the Advanced page and Search
+width on the Voice recognition page. If you have set any of those by hand,
+VRCC names them and asks first; flipping between the two modes to compare
+never prompts, because those values came from a preset rather than from you.
+
+Parakeet and SenseVoice always decode at full accuracy, so the Mode control
+is greyed out while either is the active voice model. The individual
 knobs (VAD timings, beam sizes, quality gates and so on) live in
 **Settings → Advanced**.
 
@@ -324,10 +353,14 @@ own directory instead (handy on a USB stick or for isolated installs).
 The **code** in this repository is separate from the **models** it
 downloads; check that a model's license fits your use:
 
-- **NLLB** models (default `nllb-600M-int8`, plus 1.3B/3.3B):
-  **CC-BY-NC-4.0**, *non-commercial use only*.
-- **M2M100** models (`m2m100-418M-int8`, `m2m100-1.2B-int8`): **MIT**, a
-  good alternative if you need a permissive license.
+- **NLLB** models (default `nllb-600M-int8`, plus 1.3B and 3.3B):
+  **CC-BY-NC-4.0**, *non-commercial use only*. These are the recommended
+  models, so if you use VRCC commercially (paid or sponsored streaming, or
+  at work) pick an M2M100 model in the **Models** window instead.
+- **M2M100** models (`m2m100-418M-int8`, plus 1.2B): **MIT**, so they carry
+  no such restriction. In a blind comparison over 60 VRChat-style utterances
+  into Japanese, Chinese and Korean they were less accurate than NLLB 600M,
+  which is the trade for the permissive license.
 - **MADLAD-400** (`madlad400-3b`): **Apache-2.0**.
 - Whisper models: **MIT** (OpenAI weights, SYSTRAN CT2 conversions).
 - **Parakeet** (`parakeet-tdt-0.6b-v3`): **CC-BY-4.0** (NVIDIA weights,

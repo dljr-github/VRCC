@@ -42,15 +42,18 @@ def test_rank_whisper_cpu_english_puts_parakeet_first():
     ]
 
 
-def test_rank_whisper_cpu_japanese_leads_with_the_covering_specialist():
-    # STT_BENCH's WER is English, so it cannot rank Japanese. sense-voice-small
-    # is unmeasured but explicitly covers "ja", which beats a measured
-    # generalist that merely does not exclude it -- see _rank_whisper.
-    assert recommend._rank_whisper("cpu", languages=("ja",)) == [
-        "sense-voice-small",
-        "small", "base", "tiny", "medium", "large-v3-turbo", "large-v3",
-        "parakeet-tdt-0.6b-v3", "distil-small.en", "distil-large-v3.5",
-    ]
+def test_rank_whisper_cpu_japanese_leads_with_a_measured_model():
+    """An unmeasured model does not lead just because it names the language.
+    sense-voice-small used to be promoted here on the grounds that STT_BENCH's
+    WER is English and so cannot rank Japanese; field testing on real VRChat
+    speech put faster-whisper ahead, so it now competes from the unmeasured
+    tail like any other id without a row."""
+    got = recommend._rank_whisper("cpu", languages=("ja",))
+
+    assert got[0] == "small"
+    assert got.index("sense-voice-small") > got.index("large-v3")
+    # Still ahead of the models that cannot serve Japanese at all.
+    assert got.index("sense-voice-small") < got.index("distil-small.en")
 
 
 def test_rank_whisper_gpu_high_german_keeps_turbo_first():
@@ -143,10 +146,14 @@ def test_spoken_codes_deduplicate_the_two_chinese_display_languages():
 
 
 def test_rank_whisper_multi_language_needs_one_model_covering_all():
-    # SenseVoice covers all three, so it leads.
-    assert recommend._rank_whisper("cpu", languages=("en", "ja", "zh"))[0] == (
-        "sense-voice-small"
-    )
+    """A mix only the unmeasured model spans still leads with a measured
+    generalist, because covering the languages is a floor rather than a
+    reason to lead. sense-voice-small is the one id that spans en+ja+zh, and
+    it stays ahead of the models that span none of them."""
+    got = recommend._rank_whisper("cpu", languages=("en", "ja", "zh"))
+
+    assert got[0] == "small"
+    assert got.index("sense-voice-small") < got.index("distil-small.en")
 
 
 def test_rank_whisper_no_model_covers_the_mix_falls_back_to_generalists():
@@ -158,14 +165,14 @@ def test_rank_whisper_no_model_covers_the_mix_falls_back_to_generalists():
     assert got.index("parakeet-tdt-0.6b-v3") > got.index("large-v3")
 
 
-def test_specialist_promotion_needs_actual_coverage():
-    """The promotion must check the language set, not just "is restricted and
-    unmeasured" -- otherwise it also promotes inside the trailing partition,
-    where a restricted model is precisely one that cannot serve the language."""
-    got = recommend._rank_whisper("gpu_high", languages=("de",))
-    # sense-voice-small has no German; it must not jump the distil pair it
-    # shares the trailing partition with.
-    assert got[-1] == "sense-voice-small"
+def test_an_unmeasured_model_never_leads_whatever_it_covers():
+    """The rule that replaced the specialist promotion. Checked on a language
+    the unmeasured model DOES cover, since that is the case the promotion
+    existed for."""
+    for tier in ("cpu", "gpu_low", "gpu_high"):
+        got = recommend._rank_whisper(tier, languages=("ja",))
+        assert got[0] != "sense-voice-small", tier
+        assert recommend.STT_BENCH.get(got[0]) is not None, tier
 
 
 def test_english_still_ranks_on_its_measurements():
@@ -191,10 +198,14 @@ def test_preset_for_tier_blind_matches_presets():
         assert recommend.preset_for_tier(tier) == recommend.PRESETS[tier]
 
 
-def test_preset_for_tier_promotes_sensevoice_for_cjk():
+def test_preset_for_tier_cjk_picks_a_measured_faster_whisper_model():
+    """Field testing put faster-whisper ahead of sense-voice-small on real
+    VRChat speech, so CJK now gets the same measured models every other
+    language does."""
     for tier in ("cpu", "gpu_low", "gpu_high"):
         whisper, mt = recommend.preset_for_tier(tier, ("ja",))
-        assert whisper == "sense-voice-small"
+        assert whisper != "sense-voice-small", tier
+        assert recommend.STT_BENCH.get(whisper) is not None, tier
         assert mt == recommend._MT_PRESET[tier]
 
 

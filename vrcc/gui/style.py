@@ -132,6 +132,14 @@ def build_qss(theme: str, scale: float = 1.0) -> str:
     QPushButton[buttonRole="primary"]:hover {{ background: {p['accent_hover']}; border-color: {p['accent_hover']}; }}
     QPushButton[buttonRole="primary"]:focus {{ background: {p['accent_hover']}; border: 1px solid {p['ground']}; }}
     QPushButton[buttonRole="primary"]:disabled {{ background: {p['surface_2']}; color: {p['muted']}; border-color: {p['border']}; }}
+    /* Checkable top-bar toggles. Fusion's own checked look is a slightly
+       sunken border, which on a dark surface is not visible at all, so an
+       on/off control read as neither. Colour is the second cue here, not the
+       only one: both toggles also change their label. */
+    QPushButton[buttonRole="toggle"]:checked {{ background: {p['accent']};
+        border-color: {p['accent']}; color: #ffffff; }}
+    QPushButton[buttonRole="toggle"]:checked:hover {{ background: {p['accent_hover']};
+        border-color: {p['accent_hover']}; }}
     QPushButton[segActive="true"] {{ background: {p['accent']}; border-color: {p['accent']}; color: #ffffff; }}
     QPushButton:disabled {{ color: {p['muted']}; }}
     QPushButton[segActive="true"]:disabled {{ background: {p['surface_2']};

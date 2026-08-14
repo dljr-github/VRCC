@@ -459,3 +459,27 @@ def test_late_startup_failure_does_not_clobber_successful_user_swap(tmp_path):
 
     reloader.request("stt", "medium")  # still installed -> still a no-op
     assert builds == ["medium"]
+
+
+def test_engine_loader_a_dead_translator_still_reports_success(tmp_path):
+    """``success`` means captioning can run, which is the STT engine's business
+    alone. It gated the pipeline start, so an MT-only failure used to leave a
+    perfectly good voice model transcribing nothing at all: the user lost their
+    captions because their translations broke."""
+
+    class _BoomMt(_FakeMt):
+        def load(self) -> None:
+            raise RuntimeError("CUDA out of memory")
+
+    bus = EventBus()
+    results: list[bool] = []
+    stt = _FakeStt()
+
+    loader = EngineLoader(stt, _BoomMt(), bus, on_complete=results.append)
+    loader.start()
+    loader.join(timeout=5.0)
+
+    assert results == [True]
+    assert stt.loaded and stt.warmed
+    # Still recorded, so re-picking the same model in Settings runs a real swap.
+    assert loader.failed_kinds == {"mt"}

@@ -94,3 +94,34 @@ class UpdateCheckResult:
     latest: str = ""
     url: str = ""
     error: str = ""
+
+
+@dataclass(frozen=True)
+class HeardLevel:
+    """Loudness of the SPEAKER capture, for its own meter.
+
+    Separate from MicLevel rather than reusing it with a flag: the two drive
+    different widgets and one of them is the evidence a user needs when the
+    speaker stream is not hearing what they expect.
+    """
+
+    rms: float
+    vad_prob: float
+
+
+@dataclass(frozen=True)
+class HeardPhrase:
+    """Something the SPEAKERS played, transcribed for the user to read.
+
+    Deliberately not a PhraseRecognized: that one carries an utterance_id the
+    chatbox path uses to tie a caption to a send, and this one is never sent.
+    Keeping it a separate type means a handler cannot treat heard speech as the
+    user's own by accident.
+
+    ``translations`` is ``[(language_display, text), ...]``, rendered INTO the
+    languages the user reads rather than the outbound targets.
+    """
+
+    text: str
+    language: str
+    translations: list[tuple[str, str]]

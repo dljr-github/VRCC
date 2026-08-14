@@ -1,6 +1,12 @@
-"""The scroll wheel must never edit a value in passing. Every spin box and
-combo box ignores wheel events, so scrolling a settings page cannot change a
-field the pointer happens to cross.
+"""The scroll wheel must never edit a value in passing. Every spin box, combo
+box and slider ignores wheel events, so scrolling a settings page cannot change
+a field the pointer happens to cross.
+
+The sweep below walks the built dialog rather than a list of field names: a
+control added later is covered without anyone remembering to come back here.
+Sliders were the gap that motivated that -- they carry the mic sensitivity and
+the noise thresholds, where a value nudged in passing is invisible until
+captions start behaving oddly.
 """
 
 import os
@@ -10,7 +16,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox, QSpinBox
+from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QApplication,
+    QComboBox,
+    QSlider,
+    QSpinBox,
+)
 
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.gui.settings import SettingsDialog
@@ -70,7 +82,8 @@ def test_every_settings_input_ignores_wheel(qapp, tmp_path):
     try:
         spins = dlg.findChildren(QAbstractSpinBox)
         combos = dlg.findChildren(QComboBox)
-        assert spins and combos
+        sliders = dlg.findChildren(QSlider)
+        assert spins and combos and sliders
         for w in spins:
             before = w.text()
             for steps in (1, -1):
@@ -81,6 +94,11 @@ def test_every_settings_input_ignores_wheel(qapp, tmp_path):
             for steps in (1, -1):
                 _scroll(c, steps)
                 assert c.currentIndex() == before, c.toolTip()
+        for s in sliders:
+            before = s.value()
+            for steps in (1, -1):
+                _scroll(s, steps)
+                assert s.value() == before, s.toolTip()
     finally:
         dlg.close()
         dlg.deleteLater()

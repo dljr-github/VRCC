@@ -233,6 +233,16 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
                 "for translation; sent untranslated.",
             )
         )
+        # Same reason as send_untranslated: with sending off there is no
+        # ChatboxSent either, and the caption row needs one of the two.
+        p._bus.publish(
+            PhraseTranslated(
+                utterance_id=utterance_id,
+                original=result.text,
+                source_lang=result.language,
+                translations=(),
+            )
+        )
         safe_submit(p, result.text, [], utterance_id)
         p._resolve_typing(utterance_id)
         _mark_finalized(p, utterance_id)
@@ -253,14 +263,32 @@ def resolve_source_language(p: "Pipeline", detected_whisper: str) -> "Language |
     src_cfg = p._config.stt.source_language
     if src_cfg != "auto":
         return languages.get(src_cfg)
-    # "auto": map the detected Whisper code to the first matching Language.
-    for lang in languages.LANGUAGES.values():
-        if lang.whisper == detected_whisper:
-            return lang
-    return None
+    return languages.from_whisper(detected_whisper)
 
 
 # -- MT job processing -------------------------------------------------------
+
+
+def send_untranslated(p: "Pipeline", job: _MtJob) -> None:
+    """Resolve an utterance that will not be translated after all: say so on
+    the bus, then put the original text in the chatbox's slot.
+
+    The empty PhraseTranslated is not cosmetic. With "send to VRChat" off,
+    safe_submit returns without sending, so no ChatboxSent follows, and a
+    caption row that hears neither event has nothing left that could ever
+    resolve it: it sits on "translating…" for the rest of the session.
+    """
+    p._bus.publish(
+        PhraseTranslated(
+            utterance_id=job.utterance_id,
+            original=job.text,
+            source_lang=job.src.display,
+            translations=(),
+        )
+    )
+    safe_submit(p, job.text, [], job.utterance_id)
+    if job.manage_typing:
+        p._resolve_typing(job.utterance_id)
 
 
 def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
@@ -292,20 +320,16 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
             return  # abandoned mid-call: discard, publish nothing
         logger.exception("translation failed; sending original text")
         p._bus.publish(AppError("MT_JOB_FAILED", str(exc)))
-        # Captions must not silently vanish: send the ORIGINAL text.
-        safe_submit(p, job.text, [], job.utterance_id)
-        if job.manage_typing:
-            p._resolve_typing(job.utterance_id)
+        # Captions must not silently vanish: keep the ORIGINAL text.
+        send_untranslated(p, job)
         return
 
     if translations is None:
-        # Engine swapped out mid-flight (or absent): send the ORIGINAL
+        # Engine swapped out mid-flight (or absent): keep the ORIGINAL
         # text, the same graceful path the exception branch uses.
         if stop.is_set():
             return  # abandoned mid-call: discard, publish nothing
-        safe_submit(p, job.text, [], job.utterance_id)
-        if job.manage_typing:
-            p._resolve_typing(job.utterance_id)
+        send_untranslated(p, job)
         return
 
     if stop.is_set():

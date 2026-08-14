@@ -3,9 +3,9 @@
 :func:`annotate` appends a tone-marked pinyin line under the text of every
 Chinese entry in a ``[(display_name, text), ...]`` translation list, so the
 reading reaches the chatbox and the caption log through the existing
-formatting paths unchanged. ``pypinyin`` is imported lazily and its absence
-degrades to unannotated text (logged once), mirroring how other optional
-runtime pieces fail soft.
+formatting paths unchanged. ``pypinyin`` is a required dependency, imported
+lazily so a broken install degrades to unannotated text (logged once) instead
+of taking down the translation pipeline.
 """
 
 from __future__ import annotations
