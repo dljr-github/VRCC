@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from vrcc.core.config import ConfigStore, TranslateConfig
+from vrcc.core.config import ConfigStore, OscConfig, TranslateConfig
 
 
 def _stored(path, raw: dict) -> ConfigStore:
@@ -32,7 +32,7 @@ def test_schema_1_profile_written_mt_beam_migrates_to_default(tmp_path, stored):
     )
 
     assert store.config.translate.beam_size == TranslateConfig().beam_size
-    assert store.config.schema_version == 2
+    assert store.config.schema_version == 3
 
 
 def test_schema_1_hand_picked_mt_beam_is_kept(tmp_path):
@@ -96,3 +96,37 @@ def test_a_newer_schema_version_is_not_written_backwards(tmp_path):
     store.save_now()
     written = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
     assert written["schema_version"] == 5
+
+
+def test_schema_2_default_overflow_migrates_to_auto(tmp_path):
+    # "split" was the shipping default, so a stored one records the default
+    # rather than a choice and these users should get the automatic handling.
+    store = _stored(
+        tmp_path / "config.json",
+        {"schema_version": 2, "osc": {"overflow": "split"}},
+    )
+
+    assert store.config.osc.overflow == "auto"
+    assert store.config.osc.overflow == OscConfig().overflow
+    assert store.config.schema_version == 3
+
+
+@pytest.mark.parametrize("stored", ["truncate", "send"])
+def test_schema_2_hand_picked_overflow_is_kept(tmp_path, stored):
+    # Neither was ever a default, so storing one is a deliberate override.
+    store = _stored(
+        tmp_path / "config.json",
+        {"schema_version": 2, "osc": {"overflow": stored}},
+    )
+
+    assert store.config.osc.overflow == stored
+
+
+def test_schema_3_overflow_is_never_migrated(tmp_path):
+    # Choosing split again from the Advanced page has to stick.
+    store = _stored(
+        tmp_path / "config.json",
+        {"schema_version": 3, "osc": {"overflow": "split"}},
+    )
+
+    assert store.config.osc.overflow == "split"

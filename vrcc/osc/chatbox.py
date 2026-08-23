@@ -21,6 +21,7 @@ from vrcc.osc.chatbox_format import (  # noqa: F401 -- re-exported, see below
     fit_chatbox,
     fit_message,
     format_message,
+    resolve_overflow,
 )
 
 logger = logging.getLogger("vrcc.osc")
@@ -209,9 +210,12 @@ class ChatboxSender:
         chunks = fit_chatbox(text, self._cfg.overflow)
         if not chunks:
             return
-        # Flag over-limit messages (unless "split", which loses nothing) so the
-        # caption log can badge them as truncated.
-        truncated = len(text) > CHATBOX_LIMIT and self._cfg.overflow != "split"
+        # The caption log badges this as "shortened to fit", so it may only be
+        # set where VRCC is what shortened the text: "split" loses nothing and
+        # "send" hands the whole string to VRChat and lets VRChat cut it.
+        # "auto" is whichever of those it resolved to for this message.
+        mode = resolve_overflow(text, self._cfg.overflow)
+        truncated = len(text) > CHATBOX_LIMIT and mode == "truncate"
         self._enqueue(chunks, utterance_id, truncated)
 
     def submit_message(
@@ -227,7 +231,8 @@ class ChatboxSender:
         if not chunks:
             return
         joined = format_message(original, translations, self._cfg)
-        truncated = self._cfg.overflow != "split" and len(joined) > CHATBOX_LIMIT
+        mode = resolve_overflow(joined, self._cfg.overflow)
+        truncated = mode == "truncate" and len(joined) > CHATBOX_LIMIT
         self._enqueue(chunks, utterance_id, truncated)
 
     def _enqueue(self, chunks: list[str], utterance_id: int, truncated: bool) -> None:

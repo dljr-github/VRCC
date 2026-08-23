@@ -28,7 +28,7 @@ def _wait_until(predicate, timeout=2.0, interval=0.01):
 
 def test_app_config_defaults_match_spec():
     cfg = AppConfig()
-    assert cfg.schema_version == 2
+    assert cfg.schema_version == 3
     assert cfg.audio == AudioConfig()
     assert cfg.vad == VadConfig()
     assert cfg.stt == SttConfig()
@@ -453,8 +453,8 @@ def test_apply_profile_unknown_profile_raises():
         apply_profile(AppConfig(), "turbo")
 
 
-def test_osc_overflow_defaults_to_split():
-    assert OscConfig().overflow == "split"
+def test_osc_overflow_defaults_to_auto():
+    assert OscConfig().overflow == "auto"
 
 
 def test_osc_split_delay_s_defaults_to_2_0():

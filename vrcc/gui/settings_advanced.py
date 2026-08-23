@@ -240,6 +240,7 @@ def build_vrchat_page(dlg: "SettingsDialog") -> QWidget:
     fmt_form = QFormLayout(fmt)
     overflow = no_wheel(QComboBox())
     for label, value in (
+        (tr("Auto"), "auto"),
         (tr("Send in parts"), "split"),
         (tr("Shorten to fit"), "truncate"),
         (tr("Send full (may be cut off in VRChat)"), "send"),

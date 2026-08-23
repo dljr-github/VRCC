@@ -469,16 +469,18 @@ def test_overflow_combo_shows_friendly_labels_and_binds_raw_value(qapp, tmp_path
         combo = next(
             c
             for c in page.findChildren(QComboBox)
-            if [c.itemData(i) for i in range(c.count())] == ["split", "truncate", "send"]
+            if [c.itemData(i) for i in range(c.count())]
+            == ["auto", "split", "truncate", "send"]
         )
         assert [combo.itemText(i) for i in range(combo.count())] == [
+            "Auto",
             "Send in parts",
             "Shorten to fit",
             "Send full (may be cut off in VRChat)",
         ]
-        assert combo.currentData() == store.config.osc.overflow  # default "split"
+        assert combo.currentData() == store.config.osc.overflow  # default "auto"
 
-        combo.setCurrentIndex(1)  # "Shorten to fit" -> "truncate"
+        combo.setCurrentIndex(2)  # "Shorten to fit" -> "truncate"
         assert store.config.osc.overflow == "truncate"
     finally:
         dlg.close()
