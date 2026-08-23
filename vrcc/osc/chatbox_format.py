@@ -36,7 +36,7 @@ def format_message(
     Always the RAW join, regardless of length: callers that need the text
     fit to `CHATBOX_LIMIT` go through `fit_message`, which budgets the
     original out of the way of the translation when this overflows in
-    "truncate"/"send" mode (see `_budget_original`). Other callers (the
+    "truncate" mode (see `_budget_original`). Other callers (the
     caption log's overflow badge, `scripts/smoke_e2e.py`) rely on this
     staying the untouched length to detect that a message was too long.
     """
@@ -68,6 +68,74 @@ def _budget_original(original: str, texts: list[str], separator: str) -> str:
     return separator.join([shortened, *texts]).strip()
 
 
+def _share_limit(texts: list[str], separator: str, limit: int) -> list[str]:
+    """Shorten `texts` so their `separator` join fits `limit`, each text taking
+    an equal share and the ones already inside it releasing the surplus.
+
+    Cutting the joined string instead spends the limit front to back, so the
+    last target arrives empty however short it is: order decides who is lost,
+    not length.
+
+    An equal share of the characters is not fairness, since the same sentence
+    costs a different number of them in every language. What it buys is the
+    largest number of targets that arrive WHOLE, which a proportional split
+    gives up: on the ja/es/de trio in
+    `tools/bench_chatbox_budget.py --policies`, proportional leaves all three
+    at 52% where this leaves ja complete.
+
+    Shortening stops on a word boundary (`_split_words`). Spaceless scripts
+    have none to find and fall back to its character cut.
+    """
+    room = limit - len(separator) * (len(texts) - 1)
+    if room < len(texts):
+        return texts
+    shares = [0] * len(texts)
+    pending = list(range(len(texts)))
+    while pending:
+        per = room // len(pending)
+        fits = [i for i in pending if len(texts[i]) <= per]
+        if not fits:
+            for i in pending:
+                shares[i] = per
+            break
+        for i in fits:
+            shares[i] = len(texts[i])
+            room -= len(texts[i])
+            pending.remove(i)
+    shortened = []
+    for text, share in zip(texts, shares):
+        if len(text) <= share:
+            shortened.append(text)
+        elif share > 1:
+            packed = _split_words(text, share - 1)
+            shortened.append((packed[0] if packed else "") + "…")
+        else:
+            shortened.append("…")
+    return shortened
+
+
+def resolve_overflow(text: str, mode: str) -> str:
+    """The mode `text` is really shaped by. The three explicit modes are
+    returned untouched; "auto" reads the message and answers for it.
+
+    Parts drain one at a time and a new utterance clears the queue, so past
+    `_MAX_REPEAT_PARTS` the tail is not read at conversational pace: sending
+    it costs the reader the wait and delivers a fragment anyway. Up to that
+    many parts, splitting loses nothing and wins outright. Past it, one
+    shortened message that arrives whole beats a queue that will not.
+
+    The part count is the floor `fit_message` starts its search from, so a
+    message needing more parts than this estimate still resolves to "split"
+    only when the estimate says it is cheap, never the other way.
+    """
+    if mode != "auto":
+        return mode
+    if len(text) <= CHATBOX_LIMIT:
+        return "split"
+    estimated_parts = -(-len(text) // CHATBOX_LIMIT)
+    return "split" if estimated_parts <= _MAX_REPEAT_PARTS else "truncate"
+
+
 def fit_chatbox(text: str, mode: str) -> list[str]:
     """Fit `text` to VRChat's 144-char display limit per ``mode``: ``truncate``
     clips over-limit text to ``text[:143] + "…"``; ``split`` greedily packs
@@ -76,6 +144,7 @@ def fit_chatbox(text: str, mode: str) -> list[str]:
     """
     if not text:
         return []
+    mode = resolve_overflow(text, mode)
     if mode == "send":
         return [text]
     if mode == "truncate":
@@ -195,11 +264,15 @@ def fit_message(
 ) -> list[str]:
     """Fit a caption and its translations into send-ready chatbox parts.
 
-    Non-"split" modes defer to `fit_chatbox`, but on a translation-aware
-    text: if the plain `format_message` join overflows `CHATBOX_LIMIT` with
+    "truncate" defers to `fit_chatbox`, but on a translation-aware text: if
+    the plain `format_message` join overflows `CHATBOX_LIMIT` with
     `cfg.include_original` on, the original -- not the translation, the
     line a non-speaker actually reads -- is the one shortened to make room
-    (see `_budget_original`). In "split" mode an over-limit message is NOT
+    (see `_budget_original`), and whatever room is left is divided between
+    the targets so that none of them is cut away outright (see
+    `_share_limit`). "send" reaches `fit_chatbox` untouched, since its label
+    promises the full text and names VRChat as what cuts it. In "split"
+    mode an over-limit message is NOT
     greedy-packed as one joined string (that carves each language
     arbitrarily across part boundaries): instead every text is cut into the
     same number of balanced slices via `_balanced_slices` and part i joins
@@ -208,11 +281,19 @@ def fit_message(
     already fits comes back as one part.
     """
     joined = format_message(original, translations, cfg)
-    if cfg.overflow != "split":
-        if cfg.include_original and translations and len(joined) > CHATBOX_LIMIT:
+    mode = resolve_overflow(joined, cfg.overflow)
+    if mode != "split":
+        # "send" is labelled as handing VRChat the whole string and letting it
+        # do the cutting, so neither reshaping step below applies to it.
+        if mode == "truncate" and translations and len(joined) > CHATBOX_LIMIT:
             texts = [text for _, text in translations]
-            joined = _budget_original(original, texts, cfg.translation_separator)
-        return fit_chatbox(joined, cfg.overflow)
+            if cfg.include_original:
+                joined = _budget_original(original, texts, cfg.translation_separator)
+            if len(texts) > 1 and len(joined) > CHATBOX_LIMIT:
+                joined = cfg.translation_separator.join(
+                    _share_limit(texts, cfg.translation_separator, CHATBOX_LIMIT)
+                ).strip()
+        return fit_chatbox(joined, mode)
     if not joined:
         return []
     if len(joined) <= CHATBOX_LIMIT:

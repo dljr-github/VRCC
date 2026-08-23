@@ -20,6 +20,8 @@ from typing import Any, Literal, NamedTuple
 import platformdirs
 from pydantic import BaseModel, Field, ValidationError
 
+from vrcc.core.config_migrate import apply_migrations
+
 logger = logging.getLogger("vrcc.core.config")
 
 
@@ -126,7 +128,9 @@ class OscConfig(BaseModel):
     notification_sfx: bool = False
     min_interval_s: float = Field(default=1.3, gt=0)
     burst: int = Field(default=5, ge=1)
-    overflow: Literal["truncate", "split", "send"] = "split"
+    # "auto" reads the message (chatbox_format._auto_mode); the three explicit
+    # modes are overrides and are never second-guessed.
+    overflow: Literal["auto", "truncate", "split", "send"] = "auto"
     split_delay_s: float = 2.0
     include_original: bool = True
     translation_separator: str = "\n"
@@ -165,16 +169,7 @@ class GuiConfig(BaseModel):
 # Bumped when a stored config needs rewriting rather than just loading.
 # 2: the Speed/Quality mode stopped writing translate.beam_size (see
 # _migrate_profile_written_mt_beam).
-_SCHEMA_VERSION = 2
-
-# The only two MT beam widths the mode bundles ever wrote. A stored config
-# holding one of them most likely recorded the mode rather than a decision
-# about translation, but the two are indistinguishable: 1 was also the shipping
-# default and both are inside the Advanced page's range, so a user who picked
-# one by hand is migrated along with everyone else. That is the intended trade,
-# because greedy MT decoding fabricates content and the alternative is leaving
-# every pre-schema-2 install on it.
-_PROFILE_WRITTEN_MT_BEAMS = (1, 3)
+_SCHEMA_VERSION = 3
 
 
 class AppConfig(BaseModel):
@@ -248,23 +243,6 @@ def profile_overrides(config: AppConfig) -> list[tuple[str, str]]:
         if getattr(getattr(config, section_name), field_name)
         not in (latency_value, PROFILES["quality"][section_name][field_name])
     ]
-
-
-def _migrate_profile_written_mt_beam(config: AppConfig, stored_version: int) -> None:
-    """Adopt the current MT beam default for a config the mode control wrote.
-
-    Until schema 2 the Speed/Quality bundles set ``translate.beam_size`` to 1 or
-    3. Because the stored file carries every field, leaving those values alone
-    would keep existing users on the greedy decoding this default moved away
-    from, and the fix would reach new installs only. Any width outside
-    :data:`_PROFILE_WRITTEN_MT_BEAMS` survives untouched; the two inside it are
-    migrated even when the user chose them, for the reason recorded there.
-    Setting either again from the Advanced page sticks, since this runs once.
-    """
-    if stored_version >= 2:
-        return
-    if config.translate.beam_size in _PROFILE_WRITTEN_MT_BEAMS:
-        config.translate.beam_size = TranslateConfig().beam_size
 
 
 # Section name -> model class, in the same order as AppConfig's fields.
@@ -411,7 +389,7 @@ class ConfigStore:
 
         config = AppConfig(**data)
         stored_version = data.get("schema_version", 1)
-        _migrate_profile_written_mt_beam(config, stored_version)
+        apply_migrations(config, stored_version)
         # Never write a version backwards: stamping our own number on a file
         # from a newer build would make that build re-run its migration over
         # data it has already migrated. Only the NUMBER survives the round
