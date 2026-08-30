@@ -6,7 +6,8 @@ Run from the repo root:
     python tools/bench_chatbox_budget.py
     python tools/bench_chatbox_budget.py --against main
 
-``--against`` loads `vrcc/osc/chatbox_format.py` from a git ref and reports
+``--against`` loads `vrcc/osc/chatbox_format.py` from a git ref, and
+`vrcc/osc/chatbox_slice.py` from that same ref when it has one, and reports
 that column beside the working tree's, which is how the before/after numbers
 in the chatbox budget commits were produced.
 
@@ -33,22 +34,84 @@ from vrcc.core.config import OscConfig  # noqa: E402
 TARGETS = [("ja", JA), ("es", ES), ("de", DE)]
 
 
-def _load_module_from_ref(ref: str):
-    """Import `vrcc/osc/chatbox_format.py` as it exists at `ref`."""
-    source = subprocess.run(
-        ["git", "show", f"{ref}:vrcc/osc/chatbox_format.py"],
+def _git_show(ref: str, rel_path: str, required: bool) -> str | None:
+    """`git show <ref>:<rel_path>`'s stdout, or `None` if `required` is False
+    and the ref has no such file (any other git failure still raises)."""
+    result = subprocess.run(
+        ["git", "show", f"{ref}:{rel_path}"],
         cwd=ROOT,
         capture_output=True,
         text=True,
         encoding="utf-8",
-        check=True,
-    ).stdout
-    tmp = Path(tempfile.mkdtemp()) / "chatbox_format_ref.py"
-    tmp.write_text(source, encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("chatbox_format_ref", tmp)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+        check=required,
+    )
+    if required:
+        return result.stdout
+    return result.stdout if result.returncode == 0 else None
+
+
+def _load_module_from_ref(ref: str):
+    """Import `vrcc/osc/chatbox_format.py` as it exists at `ref`.
+
+    Since commit 55cef2b, `chatbox_format.py` imports several
+    part-arrangement helpers from `vrcc.osc.chatbox_slice`. Loading only
+    `chatbox_format.py`'s text standalone would leave that import statement
+    to fall through to `sys.path`, which finds the WORKING TREE's
+    `chatbox_slice.py` (it is a real, already-importable package on disk),
+    not the ref's. That would silently report today's part-arrangement
+    behavior for a ref that is meant to isolate an older or newer one, with
+    no error to say so. So `chatbox_slice.py` is fetched from the same `ref`
+    and, when the ref has one, temporarily registered in `sys.modules` under
+    the exact dotted name (`vrcc.osc.chatbox_slice`) the import statement
+    looks up, before `chatbox_format.py` is executed: Python's import system
+    checks `sys.modules` before ever touching a real finder, so the ref's
+    copy wins over the on-disk package for the duration of that one exec.
+
+    The substitution is undone in every case (success, or `chatbox_format.py`
+    raising while loading) before returning, restoring whatever module was
+    cached at that name before this call. `main()` calls this once for
+    `--against` and then imports the real `vrcc.osc.chatbox_format` for the
+    working-tree report in the same process; that second import must see the
+    real `chatbox_slice`, not a stale substitution left behind by the first.
+
+    A ref that predates the split (`--against main`, this module's own
+    documented example) has no `chatbox_slice.py` for `git show` to find:
+    its `chatbox_format.py` is self-contained, exactly as it was before the
+    split, so nothing is substituted and it loads exactly as it does today.
+    """
+    tmp_dir = Path(tempfile.mkdtemp())
+    format_source = _git_show(ref, "vrcc/osc/chatbox_format.py", required=True)
+    slice_source = _git_show(ref, "vrcc/osc/chatbox_slice.py", required=False)
+
+    slice_name = "vrcc.osc.chatbox_slice"
+    previous_slice_module = sys.modules.get(slice_name)
+    try:
+        if slice_source is not None:
+            slice_path = tmp_dir / "chatbox_slice_ref.py"
+            slice_path.write_text(slice_source, encoding="utf-8")
+            slice_spec = importlib.util.spec_from_file_location(slice_name, slice_path)
+            slice_module = importlib.util.module_from_spec(slice_spec)
+            # Registered before exec, not after: chatbox_format_ref's own
+            # `from vrcc.osc.chatbox_slice import ...` runs during
+            # format_spec.loader.exec_module below, and that import resolves
+            # by checking sys.modules first, before any real finder.
+            sys.modules[slice_name] = slice_module
+            slice_spec.loader.exec_module(slice_module)
+
+        format_path = tmp_dir / "chatbox_format_ref.py"
+        format_path.write_text(format_source, encoding="utf-8")
+        format_spec = importlib.util.spec_from_file_location(
+            "chatbox_format_ref", format_path
+        )
+        format_module = importlib.util.module_from_spec(format_spec)
+        format_spec.loader.exec_module(format_module)
+        return format_module
+    finally:
+        if slice_source is not None:
+            if previous_slice_module is not None:
+                sys.modules[slice_name] = previous_slice_module
+            else:
+                sys.modules.pop(slice_name, None)
 
 
 def _delivered(module, ordering) -> dict[str, int]:
