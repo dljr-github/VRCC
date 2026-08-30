@@ -1,13 +1,10 @@
 """Arrange a caption and its translations into balanced, size-limited
 chatbox parts.
 
-Given several texts that must ship together (an original plus its
-translations), this module cuts each into the same number of ordered
-slices and assembles those slices into parts that fit `CHATBOX_LIMIT`,
-preferring an arrangement where a translation survives whole over one
-that reads more evenly. It has no opinion on how many parts a message
-needs: :mod:`vrcc.osc.chatbox_format` searches for that count and calls
-in here once it has a candidate.
+Cuts every text that ships together into the same number of ordered slices
+and assembles those into parts fitting `CHATBOX_LIMIT`, preferring an
+arrangement where a translation survives whole. How many parts a message
+needs is decided in :mod:`vrcc.osc.chatbox_format`, which calls in here.
 """
 
 from __future__ import annotations
@@ -23,45 +20,29 @@ def _balanced_slices(
 ) -> list[str]:
     """Split `text` into exactly `n` ordered slices of near-equal length.
 
-    Word-based whenever the text splits into words that each fit `limit` AND
-    no single word is both spaceless-script and too long for its per-slice
-    share (`limit // n`): each slice takes whole words greedily toward a
-    running remaining-length/remaining-slices target (last slice takes the
-    rest), so joining the slices with spaces preserves every word in order.
-    Character-based ceil-division runs otherwise -- a lone pathological
-    over-long word, or a spaceless run over its share even when the rest of
-    the text is ordinary spaced words alongside it -- where the
-    concatenation reproduces `text` exactly (boundaries are nudged off
-    combining marks). Callers drop empty slices.
+    Word-based whenever every word fits `limit` AND no word is both
+    spaceless-script and over its per-slice share (`limit // n`), each slice
+    taking whole words greedily toward a remaining-length/remaining-slices
+    target. Otherwise character-based ceil-division, whose concatenation
+    reproduces `text` exactly. Callers drop empty slices.
 
-    Fewer words than slices leaves blank slices, positioned per `anchor`.
-    ``"start"`` leaves them at the end, so the original fades out once
-    exhausted. ``"end"`` puts them first, so a text that runs out early still
-    lands in the final part: parts drain one at a time and a new utterance
-    clears the queue, so the last part is the one still on screen when the user
-    stops talking, and a translation absent from it is one the reader never
-    ends up with.
+    Fewer words than slices leaves blanks, per `anchor`: ``"start"`` puts
+    them last, ``"end"`` first so a short text still reaches the final part.
 
     `snap` only changes the character path: each ceil-division boundary is
     nudged with `linebreak.choose_cut` to the nearest clause mark within
-    half a slice either way. A slice spans two independently chosen cuts,
-    so it can reach `size + 2 * (size // 2)` (just under twice its share),
-    a structural bound, not an empirical one. One 98,924-slice corpus (n=2,
-    n=3, 60-220 chars, clause marks every 6-28) measured roughly 300 slices
-    over 1.5x their share; 0 needs two boundaries on the same index, only
-    when n grossly exceeds what the text can support. `snap=False` is byte
-    for byte what this function has always done, on both paths; the word
-    path never reads `snap`, since a word boundary already reads right.
+    half a slice either way, so a slice spanning two chosen cuts can reach
+    `size + 2 * (size // 2)`, a structural bound rather than an empirical
+    one. One 98,924-slice corpus (n=2, n=3, 60-220 chars, clause marks
+    every 6-28) measured roughly 300 slices over 1.5x their share and none
+    collapsed. The word path ignores `snap`: a word boundary reads right.
     """
     words = text.split()
-    # A spaceless run within its per-part share is better carried whole, which
-    # _assemble already does where it fits. Checked per word, not over the
-    # whole text: a translation carrying one stray ASCII space (normalize
-    # never touches `!` or `?`, so a space after one survives) still has a
-    # spaceless-script word too long for its share, and that word is what the
-    # word packer would mishandle. is_spaceless is true of a hangul run like
-    # any other, so what leaves Korean on the word path is the length half:
-    # its tokens are short enough that none exceeds its share.
+    # A spaceless run inside its per-part share travels better whole, which
+    # _assemble already does. Checked per WORD: a translation carrying one
+    # stray ASCII space (normalize leaves `!` and `?` alone) still holds a
+    # spaceless word over its share. Korean stays on the word path on the
+    # length half; is_spaceless is true of a hangul run like any other.
     spaceless = any(is_spaceless(word) and len(word) > limit // n for word in words)
     if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []
@@ -72,8 +53,8 @@ def _balanced_slices(
             idx += 1
             while idx < len(words):
                 grown = len(piece) + 1 + len(words[idx])
-                # Take the next word only while it moves the slice at least
-                # as close to the target -- overshoot stays within one word.
+                # Take the next word only while it moves the slice closer to
+                # the target; overshoot stays within one word.
                 if abs(grown - target) > abs(len(piece) - target):
                     break
                 piece = f"{piece} {words[idx]}"
@@ -92,19 +73,15 @@ def _balanced_slices(
     for i in range(1, n):
         ideal = min(i * size, len(text))
         if snap:
-            # bounds[-1] + 1, not bounds[-1]: floor is an inclusive candidate
-            # (lo = max(lo, floor) in linebreak.py), so the window's only
-            # clause mark could be bounds[-1] itself, handed back unchanged
-            # and collapsing this slice. Strictly past the previous boundary
-            # belongs here, a stronger guarantee than the shared contract in
-            # linebreak.choose_cut, pinned inclusive by its own tests.
+            # bounds[-1] + 1, not bounds[-1]: floor is an inclusive candidate,
+            # so the window's only clause mark could be the previous boundary
+            # itself, handed back unchanged and collapsing this slice.
             cut = choose_cut(
                 text, ideal, bounds[-1] + 1, ideal - size // 2, ideal + size // 2
             )
         else:
             cut = safe_cut(text, ideal)
-        # Belt and braces: choose_cut already honors floor, but this is the
-        # same guard the unsnapped path has always needed to stay monotonic.
+        # safe_cut does not honor floor, and both paths need bounds monotonic.
         bounds.append(max(cut, bounds[-1]))
     bounds.append(len(text))
     return [text[bounds[i] : bounds[i + 1]] for i in range(n)]
@@ -121,15 +98,11 @@ def _join(
 ) -> list[str]:
     """`n` parts, with the `repeated` texts whole in each and the rest sliced.
 
-    ``anchored`` moves a sliced translation's content to the LAST parts.
+    ``anchored`` moves a sliced translation's content to the LAST parts;
     ``snap`` nudges each character-based boundary onto the nearest clause
-    mark (see `_balanced_slices`). Both default off while a part count is
-    being judged: anchoring changes which original slice a translation shares
-    a part with, and snapping changes slice lengths, and a count that only
-    fits because of either would be chosen over a larger one that the search
-    would otherwise have picked, which measured better for anchoring and is
-    the whole reason snapping runs after the search rather than inside it.
-    """
+    mark. Both default off while a part count is being judged, or a count
+    that only fits because of one of them would win over the larger one the
+    search would otherwise have picked."""
     sliced = {
         i: _balanced_slices(
             text,
@@ -159,25 +132,20 @@ def _assemble(
     """Build `n` parts, repeating each translation that fits rather than
     slicing it. Returns the parts and which texts were repeated.
 
-    Parts drain one every `max(split_delay_s, min_interval_s)`, and a new
+    Parts drain one every `max(split_delay_s, min_interval_s)` and a new
     utterance clears the queue, so anything past roughly the third part is
-    rarely seen at conversational pace. Slicing a translation therefore spread
-    it across parts the reader would never receive; putting a short one in
-    EVERY part means it arrives in the first and is still on screen when the
-    user stops talking. Measured over a 12-turn conversation at four paces,
-    that beat slicing on delivery and on what survives afterwards, in every
-    combination tried.
-
-    Repeated shortest first and only while every part still fits, so a long
-    translation falls back to being sliced across the parts in order. The
-    original is always sliced: it is the one text the reader can afford to lose
-    the tail of, since it is not what a non-speaker is reading.
+    rarely seen at conversational pace. A short translation repeated in
+    EVERY part arrives in the first and is still on screen when the user
+    stops talking: measured over a 12-turn conversation at four paces, that
+    beat slicing on delivery and on what survives, in every combination
+    tried. Repeating goes shortest first and only while every part fits, so
+    a long translation falls back to slicing; the original is always sliced,
+    being the one text a non-speaker is not reading.
     """
     # Shortest first so a long translation cannot crowd out two short ones it
-    # could not fit beside anyway. Swept 2875 realistic messages through
-    # fit_message with the order reversed and the output was identical every
-    # time, so this is insurance rather than a measured win: keep it because it
-    # is the order that can only help, not because it is currently doing work.
+    # could not fit beside anyway. Swept 2875 realistic messages with the
+    # order reversed and the output was identical every time: insurance, not
+    # a measured win, kept because it can only help.
     order = sorted(
         (i for i, is_tr in enumerate(translated) if is_tr), key=lambda i: len(texts[i])
     )
@@ -203,39 +171,28 @@ def _settle(
     """`parts`, replaced by the first better arrangement that still fits.
 
     Tries anchoring a sliced translation into the LAST parts and snapping
-    character-based boundaries onto clause marks, in preference order:
-    anchored and snapped, anchored alone, snapped alone. Anchoring outranks
-    snapping because anchoring decides whether the reader receives the
-    translation at all (a translation with fewer words than parts leaves the
-    trailing ones blank, and the last part is the one still on screen once
-    the queue drains), while snapping only decides where the text looks
-    broken. Applied only after the part count is settled, and only when every
-    part still fits: the part-count search must keep seeing the plain
-    ceil-division sizes it has always searched over, or the delivery numbers
-    in `fit_message`'s comment stop describing what ships.
+    character-based boundaries onto clause marks, in that preference order:
+    anchoring decides whether the reader receives the translation at all,
+    snapping only where the text looks broken. Runs after the part count is
+    settled and only when every part still fits, so the search keeps seeing
+    the plain ceil-division sizes `fit_message`'s delivery numbers describe.
 
-    Skips straight to returning `parts` only when a translation exists and
-    every one of them is repeated whole: anchoring cannot relocate a text
-    that was never sliced, and the part-count search already has the
-    outcome it optimizes for. A caption sent with NO translations has
-    neither reason behind it and reaches the loop, since its original can
-    still be a spaceless run whose cuts want snapping. That is an ordinary
-    mode, not a corner: `vrcc.core.pipeline_send.safe_submit` is called
-    with an empty translation list from five places, among them
-    translation switched off and the MT engine absent.
-    """
+    Returns `parts` untouched only when a translation exists and every one is
+    repeated whole. A caption with NO translations reaches the loop instead,
+    its original still a spaceless run whose cuts want snapping: an ordinary
+    mode, since `pipeline_send.safe_submit` takes an empty translation list
+    from five call sites, translation switched off among them."""
     if any(translated) and all(
         i in repeated for i, is_tr in enumerate(translated) if is_tr
     ):
         return parts
-    # Preference order: anchored and snapped, anchored alone, snapped alone.
     for anchored, snap in ((True, True), (True, False), (False, True)):
         candidate = _join(
             texts, translated, repeated, n, cfg, anchored=anchored, snap=snap
         )
         # len(candidate) == len(parts): _join drops any slot left empty by a
-        # collapsed slice, so a shorter candidate could still pass the
-        # per-part CHATBOX_LIMIT test while missing a whole part.
+        # collapsed slice, so a shorter candidate can pass the per-part limit
+        # while missing a whole part.
         if (
             candidate
             and len(candidate) == len(parts)

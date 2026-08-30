@@ -53,31 +53,15 @@ def _git_show(ref: str, rel_path: str, required: bool) -> str | None:
 def _load_module_from_ref(ref: str):
     """Import `vrcc/osc/chatbox_format.py` as it exists at `ref`.
 
-    Since commit 55cef2b, `chatbox_format.py` imports several
-    part-arrangement helpers from `vrcc.osc.chatbox_slice`. Loading only
-    `chatbox_format.py`'s text standalone would leave that import statement
-    to fall through to `sys.path`, which finds the WORKING TREE's
-    `chatbox_slice.py` (it is a real, already-importable package on disk),
-    not the ref's. That would silently report today's part-arrangement
-    behavior for a ref that is meant to isolate an older or newer one, with
-    no error to say so. So `chatbox_slice.py` is fetched from the same `ref`
-    and, when the ref has one, temporarily registered in `sys.modules` under
-    the exact dotted name (`vrcc.osc.chatbox_slice`) the import statement
-    looks up, before `chatbox_format.py` is executed: Python's import system
-    checks `sys.modules` before ever touching a real finder, so the ref's
-    copy wins over the on-disk package for the duration of that one exec.
-
-    The substitution is undone in every case (success, or `chatbox_format.py`
-    raising while loading) before returning, restoring whatever module was
-    cached at that name before this call. `main()` calls this once for
-    `--against` and then imports the real `vrcc.osc.chatbox_format` for the
-    working-tree report in the same process; that second import must see the
-    real `chatbox_slice`, not a stale substitution left behind by the first.
-
-    A ref that predates the split (`--against main`, this module's own
-    documented example) has no `chatbox_slice.py` for `git show` to find:
-    its `chatbox_format.py` is self-contained, exactly as it was before the
-    split, so nothing is substituted and it loads exactly as it does today.
+    Since 55cef2b it imports part-arrangement helpers from
+    `vrcc.osc.chatbox_slice`. Executing only `chatbox_format.py`'s text lets
+    that import fall through to the WORKING TREE's copy, silently reporting
+    today's part arrangement for a ref meant to isolate another one, with no
+    error to say so. The ref's `chatbox_slice.py` is registered under that
+    dotted name in `sys.modules` instead, and the registration is undone on
+    every exit: `main()` imports the real module afterwards in the same
+    process and must not see a stale substitution. A ref predating the split
+    has no `chatbox_slice.py` to fetch and loads as it always did.
     """
     tmp_dir = Path(tempfile.mkdtemp())
     format_source = _git_show(ref, "vrcc/osc/chatbox_format.py", required=True)
@@ -91,10 +75,8 @@ def _load_module_from_ref(ref: str):
             slice_path.write_text(slice_source, encoding="utf-8")
             slice_spec = importlib.util.spec_from_file_location(slice_name, slice_path)
             slice_module = importlib.util.module_from_spec(slice_spec)
-            # Registered before exec, not after: chatbox_format_ref's own
-            # `from vrcc.osc.chatbox_slice import ...` runs during
-            # format_spec.loader.exec_module below, and that import resolves
-            # by checking sys.modules first, before any real finder.
+            # Registered before exec: chatbox_format_ref's own import of it
+            # runs during exec_module below.
             sys.modules[slice_name] = slice_module
             slice_spec.loader.exec_module(slice_module)
 
