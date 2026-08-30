@@ -8,7 +8,7 @@ threads.
 from __future__ import annotations
 
 from vrcc.core.config import OscConfig
-from vrcc.osc.linebreak import is_spaceless, safe_cut
+from vrcc.osc.linebreak import choose_cut, is_spaceless, safe_cut
 
 CHATBOX_LIMIT = 144
 
@@ -156,7 +156,7 @@ def fit_chatbox(text: str, mode: str) -> list[str]:
 
 
 def _balanced_slices(
-    text: str, n: int, limit: int, anchor: str = "start"
+    text: str, n: int, limit: int, anchor: str = "start", snap: bool = False
 ) -> list[str]:
     """Split `text` into exactly `n` ordered slices of near-equal length.
 
@@ -176,6 +176,14 @@ def _balanced_slices(
     clears the queue, so the last part is the one still on screen when the user
     stops talking, and a translation absent from it is one the reader never
     ends up with.
+
+    `snap` only changes the character path: each ceil-division boundary is
+    nudged with `linebreak.choose_cut` to the nearest clause mark within half
+    a slice either way, the widest travel that still leaves every slice
+    between half and one and a half of its share. `snap=False` is byte for
+    byte what this function has always done, on both paths; word-based
+    slicing never reads `snap` at all, since a word boundary already reads
+    right and the clause vocabulary has nothing to add there.
     """
     words = text.split()
     # A spaceless run within its per-part share is better carried whole, which
@@ -208,7 +216,15 @@ def _balanced_slices(
     size = -(-len(text) // n)  # ceil division
     bounds = [0]
     for i in range(1, n):
-        cut = safe_cut(text, min(i * size, len(text)))
+        ideal = min(i * size, len(text))
+        if snap:
+            cut = choose_cut(
+                text, ideal, bounds[-1], ideal - size // 2, ideal + size // 2
+            )
+        else:
+            cut = safe_cut(text, ideal)
+        # Belt and braces: choose_cut already honors floor, but this is the
+        # same guard the unsnapped path has always needed to stay monotonic.
         bounds.append(max(cut, bounds[-1]))
     bounds.append(len(text))
     return [text[bounds[i] : bounds[i + 1]] for i in range(n)]
@@ -282,10 +298,10 @@ def fit_message(
             grown, grown_repeated = _assemble(texts, translated, n + 1, cfg)
             fits = grown and all(len(part) <= CHATBOX_LIMIT for part in grown)
             if fits and len(grown_repeated) > len(repeated):
-                return _end_anchored(
+                return _settle(
                     texts, translated, grown_repeated, n + 1, cfg, grown
                 )
-        return _end_anchored(texts, translated, repeated, n, cfg, parts)
+        return _settle(texts, translated, repeated, n, cfg, parts)
     # Degenerate input that no slice count could balance: split EACH
     # language's own text independently rather than the flat joined string
     # (whose ``.split()`` would treat the "\n" separator as just more
@@ -297,7 +313,7 @@ def fit_message(
     return parts
 
 
-def _end_anchored(
+def _settle(
     texts: list[str],
     translated: list[bool],
     repeated: set[int],
@@ -305,18 +321,36 @@ def _end_anchored(
     cfg: OscConfig,
     parts: list[str],
 ) -> list[str]:
-    """`parts` with any sliced translation moved to the last parts, if it fits.
+    """`parts`, replaced by the first better arrangement that still fits.
 
-    A translation with fewer words than parts leaves the trailing ones blank,
-    and the last part is the one still on screen once the queue drains, so a
-    translation missing from it is one the reader never ends up with. Applied
-    only after the part count is settled, and only when every part still fits.
+    Tries anchoring a sliced translation into the LAST parts and snapping
+    character-based boundaries onto clause marks, in preference order:
+    anchored and snapped, anchored alone, snapped alone. Anchoring outranks
+    snapping because anchoring decides whether the reader receives the
+    translation at all (a translation with fewer words than parts leaves the
+    trailing ones blank, and the last part is the one still on screen once
+    the queue drains), while snapping only decides where the text looks
+    broken. Applied only after the part count is settled, and only when every
+    part still fits: the part-count search must keep seeing the plain
+    ceil-division sizes it has always searched over, or the delivery numbers
+    in `fit_message`'s comment stop describing what ships.
+
+    Skips straight to returning `parts` when every translation is already
+    repeated whole rather than sliced. Only a sliced translation needs
+    relocating, so anchoring is a guaranteed no-op here; snapping is skipped
+    too, even though the original can still be spaceless text long enough to
+    want it, because every translation already arrives whole in every part,
+    which is the outcome the part-count search was optimizing for.
     """
     if all(i in repeated for i, is_tr in enumerate(translated) if is_tr):
         return parts
-    moved = _join(texts, translated, repeated, n, cfg, anchored=True)
-    if moved and all(len(part) <= CHATBOX_LIMIT for part in moved):
-        return moved
+    # Preference order: anchored and snapped, anchored alone, snapped alone.
+    for anchored, snap in ((True, True), (True, False), (False, True)):
+        candidate = _join(
+            texts, translated, repeated, n, cfg, anchored=anchored, snap=snap
+        )
+        if candidate and all(len(part) <= CHATBOX_LIMIT for part in candidate):
+            return candidate
     return parts
 
 
@@ -366,14 +400,18 @@ def _join(
     n: int,
     cfg: OscConfig,
     anchored: bool = False,
+    snap: bool = False,
 ) -> list[str]:
     """`n` parts, with the `repeated` texts whole in each and the rest sliced.
 
-    ``anchored`` moves a sliced translation's content to the LAST parts. Off
-    while a part count is being judged, because anchoring changes which
-    original slice a translation shares a part with, and a count that only fits
-    because of it would be chosen over a larger one that repeats the
-    translation outright, which measured better.
+    ``anchored`` moves a sliced translation's content to the LAST parts.
+    ``snap`` nudges each character-based boundary onto the nearest clause
+    mark (see `_balanced_slices`). Both default off while a part count is
+    being judged: anchoring changes which original slice a translation shares
+    a part with, and snapping changes slice lengths, and a count that only
+    fits because of either would be chosen over a larger one that the search
+    would otherwise have picked, which measured better for anchoring and is
+    the whole reason snapping runs after the search rather than inside it.
     """
     sliced = {
         i: _balanced_slices(
@@ -381,6 +419,7 @@ def _join(
             n,
             CHATBOX_LIMIT,
             anchor="end" if anchored and translated[i] else "start",
+            snap=snap,
         )
         for i, text in enumerate(texts)
         if i not in repeated
