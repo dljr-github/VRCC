@@ -158,13 +158,128 @@ def test_snap_never_produces_an_empty_slice_for_terminated_text():
 
 
 def test_concatenation_reproduces_the_text_for_both_values_of_snap():
-    texts = ["\u4e2d" * 55, _JA_TRANSLATION]
-    for text in texts:
+    """Wide enough to catch a regression in a script this suite would
+    otherwise never exercise. `snap` only touches the character path
+    (`_balanced_slices`' own routing decides which path a text takes), so
+    the two script families below need two different reconstructions: the
+    character path promises exact "".join() reconstruction, but the word
+    path rejoins on whole words with a single space (see `_balanced_slices`'
+    own docstring), since blank slices from a short translation collapse
+    when concatenated raw -- `test_snap_never_touches_the_word_path`
+    already pins that `snap` cannot change which one applies.
+    """
+    # Character path: spaceless scripts, and a plain unbreakable run (a
+    # single token with no spaces at all, over `limit`, so it fails the
+    # word path's own eligibility check regardless of script).
+    char_path_texts = [
+        "\u4e2d" * 55,  # CJK, no clause marks: the ceil-division floor
+        _JA_TRANSLATION,  # CJK with clause marks: the regression text
+        (  # Thai: the suite's one script with combining marks AND no spaces
+            "\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35\u0e04\u0e23\u0e31\u0e1a"
+            "\u0e17\u0e38\u0e01\u0e04\u0e19\u0e27\u0e31\u0e19\u0e19\u0e35"
+            "\u0e49\u0e2d\u0e32\u0e01\u0e32\u0e28\u0e14\u0e35\u0e21\u0e32"
+            "\u0e01\u0e1c\u0e21\u0e01\u0e33\u0e25\u0e31\u0e07\u0e17\u0e14"
+            "\u0e2a\u0e2d\u0e1a\u0e23\u0e30\u0e1a\u0e1a\u0e04\u0e33\u0e1a"
+            "\u0e23\u0e23\u0e22\u0e32\u0e22\u0e20\u0e32\u0e29\u0e32\u0e44"
+            "\u0e17\u0e22\u0e2d\u0e22\u0e39\u0e48\u0e04\u0e23\u0e31\u0e1a"
+            "\u0e2b\u0e27\u0e31\u0e07\u0e27\u0e48\u0e32\u0e08\u0e30\u0e43"
+            "\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e44\u0e14\u0e49\u0e14\u0e35"
+        ),
+        "9" * 200,  # unbreakable run: not a spaceless script, one long token
+    ]
+    for text in char_path_texts:
         for n in (2, 3, 4, 5):
             for snap in (False, True):
                 slices = _balanced_slices(text, n, CHATBOX_LIMIT, snap=snap)
                 assert len(slices) == n
                 assert "".join(slices) == text
+
+    # Word path: ordinary spaced text, and a script mix. snap has nothing to
+    # do here (see test_snap_never_touches_the_word_path`), but the
+    # reconstruction is still worth pinning across scripts and n.
+    word_path_texts = [
+        " ".join(f"word{i}" for i in range(30)),  # Latin
+        "hello " + "\u4e2d" * 20 + " world " + "\u65e5" * 20 + " test " + "\u4e2d" * 20,
+    ]
+    for text in word_path_texts:
+        for n in (2, 3, 4, 5):
+            for snap in (False, True):
+                slices = _balanced_slices(text, n, CHATBOX_LIMIT, snap=snap)
+                assert len(slices) == n
+                assert " ".join(s for s in slices if s) == text
+
+
+def test_snap_does_not_collapse_a_slice_when_the_window_repeats_the_prior_cut():
+    """Minimal reproduction of a floor-inclusive collision: the only clause
+    mark sits at index 26, so bounds[1] lands right after it, at 27, and
+    bounds[2]'s window (27 to 45) has that same index 27 as its only
+    candidate. Passing bounds[-1] as choose_cut's floor lets it hand that
+    index straight back, since floor is an inclusive candidate there,
+    collapsing the second slice to nothing; bounds[-1] + 1 is what
+    `_balanced_slices` passes instead, forcing the search past it."""
+    text = "\u4e2d" * 26 + "\u3002" + "\u4e2d" * 25
+    assert len(text) == 52
+
+    slices = _balanced_slices(text, 3, CHATBOX_LIMIT, snap=True)
+
+    assert len(slices) == 3
+    assert all(slices), f"a slice collapsed to empty: {slices!r}"
+    assert "".join(slices) == text
+
+
+def test_settle_rejects_a_candidate_arrangement_that_drops_a_part():
+    """`_join` drops any slot whose pieces are all empty. A 2-word
+    translation at n=4 has two blank slots regardless of which end
+    `anchored` puts them on, and with no other text to cover for them (only
+    one translation, `include_original=False`), all three of `_settle`'s
+    attempts come back 2 parts long. `_settle` must not ship a 2-part
+    result in place of the 4 parts it was handed, even though each of
+    those 2 parts individually fits `CHATBOX_LIMIT` with room to spare:
+    fitting the limit is not the same question as keeping every part."""
+    cfg = make_cfg(overflow="split", include_original=False)
+    texts = ["alpha beta"]
+    translated = [True]
+    # Stands in for whatever fit_message already committed to sending at
+    # n=4; _settle only inspects its length and that each entry already
+    # fits, not its provenance.
+    parts = ["placeholder0", "placeholder1", "placeholder2", "placeholder3"]
+
+    settled = _settle(texts, translated, set(), 4, cfg, parts)
+
+    assert settled == parts
+
+
+def test_settle_falls_back_to_parts_when_every_arrangement_overflows():
+    """Built so all three of `_settle`'s attempts overflow `CHATBOX_LIMIT`,
+    unlike test_settle_discards_a_snap_that_would_push_a_part_over_the_limit
+    (which succeeds on the second attempt): this exercises the final
+    `return parts` line instead. `original`'s word-path split puts most of
+    its length in the last slot (a giant trailing word the greedy packer
+    saves for the end); pairing that with the translation `A` (anchored
+    there) or the CJK translation `B`'s snap-enlarged last slot (or both)
+    all push that one part past the limit, while the plain, unanchored,
+    unsnapped baseline does not."""
+    cfg = make_cfg(overflow="split", include_original=True, translation_separator="\n")
+    original = " ".join([f"w{i}" for i in range(20)] + ["G" * 60])
+    a_translation = "X" * 30
+    b_translation = "\u4e2d" * 176 + "\u3002" + "\u4e2d" * 103
+    texts = [original, a_translation, b_translation]
+    translated = [False, True, True]
+    n = 4
+
+    baseline = _join(texts, translated, set(), n, cfg)
+    assert len(baseline) == n
+    assert all(len(part) <= CHATBOX_LIMIT for part in baseline)
+    for anchored, snap in ((True, True), (True, False), (False, True)):
+        candidate = _join(texts, translated, set(), n, cfg, anchored=anchored, snap=snap)
+        assert not (
+            len(candidate) == len(baseline)
+            and all(len(part) <= CHATBOX_LIMIT for part in candidate)
+        ), (anchored, snap, [len(p) for p in candidate])
+
+    settled = _settle(texts, translated, set(), n, cfg, baseline)
+
+    assert settled == baseline
 
 
 def test_settle_discards_a_snap_that_would_push_a_part_over_the_limit():
