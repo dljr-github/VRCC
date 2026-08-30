@@ -59,8 +59,9 @@ def _balanced_slices(
     # whole text: a translation carrying one stray ASCII space (normalize
     # never touches `!` or `?`, so a space after one survives) still has a
     # spaceless-script word too long for its share, and that word is what the
-    # word packer would mishandle. Korean's tokens are genuinely space
-    # separated and each is short, so this leaves it on the word path.
+    # word packer would mishandle. is_spaceless is true of a hangul run like
+    # any other, so what leaves Korean on the word path is the length half:
+    # its tokens are short enough that none exceeds its share.
     spaceless = any(is_spaceless(word) and len(word) > limit // n for word in words)
     if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []

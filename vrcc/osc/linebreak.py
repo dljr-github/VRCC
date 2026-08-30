@@ -92,10 +92,6 @@ def is_spaceless(text: str) -> bool:
     by :func:`_assemble` and never arrives here; one too long has to be cut,
     and cutting it by character is the only way every part carries a share.
 
-    Whitespace anywhere means the script separates words (Korean does, and packs
-    correctly), so only a run of unseparated text reaches the character branch
-    the docstring above already promises it.
-
     Thai is here for the same reason as CJK: written without spaces between
     words, so `.split()` returns one token. Those are the only scripts among
     the languages vrcc.core.languages offers that do this, so the ranges stop

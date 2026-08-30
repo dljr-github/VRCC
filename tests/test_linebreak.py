@@ -53,9 +53,13 @@ def test_safe_cut_falls_back_to_index_when_nudging_would_reach_zero():
 
 def test_is_spaceless_true_for_unspaced_scripts_false_for_spaced_ones():
     assert is_spaceless(_THAI) is True
-    assert is_spaceless("これはテストです") is True
+    assert is_spaceless("\u3053\u308C\u306F\u30C6\u30B9\u30C8\u3067\u3059") is True
     assert is_spaceless("hello world") is False
-    assert is_spaceless("안녕 하세요") is False  # Korean separates words
+    # Whitespace makes this False whatever the script. A lone hangul word is
+    # spaceless like any other unspaced run, and stays on the word path
+    # because it is short, not because this predicate turns it away.
+    assert is_spaceless("\uC548\uB155 \uD558\uC138\uC694") is False
+    assert is_spaceless("\uC548\uB155") is True
 
 
 def test_is_spaceless_false_for_private_use_area():

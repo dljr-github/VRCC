@@ -1,19 +1,24 @@
 """Post-decode CJK punctuation normalization.
 
-NLLB writes Japanese and Chinese with the ASCII period and comma whatever the
-target script is, and m2m100 does the same for Chinese. Observed 2026-08-30 on
-CPU int8 with the shipped decoding defaults, translating "I bought apples,
-oranges and pears. They were cheap." from English:
-`nllb-600M-int8` returned 我买了果,果和梨,它们很便宜. and
-`m2m100-418M-int8` returned 我买了苹果,橙子和珍珠,它们很便宜。 Neither is
-tokenizer damage: the same decode path returns 彼は「はい」と言い、その後、
-彼は去った。 from m2m100 into Japanese, ideographic throughout.
+Both shipped MT families write CJK with the ASCII period and comma.
+Measured 2026-08-31 on CPU int8 at the live decoding settings (beam 4,
+repetition penalty 1.1, no_repeat_ngram_size 3), six English sentences per
+target, counting the decodes `normalize` has to repair:
+
+    nllb-600M-int8, nllb-1.3B-int8      Jpan 6/6  Hans 6/6  Hant 6/6
+    m2m100-418M-int8, m2m100-1.2B-int8  Jpan 0/6  Hans 5/6  Hant 5/6
+
+"I bought apples, oranges and pears. They were cheap." came out of
+nllb-600M-int8 into Chinese Simplified as
+"\u6211\u4E70\u4E86\u679C,\u5B50\u548C\u68A8.\u5B83\u4EEC\u5F88\u4FBF\u5B9C."
+Not tokenizer damage: the same decode path fills the m2m100 Jpan cell above
+with ideographic marks throughout.
 
 `normalize` is the repair, keyed on the target's FLORES script subtag, which
 the caller already holds (see `vrcc.translate.engine.TranslateEngine.translate`,
-the only caller). Applying it to every family is deliberate: the defect is not
-confined to one checkpoint, and the guards below leave text that already
-carries the ideographic mark untouched.
+the only caller). Applying it to every family is deliberate: the table finds
+the defect in both, and the guards below leave text that already carries the
+ideographic mark untouched.
 """
 
 from __future__ import annotations
