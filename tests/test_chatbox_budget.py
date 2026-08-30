@@ -126,8 +126,9 @@ def test_a_cut_lands_on_a_word_boundary():
 
 
 def test_a_cut_keeps_a_combining_mark_with_its_base():
-    # Thai tone marks are the case that reaches _safe_cut: a boundary landing
-    # on one backs up so the base and its mark travel together or not at all.
+    # Thai tone marks are the case that reaches linebreak.safe_cut: a boundary
+    # landing on one backs up so the base and its mark travel together or not
+    # at all.
     cfg = OscConfig(overflow="truncate", include_original=False)
     thai = "ก" * 70 + "้" + "ก" * 60
     parts = fit_message(ORIGINAL, [("TH", thai), ("X", "x" * 131)], cfg)

@@ -7,9 +7,8 @@ threads.
 
 from __future__ import annotations
 
-import unicodedata
-
 from vrcc.core.config import OscConfig
+from vrcc.osc.linebreak import is_spaceless, safe_cut
 
 CHATBOX_LIMIT = 144
 
@@ -156,50 +155,6 @@ def fit_chatbox(text: str, mode: str) -> list[str]:
     raise ValueError(f"Unknown overflow mode: {mode!r}")
 
 
-def _safe_cut(text: str, index: int) -> int:
-    """Back a prospective slice boundary at `index` up past any combining
-    marks (`unicodedata.combining(ch) != 0`, e.g. Thai vowel/tone marks) so
-    a cut never separates one from its base character. Falls back to the
-    original `index` if nudging would collapse to 0 (an adversarial run of
-    nothing but combining marks), so callers always make forward progress.
-    """
-    cut = index
-    while 0 < cut < len(text) and unicodedata.combining(text[cut]) != 0:
-        cut -= 1
-    return cut if cut > 0 else index
-
-
-def _is_spaceless(text: str) -> bool:
-    """Whether `text` is written in a script that does not separate words.
-
-    `text.split()` returns ONE token for a Japanese or Chinese sentence, and
-    that token is usually under the 144-char limit, so the word packer accepts
-    it and drops the whole translation into ONE slice while leaving the other
-    parts blank of it. A translation short enough to travel whole is repeated
-    by :func:`_assemble` and never arrives here; one too long has to be cut,
-    and cutting it by character is the only way every part carries a share.
-
-    Whitespace anywhere means the script separates words (Korean does, and packs
-    correctly), so only a run of unseparated text reaches the character branch
-    the docstring above already promises it.
-
-    Thai is here for the same reason as CJK: written without spaces between
-    words, so `.split()` returns one token. Those are the only scripts among
-    the languages vrcc.core.languages offers that do this, so the ranges stop
-    there rather than guessing at ones nothing can produce.
-    """
-    if any(ch.isspace() for ch in text):
-        return False
-    return any(
-        "　" <= ch <= "鿿"      # CJK punctuation, kana, unified ideographs
-        or "가" <= ch <= "힯"   # hangul syllables
-        or "豈" <= ch <= "﫿"   # CJK compatibility ideographs
-        or "･" <= ch <= "ﾟ"   # halfwidth katakana
-        or "ก" <= ch <= "๛"      # Thai
-        for ch in text
-    )
-
-
 def _balanced_slices(
     text: str, n: int, limit: int, anchor: str = "start"
 ) -> list[str]:
@@ -225,7 +180,7 @@ def _balanced_slices(
     words = text.split()
     # A spaceless run within its per-part share is better carried whole, which
     # _assemble already does where it fits.
-    spaceless = _is_spaceless(text) and len(text) > limit // n
+    spaceless = is_spaceless(text) and len(text) > limit // n
     if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []
         idx = 0
@@ -253,7 +208,7 @@ def _balanced_slices(
     size = -(-len(text) // n)  # ceil division
     bounds = [0]
     for i in range(1, n):
-        cut = _safe_cut(text, min(i * size, len(text)))
+        cut = safe_cut(text, min(i * size, len(text)))
         bounds.append(max(cut, bounds[-1]))
     bounds.append(len(text))
     return [text[bounds[i] : bounds[i + 1]] for i in range(n)]
@@ -450,7 +405,7 @@ def _split_words(text: str, limit: int) -> list[str]:
             if current:
                 chunks.append(current)
                 current = ""
-            cut = _safe_cut(word, limit)
+            cut = safe_cut(word, limit)
             chunks.append(word[:cut])
             word = word[cut:]
 
