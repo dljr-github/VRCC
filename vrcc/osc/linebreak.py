@@ -4,6 +4,12 @@ Answers "what does this script do at a cut": which characters a slice
 boundary may land next to, and where a cut reads best. Knows nothing about
 the 144-character chatbox limit or how many parts a message needs; that
 policy stays in :mod:`vrcc.osc.chatbox_format`, which calls in here.
+
+Every non-ASCII codepoint below is written as a \\uXXXX escape rather than a
+raw glyph, so a normalizing editor or write path cannot silently substitute a
+canonically-equivalent codepoint (as happened once to a raw glyph here): an
+escape reads back as the exact codepoint it names, and a reviewer can verify
+it by eye against a codepoint table without relying on font rendering.
 """
 
 from __future__ import annotations
@@ -13,41 +19,42 @@ import unicodedata
 # Terminators, their halfwidth forms, and the ellipsis. A cut is welcome
 # right after one of these, so they also can never lead the line they would
 # otherwise end (folded into `_NO_START` below).
-_BREAK_AFTER = "。、，．！？：；｡､…"
+_BREAK_AFTER = "\u3002\u3001\uFF0C\uFF0E\uFF01\uFF1F\uFF1A\uFF1B\uFF61\uFF64\u2026"
 
 # Closing brackets and quotes. A closer at the start of a line strands the
 # reader looking for what it closed, so `_NO_START` includes this set. The
 # same set is also the run `_ends_clause` walks back through: a closer
 # carries no script of its own, so the mark it closes over decides, which
 # is the same reasoning `vrcc.translate.punctuation._anchor` uses for the
-# same walk.
-_CLOSING = "\"'’”)]}）］｝」』】〉》〕｣"
+# same walk. Kept identical to `punctuation._CLOSERS`, character for
+# character, by a test that checks the two against each other.
+_CLOSING = "\"'\u2019\u201D)]}\uFF09\uFF3D\uFF5D\u300D\u300F\u3011\u3009\u300B\u3015\uFF63"
 
 # Opening brackets and quotes: the mirror set. An opener at the end of a
 # line strands the reader before its content, so it belongs in `_NO_END`.
-_OPENING = "\"'‘“([{（［｛「『【〈《〔｢"
+_OPENING = "\"'\u2018\u201C([{\uFF08\uFF3B\uFF5B\u300C\u300E\u3010\u3008\u300A\u3014\uFF62"
 
 # Kinsoku line-start prohibition: a line may never begin with one of these,
 # since each reads as attached to what came before it rather than as the
 # start of something new.
 _NO_START = (
     _BREAK_AFTER
-    + "・"  # middle dot: separates the words on either side of it
-    + "々ゝゞヽヾ"  # iteration marks: repeat the character before them
-    + "ー"  # prolonged sound mark: extends the vowel before it
-    + "ぁぃぅぇぉっゃゅょゎ"  # hiragana small kana: never stand alone
-    + "ァィゥェォッャュョヮ"  # katakana small kana: never stand alone
-    + "゛゜"  # voicing marks: modify the kana before them
+    + "\u30FB"  # middle dot: separates the words on either side of it
+    + "\u3005\u309D\u309E\u30FD\u30FE"  # iteration marks: repeat the character before them
+    + "\u30FC"  # prolonged sound mark: extends the vowel before it
+    + "\u3041\u3043\u3045\u3047\u3049\u3063\u3083\u3085\u3087\u308E"  # hiragana small kana: never stand alone
+    + "\u30A1\u30A3\u30A5\u30A7\u30A9\u30C3\u30E3\u30E5\u30E7\u30EE"  # katakana small kana: never stand alone
+    + "\u309B\u309C"  # voicing marks: modify the kana before them
     + _CLOSING
-    + "ｧｨｩｪｫｬｭｮｯｰﾞﾟ"  # halfwidth small kana, prolonged mark, voicing marks
-    + "ำะๆฯ"  # Thai SARA AM, SARA A, MAIYAMOK, PAIYANNOI: attach backward
+    + "\uFF67\uFF68\uFF69\uFF6A\uFF6B\uFF6C\uFF6D\uFF6E\uFF6F\uFF70\uFF9E\uFF9F"  # halfwidth small kana, prolonged mark, voicing marks
+    + "\u0E33\u0E30\u0E46\u0E2F"  # Thai SARA AM, SARA A, MAIYAMOK, PAIYANNOI: attach backward
 )
 
 # Kinsoku line-end prohibition: a line may never end on one of these, since
 # each is written leading into what follows it.
 _NO_END = (
     _OPENING
-    + "เแโใไ"  # Thai preposed vowels, written before their consonant
+    + "\u0E40\u0E41\u0E42\u0E43\u0E44"  # Thai preposed vowels, written before their consonant
 )
 
 
@@ -56,7 +63,7 @@ def safe_cut(text: str, index: int) -> int:
     mark (`unicodedata.category(ch) in ("Mn", "Mc")`, e.g. Thai vowel/tone
     marks) so a cut never separates one from its base character.
     `unicodedata.combining(ch) != 0` is not enough: it returns 0 for some
-    marks, such as Thai SARA AM and SARA II, that still need their base.
+    marks, such as Thai MAI HAN-AKAT and SARA II, that still need their base.
     Falls back to the original `index` if nudging would collapse to 0 (an
     adversarial run of nothing but combining marks), so callers always make
     forward progress.
@@ -89,11 +96,11 @@ def is_spaceless(text: str) -> bool:
     if any(ch.isspace() for ch in text):
         return False
     return any(
-        "　" <= ch <= "鿿"      # CJK punctuation, kana, unified ideographs
-        or "가" <= ch <= "힯"   # hangul syllables
-        or "豈" <= ch <= "﫿"   # CJK compatibility ideographs
-        or "･" <= ch <= "ﾟ"   # halfwidth katakana
-        or "ก" <= ch <= "๛"      # Thai
+        "\u3000" <= ch <= "\u9FFF"  # CJK punctuation, kana, unified ideographs
+        or "\uAC00" <= ch <= "\uD7AF"  # hangul syllables
+        or "\uF900" <= ch <= "\uFAFF"  # CJK compatibility ideographs
+        or "\uFF65" <= ch <= "\uFF9F"  # halfwidth katakana
+        or "\u0E01" <= ch <= "\u0E5B"  # Thai
         for ch in text
     )
 
@@ -141,7 +148,10 @@ def choose_cut(text: str, index: int, floor: int, lo: int, hi: int) -> int:
     unchanged, which is what the caller would have used anyway: not a new
     failure mode, just today's.
 
-    Never returns below `floor` and never at or past `len(text) - 1`.
+    Never returns below `floor`. Also never at or past `len(text) - 1`,
+    unless `floor` itself is already at or past that point, in which case
+    `floor` wins: the monotonic-bounds guarantee the caller depends on takes
+    priority over the terminal clamp.
     """
     ceiling = len(text) - 2
     lo = max(lo, floor)

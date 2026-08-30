@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import unicodedata
 
-from vrcc.osc.linebreak import _ends_clause, _legal, choose_cut, is_spaceless, safe_cut
+from vrcc.osc.linebreak import _CLOSING, _ends_clause, _legal, choose_cut, is_spaceless, safe_cut
+from vrcc.translate.punctuation import _CLOSERS
 
 # Same fixture tests/test_chatbox_split.py uses for its Thai case, reused
 # here rather than inventing a second one.
@@ -18,9 +19,9 @@ _THAI = (
 )
 
 
-def test_safe_cut_now_respects_sara_am_and_sara_ii():
-    # unicodedata.combining() is 0 for both, so the predicate it used to use
-    # never moved the cut off either mark.
+def test_safe_cut_backs_up_past_mai_han_akat_and_sara_ii():
+    # Both have unicodedata.combining() == 0, so a check keyed on that alone
+    # would leave the cut sitting on the mark itself.
     for mark, index in (("ั", 2), ("ี", 5)):
         assert _THAI[index] == mark
         cut = safe_cut(_THAI, index)
@@ -28,8 +29,9 @@ def test_safe_cut_now_respects_sara_am_and_sara_ii():
         assert unicodedata.category(_THAI[cut]) not in ("Mn", "Mc")
 
 
-def test_safe_cut_still_respects_mai_ek():
-    # combining class 107: the one class the old predicate already caught.
+def test_safe_cut_backs_up_past_mai_ek():
+    # Combining class 107: unicodedata.combining() alone already identifies
+    # this one, unlike MAI HAN-AKAT and SARA II above.
     index = _THAI.index("่")
     cut = safe_cut(_THAI, index)
     assert cut < index
@@ -41,11 +43,23 @@ def test_safe_cut_falls_back_to_index_when_nudging_would_reach_zero():
     assert safe_cut(marks, 2) == 2
 
 
-def test_is_spaceless_unchanged_by_the_move():
+def test_is_spaceless_true_for_unspaced_scripts_false_for_spaced_ones():
     assert is_spaceless(_THAI) is True
     assert is_spaceless("これはテストです") is True
     assert is_spaceless("hello world") is False
     assert is_spaceless("안녕 하세요") is False  # Korean separates words
+
+
+def test_is_spaceless_false_for_private_use_area():
+    # U+8C48..U+FAFF once stood in for U+F900..U+FAFF here (an editor or
+    # write path silently substituted the NFC-canonical decomposition of
+    # U+F900), which widened this range to swallow the Private Use Area.
+    # Nothing in vrcc/core/languages.py emits PUA text, so this is a
+    # regression guard rather than a shipped-behavior test.
+    assert is_spaceless("\ue000" * 80) is False
+    assert is_spaceless("\uf8ff" * 80) is False
+    assert is_spaceless("\uf900" * 80) is True  # the real range's own start
+    assert is_spaceless("\ufaff" * 80) is True  # the real range's own end
 
 
 def test_legal_rejects_a_character_forbidden_at_line_start():
@@ -60,14 +74,48 @@ def test_legal_rejects_a_predecessor_forbidden_at_line_end():
     assert _legal(text, opener) is True  # the opener itself may start one
 
 
+def test_legal_rejects_each_thai_sign_that_attaches_backward():
+    # U+0E33 SARA AM, U+0E30 SARA A, U+0E46 MAIYAMOK, U+0E2F PAIYANNOI are
+    # category Lo/Lm, not Mn/Mc, so only _NO_START membership catches them.
+    # Dropping any one of the four from _NO_START would still leave this red.
+    for mark in ("\u0e33", "\u0e30", "\u0e46", "\u0e2f"):
+        text = "\u0e01" + mark
+        assert _legal(text, 1) is False
+
+
+def test_legal_rejects_a_position_after_each_thai_preposed_vowel():
+    # U+0E40 through U+0E44 are written before the consonant they voice, so
+    # the position right after one is illegal to start a line on.
+    for mark in ("\u0e40", "\u0e41", "\u0e42", "\u0e43", "\u0e44"):
+        text = mark + "\u0e01"
+        assert _legal(text, 1) is False
+
+
 def test_ends_clause_sees_through_a_run_of_closing_brackets():
     text = "彼は言った。」"
+    assert _ends_clause(text, len(text)) is True
+
+
+def test_ends_clause_sees_through_a_run_of_two_closers():
+    text = "text\u3002\u300d\uff09"  # period, then two different closers
+    assert _ends_clause(text, len(text)) is True
+
+
+def test_ends_clause_sees_through_a_run_of_three_closers():
+    text = "text\u3002\u300d\uff09\u300f"  # period, then three closers
     assert _ends_clause(text, len(text)) is True
 
 
 def test_ends_clause_false_without_a_clause_mark_behind_the_brackets():
     text = "彼は言った」"
     assert _ends_clause(text, len(text)) is False
+
+
+def test_closing_matches_punctuation_closers():
+    # A test may cross the package boundary the module itself deliberately
+    # does not: if punctuation._CLOSERS ever gains a bracket, this must fail
+    # rather than let the two definitions drift apart silently.
+    assert _CLOSING == _CLOSERS
 
 
 def test_choose_cut_prefers_the_nearest_clause_boundary_in_window():
