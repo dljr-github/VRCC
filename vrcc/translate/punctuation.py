@@ -56,12 +56,12 @@ _CJK_RANGES: tuple[tuple[int, int], ...] = (
 # 他说"是的",然后离开了. keeps its ASCII comma while the same sentence without
 # the quotes converts. Escaped rather than written out: a run of
 # near-identical bracket glyphs is unreadable as literals.
-_CLOSERS = "\"'\u2019\u201d)]}\uff09\uff3d\uff5d\u300d\u300f\u3011\u3009\u300b\u3015\uff63"
+_CLOSERS = "\"'\u2019\u201D)]}\uFF09\uFF3D\uFF5D\u300D\u300F\u3011\u3009\u300B\u3015\uFF63"
 
 # Terminators the target script already uses. A mark next to one of these is
 # left alone rather than converted, which would double the glyph: the input is
 # a checkpoint that mixes conventions, so です。. is a shape to expect.
-_ALREADY = "\u3002\u3001\uff0c\uff0e\uff61\uff64"
+_ALREADY = "\u3002\u3001\uFF0C\uFF0E\uFF61\uFF64"
 
 
 def _is_cjk(ch: str) -> bool:

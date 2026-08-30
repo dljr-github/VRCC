@@ -8,8 +8,16 @@ from __future__ import annotations
 
 import unicodedata
 
-from vrcc.osc.linebreak import _CLOSING, _ends_clause, _legal, choose_cut, is_spaceless, safe_cut
-from vrcc.translate.punctuation import _CLOSERS
+from vrcc.osc.linebreak import (
+    _BREAK_AFTER,
+    _CLOSING,
+    _ends_clause,
+    _legal,
+    choose_cut,
+    is_spaceless,
+    safe_cut,
+)
+from vrcc.translate.punctuation import _ALREADY, _CLOSERS
 
 # Same fixture tests/test_chatbox_split.py uses for its Thai case, reused
 # here rather than inventing a second one.
@@ -153,6 +161,14 @@ def test_closing_matches_punctuation_closers():
     assert _CLOSING == _CLOSERS
 
 
+def test_already_is_a_subset_of_break_after():
+    # punctuation.normalize refuses to convert a mark that already sits
+    # next to one of _ALREADY; the line breaker welcomes a cut right after
+    # one of _BREAK_AFTER. A terminator the normalizer respects but the
+    # line breaker does not know is a sentence end no slice can snap to.
+    assert set(_ALREADY) <= set(_BREAK_AFTER)
+
+
 def test_choose_cut_prefers_the_nearest_clause_boundary_in_window():
     text = "abc。defg、hijk"  # clause boundaries at index 4 and index 9
     assert choose_cut(text, index=8, floor=0, lo=0, hi=len(text) - 1) == 9
@@ -187,10 +203,13 @@ def test_choose_cut_never_starts_a_slice_on_a_closing_bracket():
 
 def test_choose_cut_falls_back_to_nearest_legal_position():
     # CJK filler, not "abc"/"def": an ASCII word on either side of the closer
-    # would also engage the ASCII-word rule below and land this on index 0
+    # would also engage the ASCII-word rule and land this on index 0
     # instead, which is a different test. No clause mark anywhere, so no
     # candidate to prefer.
-    text = "あいう」でずが"
+    # Escaped, not literal: U+3067, U+305A and U+304C are precomposed voiced
+    # kana with canonical decompositions, so a normalizing write path could
+    # substitute base plus U+3099 and leave this test green.
+    text = "\u3042\u3044\u3046\u300D\u3067\u305A\u304C"
     # index 3 (the closer) is illegal to start a line on; the walk lands on
     # the nearest legal position behind it.
     assert choose_cut(text, index=3, floor=0, lo=0, hi=len(text) - 1) == 2
