@@ -161,9 +161,9 @@ class TranslateEngine:
         of them (m2m100 and madlad share one for both Chinese scripts) would
         otherwise run the same decode twice and return the same text twice.
         Each decoded hypothesis passes through
-        :func:`vrcc.translate.punctuation.normalize` keyed on that entry's
-        target before being returned, since NLLB writes Japanese and Chinese
-        with ASCII period and comma regardless of target script.
+        :func:`vrcc.translate.punctuation.normalize`, keyed on that entry's own
+        target rather than on the batch: the checkpoints write CJK with ASCII
+        marks, and only the target names the script to repair them into.
         Raises ``RuntimeError`` if called before :meth:`load`.
         """
         if self._translator is None or self._tokenizer is None:

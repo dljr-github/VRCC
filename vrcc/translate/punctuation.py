@@ -1,47 +1,67 @@
 """Post-decode CJK punctuation normalization.
 
-`MtTokenizer.decode` was measured byte-identical to
-`tokenizers.Tokenizer.decode(ids, skip_special_tokens=True)`, and the decoding
-parameters were cleared by ablation -- neither is the source of the defect.
-`nllb-1.3B-int8` writes Japanese and Chinese with ASCII period and comma
-regardless of target script; `m2m100-418M` on the same decode path does not,
-which is what points at the checkpoint rather than VRCC. `normalize` is the
-repair: a post-decode pass keyed on the target language that the caller
-already has in hand (see `vrcc.translate.engine.TranslateEngine.translate`,
-the only caller).
+NLLB writes Japanese and Chinese with the ASCII period and comma whatever the
+target script is, and m2m100 does the same for Chinese. Observed 2026-08-30 on
+CPU int8 with the shipped decoding defaults, translating "I bought apples,
+oranges and pears. They were cheap." from English:
+`nllb-600M-int8` returned 我买了果,果和梨,它们很便宜. and
+`m2m100-418M-int8` returned 我买了苹果,橙子和珍珠,它们很便宜。 Neither is
+tokenizer damage: the same decode path returns 彼は「はい」と言い、その後、
+彼は去った。 from m2m100 into Japanese, ideographic throughout.
+
+`normalize` is the repair, keyed on the target's FLORES script subtag, which
+the caller already holds (see `vrcc.translate.engine.TranslateEngine.translate`,
+the only caller). Applying it to every family is deliberate: the defect is not
+confined to one checkpoint, and the guards below leave text that already
+carries the ideographic mark untouched.
 """
 
 from __future__ import annotations
 
 from vrcc.core.languages import Language
 
-# Per-language mark mapping for the ASCII '.' and ',' NLLB emits regardless of
-# script. Chinese splits the comma: the enumeration comma U+3001 belongs only
-# between list items, while U+FF0C is the ordinary clause separator, so only
-# the clause separator is safe to emit without knowing sentence structure.
-# Japanese uses U+3001 for both, so one entry covers it. Korean is excluded
-# entirely: modern Korean writes ASCII period and comma.
+# Per-script mark mapping for the ASCII '.' and ',' the checkpoints emit,
+# keyed on the FLORES script subtag rather than the GUI display name, the same
+# accessor vrcc.stt.engine._script_seed uses. A CJK language added to the
+# registry later is then covered without editing this table. Chinese splits the
+# comma: the enumeration comma U+3001 belongs only between list items, while
+# U+FF0C is the ordinary clause separator, so only the clause separator is safe
+# to emit without knowing sentence structure. Japanese uses U+3001 for both.
+# Korean (Hang) is absent on purpose: modern Korean writes ASCII marks.
 _MARKS: dict[str, dict[str, str]] = {
-    "Japanese": {".": "。", ",": "、"},
-    "Chinese Simplified": {".": "。", ",": "，"},
-    "Chinese Traditional": {".": "。", ",": "，"},
+    "Jpan": {".": "。", ",": "、"},
+    "Hans": {".": "。", ",": "，"},
+    "Hant": {".": "。", ",": "，"},
 }
 
-# A preceding character must fall in one of these ranges for a mark to
-# convert. Written out explicitly rather than via unicodedata.east_asian_width,
+# A mark converts only when the character it attaches to falls in one of these
+# ranges. Written out explicitly rather than via unicodedata.east_asian_width,
 # which also matches fullwidth Latin. U+3000 IDEOGRAPHIC SPACE is left out of
-# the range starting at U+3001: it is whitespace, not something a mark
-# attaches to.
+# the range starting at U+3001: it is whitespace, not something a mark attaches
+# to.
 _CJK_RANGES: tuple[tuple[int, int], ...] = (
-    (0x3001, 0x303F),    # CJK symbols and punctuation: 」 、 。 included
+    (0x3001, 0x303F),    # CJK symbols and punctuation
     (0x3040, 0x309F),    # Hiragana
-    (0x30A0, 0x30FF),    # Katakana, including the prolonged sound mark and ・
+    (0x30A0, 0x30FF),    # Katakana
     (0x3400, 0x4DBF),    # CJK unified ideographs extension A
     (0x4E00, 0x9FFF),    # CJK unified ideographs
     (0xF900, 0xFAFF),    # CJK compatibility ideographs
-    (0xFF66, 0xFF9D),    # Halfwidth katakana
+    (0xFF66, 0xFF9F),    # Halfwidth katakana, dakuten and handakuten included
     (0x20000, 0x2FA1F),  # CJK extension B and later, plus compatibility supplement
 )
+
+# Closing marks carry no script of their own, so a terminator after one is
+# judged against whatever the bracket or quote closes on. Both checkpoints
+# quote with ASCII " and with the fullwidth and curly forms, and without this
+# 他说"是的",然后离开了. keeps its ASCII comma while the same sentence without
+# the quotes converts. Escaped rather than written out: a run of
+# near-identical bracket glyphs is unreadable as literals.
+_CLOSERS = "\"'\u2019\u201d)]}\uff09\uff3d\uff5d\u300d\u300f\u3011\u3009\u300b\u3015\uff63"
+
+# Terminators the target script already uses. A mark next to one of these is
+# left alone rather than converted, which would double the glyph: the input is
+# a checkpoint that mixes conventions, so です。. is a shape to expect.
+_ALREADY = "\u3002\u3001\uff0c\uff0e\uff61\uff64"
 
 
 def _is_cjk(ch: str) -> bool:
@@ -50,43 +70,55 @@ def _is_cjk(ch: str) -> bool:
     return any(lo <= cp <= hi for lo, hi in _CJK_RANGES)
 
 
+def _anchor(text: str, i: int) -> int:
+    """Index of the character the mark at ``text[i]`` attaches to, looking
+    through any run of closing brackets and quotes, or -1 if there is none."""
+    j = i - 1
+    while j >= 0 and text[j] in _CLOSERS:
+        j -= 1
+    return j
+
+
 def _should_convert(text: str, i: int) -> bool:
     """True if the mark at ``text[i]`` converts, judged only against the
-    ORIGINAL ``text`` so the walk never cascades off its own output.
+    ORIGINAL ``text`` so the walk never reads its own output.
 
-    Index 0 has no preceding character, so it never converts. A run of the
-    same mark on either side is left alone: without that check
-    ``です...`` would convert left to right, since the second period sees a
-    freshly minted ``。`` before it, and land on ``です。。。`` -- an ASCII
-    ellipsis reads better than three ideographic full stops. What remains is
-    the single test that leaves decimals, thousands separators, ``e.g.`` and
-    URLs alone: the preceding character has to be CJK.
+    A period directly followed by ASCII letters or digits is a file extension
+    or a domain label, not a sentence end: without that test テスト.txt becomes
+    テスト。txt. A run of the same mark is left alone, since an ASCII ellipsis
+    reads better than three ideographic full stops. The neighbour test looks
+    past one space, because :func:`normalize` absorbs that space: judging
+    です. ... on the space alone converts, and the ideographic stop then lands
+    against the ellipsis it was supposed to keep clear of. What remains is the
+    test that leaves decimals, thousands separators, ``e.g.`` and URLs alone:
+    the character the mark attaches to has to be CJK.
     """
-    if i == 0:
-        return False
     mark = text[i]
-    if text[i - 1] == mark:
+    if i + 1 < len(text):
+        if mark == "." and text[i + 1].isascii() and text[i + 1].isalnum():
+            return False
+        k = i + 2 if text[i + 1] == " " else i + 1
+        if k < len(text) and (text[k] == mark or text[k] in _ALREADY):
+            return False
+    j = _anchor(text, i)
+    if j < 0 or text[j] in _ALREADY:
         return False
-    if i + 1 < len(text) and text[i + 1] == mark:
-        return False
-    return _is_cjk(text[i - 1])
+    return _is_cjk(text[j])
 
 
 def normalize(text: str, target: Language) -> str:
     """Rewrite ASCII ``.`` and ``,`` into the ideographic marks a CJK target
-    expects, wherever one follows a CJK character.
+    expects, wherever one attaches to a CJK character.
 
-    Returns ``text`` unchanged for any ``target`` outside `_MARKS`: every
-    script but Japanese and the two Chinese scripts, Korean included, since
-    modern Korean keeps ASCII marks. ``!`` and ``?`` are never touched --
-    half-width marks are ordinary in casual chat and converting them reads
-    stiffly -- and neither are colons, semicolons, parentheses or quotes.
+    Returns ``text`` unchanged for every script outside `_MARKS`, Korean
+    included. ``!`` and ``?`` are never touched, since half-width marks are
+    ordinary in casual chat and converting them reads stiffly, and neither are
+    colons, semicolons, parentheses or quotes.
 
-    A converted mark absorbs exactly one following ASCII space, never a run:
-    the ideographic glyph carries its own advance width, so one following
-    space is always redundant.
+    A converted mark absorbs one following ASCII space: the ideographic glyph
+    carries its own advance width, so the space is redundant.
     """
-    marks = _MARKS.get(target.display)
+    marks = _MARKS.get(target.nllb.rpartition("_")[2])
     if marks is None:
         return text
 
