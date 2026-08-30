@@ -40,6 +40,19 @@ def test_converts_target_chinese_simplified():
 
 
 # --------------------------------------------------------------------------
+# Converts, target Chinese Traditional
+# --------------------------------------------------------------------------
+
+def test_converts_target_chinese_traditional():
+    # Deleting the Chinese Traditional entry from _MARKS leaves the rest of
+    # the suite green, since every other case table targets Japanese or
+    # Chinese Simplified. This is the only test pinning that entry exists.
+    text = "我買了蘋果, 橙子和梨."
+    expected = "我買了蘋果，橙子和梨。"
+    assert normalize(text, get("Chinese Traditional")) == expected
+
+
+# --------------------------------------------------------------------------
 # Must NOT convert
 # --------------------------------------------------------------------------
 
@@ -102,3 +115,31 @@ def test_single_trailing_space_after_comma_is_absorbed():
 
 def test_run_of_spaces_after_comma_loses_only_one():
     assert normalize("はい,  いいえ", get("Japanese")) == "はい、 いいえ"
+
+
+# --------------------------------------------------------------------------
+# CJK range boundaries: U+3000 and fullwidth Latin are deliberately excluded
+# --------------------------------------------------------------------------
+
+def test_ideographic_space_is_not_a_cjk_predecessor():
+    # U+3000 IDEOGRAPHIC SPACE is whitespace, not something a mark attaches
+    # to, so it is left out of the range that starts at U+3001. Widening
+    # that range to start at U+3000 would convert this period; nothing else
+    # in the suite exercises a mark preceded by an ideographic space.
+    text = "あ　."
+    assert normalize(text, get("Japanese")) == text
+
+
+def test_fullwidth_latin_letter_is_not_a_cjk_predecessor():
+    # unicodedata.east_asian_width also matches fullwidth Latin, which is
+    # the brief's stated reason the ranges are written out by hand rather
+    # than derived from it. A regression to east_asian_width would convert
+    # this period; nothing else in the suite exercises a fullwidth Latin
+    # predecessor.
+    text = "Ａ."
+    assert normalize(text, get("Japanese")) == text
+
+
+def test_fullwidth_digit_is_not_a_cjk_predecessor():
+    text = "０."
+    assert normalize(text, get("Japanese")) == text
