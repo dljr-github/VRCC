@@ -21,6 +21,14 @@ import unicodedata
 # otherwise end (folded into `_NO_START` below).
 _BREAK_AFTER = "\u3002\u3001\uFF0C\uFF0E\uFF01\uFF1F\uFF1A\uFF1B\uFF61\uFF64\u2026"
 
+# ASCII "!" and "?" stay out, though the checkpoints emit them inside
+# Japanese and punctuation.normalize leaves them alone. Measured over 2500
+# generated Japanese messages (150-400 chars, ideographic marks alongside
+# ASCII terminators, n = 2, 3, 4, 15,000 cuts): adding them takes cuts
+# landing after a sentence end from 98.1% to 100%, and costs slices opening
+# on a space 7 -> 3254 (a snap after "! " lands on the space) and slices cut
+# through a URL 57 -> 1295 (a query string's own "?").
+
 # Closing brackets and quotes. A closer at the start of a line strands the
 # reader looking for what it closed, so `_NO_START` includes this set. The
 # same set is also the run `_ends_clause` walks back through: a closer
