@@ -158,6 +158,33 @@ def test_choose_cut_prefers_the_nearest_clause_boundary_in_window():
     assert choose_cut(text, index=8, floor=0, lo=0, hi=len(text) - 1) == 9
 
 
+def test_choose_cut_skips_a_clause_boundary_that_may_not_start_a_line():
+    # A quoted terminator sits behind its closer, and _ends_clause looks
+    # straight through the closer to reach it. That makes the closer's own
+    # position a clause boundary, and a slice starting there opens on a
+    # closer with nothing it closed. One position further out is both a
+    # clause end and legal, so the window is not short of candidates.
+    text = (
+        "\u3042\u3044\u3046\u300C\u3059\u3054\u3044\uFF01"
+        "\u300D\u3068\u8A00\u3063\u305F\u3002\u306F\u3044"
+    )
+    assert text[8] == "\u300D"
+    assert _ends_clause(text, 8) is True and _legal(text, 8) is False
+    assert _ends_clause(text, 9) is True and _legal(text, 9) is True
+    assert choose_cut(text, index=8, floor=1, lo=6, hi=11) == 9
+
+
+def test_choose_cut_never_starts_a_slice_on_a_closing_bracket():
+    # Every clause mark here is quoted, so every position the clause branch
+    # reaches through a closer is one _legal forbids. The window always holds
+    # a legal candidate, which keeps that branch rather than the fallback
+    # walk in charge of the answer.
+    text = "\u300C\u306F\u3044\u3002\u300D" * 8
+    for index in range(2, len(text) - 2):
+        cut = choose_cut(text, index, 1, index - 3, index + 3)
+        assert text[cut] not in _CLOSING, f"index {index} cut onto a closer"
+
+
 def test_choose_cut_falls_back_to_nearest_legal_position():
     # CJK filler, not "abc"/"def": an ASCII word on either side of the closer
     # would also engage the ASCII-word rule below and land this on index 0

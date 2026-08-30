@@ -170,7 +170,9 @@ def choose_cut(text: str, index: int, floor: int, lo: int, hi: int) -> int:
     lo = max(lo, floor)
     hi = min(hi, ceiling)
     if lo <= hi:
-        clause = [i for i in range(lo, hi + 1) if _ends_clause(text, i)]
+        clause = [
+            i for i in range(lo, hi + 1) if _ends_clause(text, i) and _legal(text, i)
+        ]
         if clause:
             return min(clause, key=lambda i: abs(i - index))
     start = min(index, ceiling)
