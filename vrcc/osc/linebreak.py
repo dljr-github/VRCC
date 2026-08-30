@@ -105,19 +105,32 @@ def is_spaceless(text: str) -> bool:
     )
 
 
+def _is_ascii_alnum(ch: str) -> bool:
+    """Whether `ch` is an ASCII letter or digit, the two characters a cut
+    between them would sever a Latin word rather than land on a script or
+    kinsoku boundary. ASCII-only: a Latin loanword digraph is the concern,
+    not `str.isalnum()`'s broader notion that also accepts, say, Devanagari
+    or CJK digits, which is not this rule's job."""
+    return ch.isascii() and ch.isalnum()
+
+
 def _legal(text: str, i: int) -> bool:
     """Whether a slice may start at `text[i]`: not a combining mark, not
-    forbidden to lead a line, and not preceded by something forbidden to
-    end one.
+    forbidden to lead a line, not preceded by something forbidden to end
+    one, and not splitting an ASCII word in half.
 
-    A single test rather than a chain, folding the combining-mark rule into
-    the kinsoku rule. That leaves one monotonic backward walk for a caller
-    searching for a legal position, with no ordering question between the
-    two rules and nothing that can oscillate.
+    A single test rather than a chain, folding the combining-mark rule and
+    the ASCII-word rule into the kinsoku rule. Each condition here reads
+    only `text[i]` and `text[i - 1]`, the same two positions the kinsoku
+    checks already read, so this is still one pointwise test with no memory
+    of where a caller's backward walk has already been: nothing here can
+    make that walk oscillate.
     """
     if unicodedata.category(text[i]) in ("Mn", "Mc"):
         return False
     if text[i] in _NO_START:
+        return False
+    if i > 0 and _is_ascii_alnum(text[i - 1]) and _is_ascii_alnum(text[i]):
         return False
     return i == 0 or text[i - 1] not in _NO_END
 

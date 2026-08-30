@@ -91,6 +91,41 @@ def test_legal_rejects_a_position_after_each_thai_preposed_vowel():
         assert _legal(text, 1) is False
 
 
+def test_legal_rejects_a_cut_between_two_ascii_alphanumerics():
+    # "without" -> "witho" / "ut" is the shape this rule exists to stop: a
+    # code-switched translation's Latin word severed by the character path.
+    text = "without"
+    for i in range(1, len(text)):
+        assert _legal(text, i) is False, f"index {i} split an ASCII word"
+
+
+def test_legal_allows_a_cut_at_an_ascii_word_boundary():
+    # The rule reads only text[i - 1] and text[i]; a space between two
+    # words is not "one word" and must not be caught by it.
+    text = "cat dog"
+    assert _legal(text, text.index("d")) is True
+
+
+def test_legal_ascii_word_rule_does_not_reach_across_punctuation():
+    # A hyphen breaks the ASCII-alnum adjacency the rule keys on, so the
+    # letter right after one is still a legal cut, same as any other
+    # non-alnum predecessor.
+    text = "cat-dog"
+    assert _legal(text, text.index("d")) is True
+
+
+def test_choose_cut_falls_back_to_the_raw_index_for_an_all_alnum_run():
+    # A pathological over-long alphanumeric run has no legal position
+    # anywhere in [floor, hi]: every interior index now fails the new rule,
+    # same as a run of nothing but kinsoku-illegal characters already did.
+    # Confirmed here rather than assumed: this must return the plain
+    # clamped index, not stall or hand back something out of range.
+    text = "9" * 40
+    result = choose_cut(text, index=20, floor=5, lo=10, hi=30)
+    assert result == 20
+    assert all(not _legal(text, i) for i in range(6, 31))  # 0 is the only legal index
+
+
 def test_ends_clause_sees_through_a_run_of_closing_brackets():
     text = "彼は言った。」"
     assert _ends_clause(text, len(text)) is True
@@ -124,7 +159,11 @@ def test_choose_cut_prefers_the_nearest_clause_boundary_in_window():
 
 
 def test_choose_cut_falls_back_to_nearest_legal_position():
-    text = "abc」def"  # no clause mark anywhere, so no candidate to prefer
+    # CJK filler, not "abc"/"def": an ASCII word on either side of the closer
+    # would also engage the ASCII-word rule below and land this on index 0
+    # instead, which is a different test. No clause mark anywhere, so no
+    # candidate to prefer.
+    text = "あいう」でずが"
     # index 3 (the closer) is illegal to start a line on; the walk lands on
     # the nearest legal position behind it.
     assert choose_cut(text, index=3, floor=0, lo=0, hi=len(text) - 1) == 2

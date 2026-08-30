@@ -379,7 +379,12 @@ def test_balanced_slices_still_word_packs_korean():
     """Korean tokens are genuinely space separated and each is far under a
     16-character share (48 // 3), so the per-word guard stays False for
     every one of them and the text keeps taking the word path, unlike the
-    Japanese case above where a single token clears its share."""
+    Japanese case above where a single token clears its share. This is
+    numerically Korean-safe rather than structurally so: a spaced Korean
+    text whose longest token is 14 characters reroutes once n reaches 11
+    (144 // 11 == 13 < 14), which is unreachable in production since `_join`
+    always passes `CHATBOX_LIMIT` and reaching n=11 there needs roughly a
+    1500-character message."""
     slices = _balanced_slices(_KOREAN_SHORT_TOKENS, 3, CHATBOX_LIMIT)
 
     assert slices == [

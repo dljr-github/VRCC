@@ -23,14 +23,16 @@ def _balanced_slices(
 ) -> list[str]:
     """Split `text` into exactly `n` ordered slices of near-equal length.
 
-    Word-based whenever the text splits into words that each fit `limit`:
-    each slice takes whole words greedily toward a running
-    remaining-length/remaining-slices target (last slice takes the rest), so
-    joining the slices with spaces preserves every word in order.
-    Character-based ceil-division runs only for spaceless scripts or a
-    pathological over-long word, where the concatenation reproduces `text`
-    exactly (boundaries are nudged off combining marks). Callers drop empty
-    slices.
+    Word-based whenever the text splits into words that each fit `limit` AND
+    no single word is both spaceless-script and too long for its per-slice
+    share (`limit // n`): each slice takes whole words greedily toward a
+    running remaining-length/remaining-slices target (last slice takes the
+    rest), so joining the slices with spaces preserves every word in order.
+    Character-based ceil-division runs otherwise -- a lone pathological
+    over-long word, or a spaceless run over its share even when the rest of
+    the text is ordinary spaced words alongside it -- where the
+    concatenation reproduces `text` exactly (boundaries are nudged off
+    combining marks). Callers drop empty slices.
 
     Fewer words than slices leaves blank slices, positioned per `anchor`.
     ``"start"`` leaves them at the end, so the original fades out once
