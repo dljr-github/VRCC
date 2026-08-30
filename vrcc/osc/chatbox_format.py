@@ -178,20 +178,15 @@ def _balanced_slices(
     ends up with.
 
     `snap` only changes the character path: each ceil-division boundary is
-    nudged with `linebreak.choose_cut` to the nearest clause mark within half
-    a slice either way. A slice sits between two independently chosen cuts,
-    so its length ranges from 0 to `size + 2 * (size // 2)`, roughly twice
-    its target share. Measured on 98,924 slices from a synthetic Japanese
-    corpus at n=2 and n=3 (60-220 characters, clause marks every 6-28
-    characters): 241 exceeded 1.5x their target share and the worst observed
-    was 1.89x. 0 needs two adjacent boundaries landing on the same index,
-    which is only reachable when far more slices are requested than the text
-    has room for (see `_settle`'s part-count check, which rejects a snapped
-    arrangement that collapsed a slice this way before it reaches a caller).
-    `snap=False` is byte for byte what this function has always done, on
-    both paths; word-based slicing never reads `snap` at all, since a word
-    boundary already reads right and the clause vocabulary has nothing to
-    add there.
+    nudged with `linebreak.choose_cut` to the nearest clause mark within
+    half a slice either way. A slice spans two independently chosen cuts,
+    so it can reach `size + 2 * (size // 2)` (just under twice its share),
+    a structural bound, not an empirical one. One 98,924-slice corpus (n=2,
+    n=3, 60-220 chars, clause marks every 6-28) measured roughly 300 slices
+    over 1.5x their share; 0 needs two boundaries on the same index, only
+    when n grossly exceeds what the text can support. `snap=False` is byte
+    for byte what this function has always done, on both paths; the word
+    path never reads `snap`, since a word boundary already reads right.
     """
     words = text.split()
     # A spaceless run within its per-part share is better carried whole, which
@@ -226,15 +221,12 @@ def _balanced_slices(
     for i in range(1, n):
         ideal = min(i * size, len(text))
         if snap:
-            # bounds[-1] + 1, not bounds[-1]: choose_cut's floor is the
-            # lowest PERMISSIBLE return value and treats it as an inclusive
-            # candidate (linebreak.py's lo = max(lo, floor)), so passing
-            # bounds[-1] itself lets it hand back the previous boundary
-            # unchanged when that is the only clause mark in the window,
-            # collapsing this slice to empty. This call needs the stronger,
-            # narrower guarantee of strictly after the previous boundary, so
-            # it is expressed here rather than by narrowing choose_cut's
-            # contract, which Task 1 pinned as inclusive with its own tests.
+            # bounds[-1] + 1, not bounds[-1]: floor is an inclusive candidate
+            # (lo = max(lo, floor) in linebreak.py), so the window's only
+            # clause mark could be bounds[-1] itself, handed back unchanged
+            # and collapsing this slice. Strictly past the previous boundary
+            # belongs here, a stronger guarantee than the shared contract in
+            # linebreak.choose_cut, pinned inclusive by its own tests.
             cut = choose_cut(
                 text, ideal, bounds[-1] + 1, ideal - size // 2, ideal + size // 2
             )
@@ -366,13 +358,9 @@ def _settle(
         candidate = _join(
             texts, translated, repeated, n, cfg, anchored=anchored, snap=snap
         )
-        # len(candidate) == len(parts): _join drops any slot whose pieces are
-        # all empty, so an arrangement that collapses one slice to nothing can
-        # come back one part short of what fit_message already committed to
-        # sending. Every remaining part can still individually fit
-        # CHATBOX_LIMIT while the arrangement as a whole has silently dropped
-        # one, so the count has to be checked on its own, not folded into the
-        # per-part length test.
+        # len(candidate) == len(parts): _join drops any slot left empty by a
+        # collapsed slice, so a shorter candidate could still pass the
+        # per-part CHATBOX_LIMIT test while missing a whole part.
         if (
             candidate
             and len(candidate) == len(parts)

@@ -168,10 +168,13 @@ def test_concatenation_reproduces_the_text_for_both_values_of_snap():
     when concatenated raw -- `test_snap_never_touches_the_word_path`
     already pins that `snap` cannot change which one applies.
     """
-    # Character path: spaceless scripts, and a plain unbreakable run (a
-    # single token with no spaces at all, over `limit`, so it fails the
-    # word path's own eligibility check regardless of script).
-    char_path_texts = [
+    # Spaceless scripts, plus a plain unbreakable run (a single token
+    # with no spaces at all, over `limit`, so it fails the word path's
+    # own eligibility check regardless of script). The first two are
+    # only on the character path from n=3 on: at n=2 the same routing
+    # threshold above sends them down the word path instead, where raw
+    # concatenation still holds because each lands whole in one slot.
+    spaceless_texts = [
         "\u4e2d" * 55,  # CJK, no clause marks: the ceil-division floor
         _JA_TRANSLATION,  # CJK with clause marks: the regression text
         (  # Thai: the suite's one script with combining marks AND no spaces
@@ -187,7 +190,7 @@ def test_concatenation_reproduces_the_text_for_both_values_of_snap():
         ),
         "9" * 200,  # unbreakable run: not a spaceless script, one long token
     ]
-    for text in char_path_texts:
+    for text in spaceless_texts:
         for n in (2, 3, 4, 5):
             for snap in (False, True):
                 slices = _balanced_slices(text, n, CHATBOX_LIMIT, snap=snap)
@@ -195,7 +198,7 @@ def test_concatenation_reproduces_the_text_for_both_values_of_snap():
                 assert "".join(slices) == text
 
     # Word path: ordinary spaced text, and a script mix. snap has nothing to
-    # do here (see test_snap_never_touches_the_word_path`), but the
+    # do here (see `test_snap_never_touches_the_word_path`), but the
     # reconstruction is still worth pinning across scripts and n.
     word_path_texts = [
         " ".join(f"word{i}" for i in range(30)),  # Latin
