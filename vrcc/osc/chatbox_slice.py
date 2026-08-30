@@ -53,8 +53,13 @@ def _balanced_slices(
     """
     words = text.split()
     # A spaceless run within its per-part share is better carried whole, which
-    # _assemble already does where it fits.
-    spaceless = is_spaceless(text) and len(text) > limit // n
+    # _assemble already does where it fits. Checked per word, not over the
+    # whole text: a translation carrying one stray ASCII space (normalize
+    # never touches `!` or `?`, so a space after one survives) still has a
+    # spaceless-script word too long for its share, and that word is what the
+    # word packer would mishandle. Korean's tokens are genuinely space
+    # separated and each is short, so this leaves it on the word path.
+    spaceless = any(is_spaceless(word) and len(word) > limit // n for word in words)
     if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []
         idx = 0

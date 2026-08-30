@@ -316,6 +316,113 @@ def test_snap_never_touches_the_word_path():
     )
 
 
+# -- routing: a lone spaceless word too long for its share goes to the
+# character path even when the text as a whole contains an ASCII space ------
+
+
+_STRAY_SPACE_JA = (
+    "\u3059\u3054\u3044! "
+    "\u99c5\u306e\u8fd1\u304f\u306e\u65b0\u3057\u3044\u30ab\u30d5\u30a7\u306f"
+    "\u671d\u516b\u6642\u306b\u958b\u304f\u3089\u3057\u3044\u306e\u3067\u3001"
+    "\u660e\u65e5\u4e00\u7dd2\u306b\u884c\u304d\u307e\u305b\u3093\u304b"
+)
+
+
+def test_balanced_slices_routes_a_lone_long_word_to_the_character_path():
+    """The bug report this task exists for. `normalize` never converts `!`
+    or `?`, so the ASCII space the model emits after one survives, and
+    `is_spaceless` on the WHOLE text sees it and returns False. The old
+    guard then sent this to the word packer, which took the 4-character
+    first word whole and had nothing left to balance the 35-character
+    second word against: 4, 35, empty. Checked per word instead, the second
+    word alone is spaceless-script and longer than its 16-character share
+    (48 // 3), so the fixed guard reroutes to the character path."""
+    slices = _balanced_slices(_STRAY_SPACE_JA, 3, 48)
+
+    assert slices == [
+        _STRAY_SPACE_JA[0:14],
+        _STRAY_SPACE_JA[14:28],
+        _STRAY_SPACE_JA[28:40],
+    ]
+    assert [len(s) for s in slices] == [14, 14, 12]
+    assert all(slices), f"a slice collapsed to empty: {slices!r}"
+    assert "".join(slices) == _STRAY_SPACE_JA
+
+
+def test_balanced_slices_routes_and_snaps_the_lone_long_word_case():
+    """Same text and share as above, with `snap=True`: this is the path
+    Task 2 changed, and the routing fix now sends this text down it, so the
+    two changes must be checked together, not just the routing decision in
+    isolation. The text's only clause mark, U+3001 at index 28, falls inside
+    the second cut's window (21 to 35) and is picked over the raw
+    ceil-division index 28 itself, moving the boundary to 29 so the second
+    slice ends right after the comma instead of splitting before it."""
+    slices = _balanced_slices(_STRAY_SPACE_JA, 3, 48, snap=True)
+
+    assert slices == [
+        _STRAY_SPACE_JA[0:14],
+        _STRAY_SPACE_JA[14:29],
+        _STRAY_SPACE_JA[29:40],
+    ]
+    assert [len(s) for s in slices] == [14, 15, 11]
+    assert all(slices), f"a slice collapsed to empty: {slices!r}"
+    assert "".join(slices) == _STRAY_SPACE_JA
+
+
+_KOREAN_SHORT_TOKENS = (
+    "\uc548\ub155\ud558\uc138\uc694 \uc624\ub298 \ub0a0\uc528\uac00 "
+    "\uc88b\ub124\uc694 \uac19\uc774 \uac78\uc744\uae4c\uc694"
+)
+
+
+def test_balanced_slices_still_word_packs_korean():
+    """Korean tokens are genuinely space separated and each is far under a
+    16-character share (48 // 3), so the per-word guard stays False for
+    every one of them and the text keeps taking the word path, unlike the
+    Japanese case above where a single token clears its share."""
+    slices = _balanced_slices(_KOREAN_SHORT_TOKENS, 3, CHATBOX_LIMIT)
+
+    assert slices == [
+        "\uc548\ub155\ud558\uc138\uc694 \uc624\ub298",
+        "\ub0a0\uc528\uac00 \uc88b\ub124\uc694",
+        "\uac19\uc774 \uac78\uc744\uae4c\uc694",
+    ]
+    assert " ".join(s for s in slices if s) == _KOREAN_SHORT_TOKENS
+
+
+def test_balanced_slices_latin_only_text_is_byte_for_byte_unchanged():
+    """Latin words never satisfy `is_spaceless`, so the per-word guard is
+    identical to the old whole-text guard for this text: both are always
+    False, and the word path runs exactly as it always has."""
+    text = " ".join(f"word{i}" for i in range(30))
+
+    slices = _balanced_slices(text, 3, CHATBOX_LIMIT)
+
+    assert slices == [
+        "word0 word1 word2 word3 word4 word5 word6 word7 word8 word9 word10",
+        "word11 word12 word13 word14 word15 word16 word17 word18 word19 word20",
+        "word21 word22 word23 word24 word25 word26 word27 word28 word29",
+    ]
+
+
+def test_balanced_slices_a_long_latin_word_does_not_trigger_the_guard():
+    """`internationalization` is 20 characters, past the 16-character share
+    (48 // 3), which is exactly the length relationship that reroutes a
+    spaceless-script word above. `is_spaceless` is still False for it,
+    since it holds no CJK, Hangul or Thai codepoints, so the guard does not
+    misfire on a merely-long Latin word."""
+    text = "hello there my friend this is an internationalization test right now"
+
+    slices = _balanced_slices(text, 3, 48)
+
+    assert slices == [
+        "hello there my friend",
+        "this is an internationalization",
+        "test right now",
+    ]
+    assert " ".join(s for s in slices if s) == text
+
+
 def test_fit_message_split_pins_a_latin_only_conversation_unchanged():
     # Pinned against today's output: wiring snap through _join/_settle must
     # not perturb a conversation that never reaches the character path.
