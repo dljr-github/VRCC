@@ -27,9 +27,9 @@ from vrcc.core.languages import Language
 # without knowing sentence structure. Japanese uses U+3001 for both. Korean
 # (Hang) is absent on purpose: modern Korean writes ASCII marks.
 _MARKS: dict[str, dict[str, str]] = {
-    "Jpan": {".": "。", ",": "、"},
-    "Hans": {".": "。", ",": "，"},
-    "Hant": {".": "。", ",": "，"},
+    "Jpan": {".": "\u3002", ",": "\u3001"},
+    "Hans": {".": "\u3002", ",": "\uFF0C"},
+    "Hant": {".": "\u3002", ",": "\uFF0C"},
 }
 
 # A mark converts only when what it attaches to falls in one of these ranges,
