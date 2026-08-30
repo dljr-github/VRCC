@@ -96,11 +96,20 @@ _CUDA_UNUSABLE_TEXTS = [_OOM_TEXT, _MISSING_LIBRARY_TEXT]
 
 
 class _FakeTranslator:
-    """Records translate_batch calls; echoes each source list as its hypothesis."""
+    """Records translate_batch calls; echoes each source list as its hypothesis,
+    unless built with a ``fixed_hypothesis`` token list to return verbatim
+    (used to hand `decode` a raw string the toy SPM vocabulary can't encode,
+    such as CJK text)."""
 
-    def __init__(self, fail_on_translate: bool = False, error_text: str = _OOM_TEXT) -> None:
+    def __init__(
+        self,
+        fail_on_translate: bool = False,
+        error_text: str = _OOM_TEXT,
+        fixed_hypothesis: list[str] | None = None,
+    ) -> None:
         self.fail_on_translate = fail_on_translate
         self.error_text = error_text
+        self.fixed_hypothesis = fixed_hypothesis
         self.batch_calls: list[SimpleNamespace] = []
 
     def translate_batch(self, source, target_prefix=None, **kwargs):
@@ -109,18 +118,30 @@ class _FakeTranslator:
         )
         if self.fail_on_translate:
             raise RuntimeError(self.error_text)
+        if self.fixed_hypothesis is not None:
+            return [
+                SimpleNamespace(hypotheses=[list(self.fixed_hypothesis)], scores=[0.0])
+                for _ in source
+            ]
         return [SimpleNamespace(hypotheses=[list(s)], scores=[0.0]) for s in source]
 
 
 class _RecordingFactory:
     """Fake ``ctranslate2.Translator`` factory recording every ctor call."""
 
-    def __init__(self, ctor_fail_at=(), translate_fail_at=(), error_text=_OOM_TEXT) -> None:
+    def __init__(
+        self,
+        ctor_fail_at=(),
+        translate_fail_at=(),
+        error_text=_OOM_TEXT,
+        fixed_hypothesis: list[str] | None = None,
+    ) -> None:
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeTranslator] = []
         self._ctor_fail_at = set(ctor_fail_at)
         self._translate_fail_at = set(translate_fail_at)
         self._error_text = error_text
+        self._fixed_hypothesis = fixed_hypothesis
 
     def __call__(
         self,
@@ -150,6 +171,7 @@ class _RecordingFactory:
         t = _FakeTranslator(
             fail_on_translate=idx in self._translate_fail_at,
             error_text=self._error_text,
+            fixed_hypothesis=self._fixed_hypothesis,
         )
         self.built.append(t)
         return t
@@ -250,6 +272,22 @@ def test_madlad_per_target_source_encodings_and_no_target_prefix(model_dir: Path
     assert call.source[0] != call.source[1]
     assert call.target_prefix is None
     assert [name for name, _ in out] == ["Japanese", "Korean"]
+
+
+def test_translate_applies_cjk_punctuation_normalization(model_dir: Path):
+    # The fixed hypothesis stands in for a decoded NLLB output: CJK text
+    # carrying the ASCII period/comma the checkpoint actually writes. The toy
+    # SPM vocabulary (trained on plain English words) has no pieces for any
+    # of this, so it has to bypass real encoding rather than round-trip
+    # through it.
+    raw = "田中さんが外で待っています, 元気."
+    factory = _RecordingFactory(fixed_hypothesis=[raw])
+    eng = TranslateEngine(_spec("nllb"), model_dir, _cfg(), EventBus(), translator_factory=factory)
+    eng.load()
+
+    out = eng.translate("hello world", get("English"), [get("Japanese")])
+
+    assert out == [("Japanese", "田中さんが外で待っています、元気。")]
 
 
 def test_translate_batch_kwargs_merge_extra_overrides_beam_size(model_dir: Path):

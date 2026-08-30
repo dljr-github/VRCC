@@ -16,6 +16,7 @@ from vrcc.core.config import TranslateConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.core.hardware import resolve
 from vrcc.core.languages import Language, get
+from vrcc.translate.punctuation import normalize
 from vrcc.translate.registry import MtModelSpec, distinct_targets
 from vrcc.translate.tokenizers import MtTokenizer
 
@@ -159,6 +160,10 @@ class TranslateEngine:
         can be SHORTER than ``targets``: a family with one control token for two
         of them (m2m100 and madlad share one for both Chinese scripts) would
         otherwise run the same decode twice and return the same text twice.
+        Each decoded hypothesis passes through
+        :func:`vrcc.translate.punctuation.normalize` keyed on that entry's
+        target before being returned, since NLLB writes Japanese and Chinese
+        with ASCII period and comma regardless of target script.
         Raises ``RuntimeError`` if called before :meth:`load`.
         """
         if self._translator is None or self._tokenizer is None:
@@ -190,7 +195,7 @@ class TranslateEngine:
 
         results = self._run_batch(source, target_prefix, kwargs)
         return [
-            (t.display, tok.decode(list(r.hypotheses[0])))
+            (t.display, normalize(tok.decode(list(r.hypotheses[0])), t))
             for t, r in zip(targets, results)
         ]
 
