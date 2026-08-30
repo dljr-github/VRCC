@@ -1,18 +1,22 @@
-"""End-to-end and character-path tests for the stray-space routing fix
-in `vrcc.osc.chatbox_slice._balanced_slices`.
+"""What `vrcc.osc.chatbox_slice` ships at the real CHATBOX_LIMIT of 144.
 
 Split out of tests/test_chatbox_split.py for the file-length cap: that
 file pins the arithmetic (limit=48, the toy share used to demonstrate
-the guard in isolation); this one pins what ships at the real
-CHATBOX_LIMIT of 144, plus the character path's separate obligation not
-to sever a Latin word once mixed Latin/CJK text is routed onto it.
+the stray-space routing guard in isolation); this one pins production
+behavior, plus the character path's separate obligation not to sever a
+Latin word once mixed Latin/CJK text is routed onto it.
 """
 
 from __future__ import annotations
 
 from tests.test_chatbox_overflow import make_cfg
 from vrcc.osc.chatbox import fit_message
-from vrcc.osc.chatbox_slice import CHATBOX_LIMIT, _balanced_slices
+from vrcc.osc.chatbox_slice import (
+    CHATBOX_LIMIT,
+    _balanced_slices,
+    _join,
+    _settle,
+)
 
 
 _GUARD_ORIGINAL = (
@@ -105,3 +109,61 @@ def test_balanced_slices_does_not_sever_a_latin_word_in_mixed_text():
     assert [len(s) for s in slices] == [13, 13, 10, 16, 13]
     assert any("without" in s for s in slices), "without" + " was severed across a boundary"
     assert "".join(slices) == text
+
+# -- a caption with no translation: the character path still snaps ----------
+
+
+_CAPTION_ONLY_JA = (
+    "今日は仕事のあとに街を歩いていたら、"
+    "見たことのない小さな店を見つけました。"
+    "駅の近くに新しいカフェができたらしくて、"
+    "今度の週末に一緒に行ってみたいと思っています。"
+    "ケーキもおいしいらしいと聴いたことがあるし、"
+    "もし良かったら一緒に行きませんか。"
+    "昨日は仕事が遅くまでかかってしまいました。"
+    "この辺りは夜になるととても静かになります。"
+)
+
+
+def test_fit_message_snaps_a_caption_sent_without_any_translation():
+    """Captioning with translation off is an ordinary VRCC mode:
+    `vrcc.core.pipeline_send.safe_submit` is reached with an empty
+    translation list from five places, among them translation disabled
+    (`pipeline_jobs.py`), the MT engine absent or raising, no target left
+    after the source match, and typed text with translation off
+    (`pipeline_typed.py`). `fit_message` builds `translated = [False]` for
+    all of them, and `_settle` has to snap that arrangement like any other.
+
+    This 161-character caption divides into two 81/80 slices, and the raw
+    ceil-division boundary at 81 lands between \u30B1 and its prolonged sound
+    mark \u30FC, which may never begin a line. Snapping moves it one back,
+    onto the \u3002 at index 80.
+    """
+    cfg = make_cfg()
+
+    parts = fit_message(_CAPTION_ONLY_JA, [], cfg)
+
+    assert len(_CAPTION_ONLY_JA) == 161
+    assert len(parts) == 2
+    assert [len(part) for part in parts] == [80, 81]
+    assert parts[0].endswith("\u3002")
+    assert parts[1].startswith("\u30B1")
+    assert "".join(parts) == _CAPTION_ONLY_JA
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+
+
+def test_settle_snaps_when_nothing_in_the_message_is_translated():
+    """The skip is keyed on every translation already being repeated whole,
+    which is vacuously satisfied when there are no translations at all.
+    Called at the shape `fit_message` builds for a caption-only message,
+    `_settle` must return a snapped arrangement rather than its argument.
+    """
+    cfg = make_cfg()
+    texts = [_CAPTION_ONLY_JA]
+    translated = [False]
+
+    plain = _join(texts, translated, set(), 2, cfg)
+    settled = _settle(texts, translated, set(), 2, cfg, plain)
+
+    assert [len(part) for part in plain] == [81, 80]
+    assert [len(part) for part in settled] == [80, 81]

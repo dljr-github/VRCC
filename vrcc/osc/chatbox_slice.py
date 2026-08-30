@@ -213,14 +213,19 @@ def _settle(
     ceil-division sizes it has always searched over, or the delivery numbers
     in `fit_message`'s comment stop describing what ships.
 
-    Skips straight to returning `parts` when every translation is already
-    repeated whole rather than sliced. Only a sliced translation needs
-    relocating, so anchoring is a guaranteed no-op here; snapping is skipped
-    too, even though the original can still be spaceless text long enough to
-    want it, because every translation already arrives whole in every part,
-    which is the outcome the part-count search was optimizing for.
+    Skips straight to returning `parts` only when a translation exists and
+    every one of them is repeated whole: anchoring cannot relocate a text
+    that was never sliced, and the part-count search already has the
+    outcome it optimizes for. A caption sent with NO translations has
+    neither reason behind it and reaches the loop, since its original can
+    still be a spaceless run whose cuts want snapping. That is an ordinary
+    mode, not a corner: `vrcc.core.pipeline_send.safe_submit` is called
+    with an empty translation list from five places, among them
+    translation switched off and the MT engine absent.
     """
-    if all(i in repeated for i, is_tr in enumerate(translated) if is_tr):
+    if any(translated) and all(
+        i in repeated for i, is_tr in enumerate(translated) if is_tr
+    ):
         return parts
     # Preference order: anchored and snapped, anchored alone, snapped alone.
     for anchored, snap in ((True, True), (True, False), (False, True)):
