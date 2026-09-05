@@ -110,6 +110,9 @@ class TranslateConfig(BaseModel):
     # own default), -1 = unlimited. Applied at Translator build time.
     max_queued_batches: int = 0
     targets: list[str] = Field(default_factory=lambda: ["Japanese"])  # display names, max 3
+    # Append a tone-marked pinyin reading line under Chinese translations
+    # (vrcc.translate.pinyin). Opt-in; read per-job, so it applies live.
+    pinyin: bool = False
     # Greedy decoding rewrites content it cannot translate: NLLB turned
     # "Okay 1,2,3,4,5,6,7" into Chinese "现在,我们要做什么?" at beam 1 and
     # copied the digits through correctly from beam 2 up. Measured cost of the
