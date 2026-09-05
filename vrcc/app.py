@@ -23,7 +23,7 @@ from vrcc.core.engine_stack import (
 )
 from vrcc.core.events import AppError
 from vrcc.core.live_apply import LiveApply
-from vrcc.core.logs import setup_logging
+from vrcc.core.logs import log_engine_states, setup_logging
 from vrcc.core.pipeline import Pipeline
 from vrcc.core.reloading import _FAILED, EngineLoader, _Reloader, _status_after_swap
 from vrcc.core.startup import (
@@ -162,6 +162,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     apply_font_scale(app, store.config.gui.font_scale)
 
     bus = EventBus()
+    log_engine_states(bus)
     bridge = BusBridge(bus)
     # One-shot daemon-thread checker; no teardown. Built before make_window
     # so the manual "Check for updates" callback it closes over is ready by

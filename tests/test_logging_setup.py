@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from pathlib import Path
 
 import pytest
@@ -15,16 +16,21 @@ from vrcc.core.logs import LOG_KEEP, prune_logs, setup_logging
 
 @pytest.fixture()
 def clean_root():
-    """Restore the root logger: _setup_logging adds handlers to it."""
+    """Restore root logger state that setup_logging mutates: handlers and
+    warnings capture. captureWarnings(True) is a no-op when capture is
+    already on, so turn it off first to give every test a known start.
+    """
     root = logging.getLogger()
     handlers = list(root.handlers)
     level = root.level
     root.handlers.clear()
+    logging.captureWarnings(False)
     yield root
     for handler in root.handlers:
         handler.close()
     root.handlers[:] = handlers
     root.setLevel(level)
+    logging.captureWarnings(False)
 
 
 def _log_names(logs_dir: Path) -> set[str]:
@@ -58,6 +64,24 @@ def test_setup_logging_writes_a_debug_file_for_this_run(tmp_path, clean_root):
     # DEBUG reaches the file even without --verbose: that is what makes an
     # attached log useful in a bug report.
     assert "a debug line" in (logs_dir / name).read_text(encoding="utf-8")
+
+
+def test_setup_logging_routes_warnings_into_the_log_file(tmp_path, clean_root):
+    logs_dir = tmp_path / "logs"
+
+    setup_logging(logs_dir, verbose=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.warn("a stray warning", RuntimeWarning)
+    for handler in clean_root.handlers:
+        handler.flush()
+
+    names = _log_names(logs_dir)
+    assert len(names) == 1
+    name = names.pop()
+    # warnings.warn() bypasses logging by default; captureWarnings is what
+    # gets it into the run's file instead of vanishing to stderr.
+    assert "a stray warning" in (logs_dir / name).read_text(encoding="utf-8")
 
 
 def test_setup_logging_adds_console_only_when_verbose(tmp_path, clean_root):

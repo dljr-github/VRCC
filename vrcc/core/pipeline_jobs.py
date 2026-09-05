@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import queue
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vrcc.audio.frames import SAMPLE_RATE
 from vrcc.core import languages
 from vrcc.core.events import (
     AppError,
@@ -99,16 +101,31 @@ def _enqueue(p: "Pipeline", q: "queue.Queue", job) -> None:
 
 
 def handle_speculative(p: "Pipeline", event: "SegSpeculative") -> None:
+    """Enqueue a speculative non-blocking: a full queue means the engine is
+    behind real time, and blocking here would stall the segmenter thread that
+    is the only consumer draining the frame queue upstream. The final
+    re-transcribes the same audio regardless, so a skip costs an early
+    caption, never a caption -- unlike the blocking backpressure below, which
+    real audio depends on."""
     if not p._should_caption():
         return
     samples_id = id(event.samples)
+    # Noted before the put: the worker can dequeue the job the moment it
+    # lands, and consume_stale has to find the key un-staled by then.
     p._spec.note_speculative(event.utterance_id, samples_id)
+    try:
+        p._stt_queue.put_nowait(
+            _SttJob(event.utterance_id, event.samples, True, samples_id)
+        )
+    except queue.Full:
+        p._spec.forget_speculative(event.utterance_id, samples_id)
+        p._skipped_speculatives += 1
+        logger.debug(
+            "stt queue full; skipped speculative for utterance %s",
+            event.utterance_id,
+        )
+        return
     p._begin_typing(event.utterance_id)
-    _enqueue(
-        p,
-        p._stt_queue,
-        _SttJob(event.utterance_id, event.samples, True, samples_id),
-    )
 
 
 def handle_final(p: "Pipeline", event: "SegFinal") -> None:
@@ -133,11 +150,50 @@ def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
 # -- STT job processing ------------------------------------------------------
 
 
+def _call_engine(
+    p: "Pipeline", samples: "np.ndarray", stop: "threading.Event", *, speculative: bool
+) -> "SttResult | None | object":
+    """Transcribe via ``p._transcribe`` and record the call's wall-clock cost.
+
+    Timing starts here, after the job was dequeued, so queue wait is never
+    counted. It does cover ``_stt_lock``, which ``p._transcribe`` takes and
+    which a model swap or the 'heard' stream can hold for seconds: a run
+    that swapped models reports those seconds as engine time.
+
+    Nothing is recorded for ``_NO_ENGINE``, which means ``engine.transcribe``
+    was never invoked (swapped out mid-flight), nor once ``stop`` is set: a
+    call that outlasted stop()'s join returns into the next run, whose
+    counters it must not touch."""
+    start = time.monotonic()
+    result = p._transcribe(samples)
+    wall_s = time.monotonic() - start
+    if result is _NO_ENGINE or stop.is_set():
+        return result
+    audio_s = len(samples) / SAMPLE_RATE
+    p._stats.record_call(speculative, audio_s, wall_s)
+    logger.debug(
+        "stt call (%s): %.2fs audio, %.3fs wall",
+        "speculative" if speculative else "final",
+        audio_s,
+        wall_s,
+    )
+    return result
+
+
 def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> None:
     key = (job.utterance_id, job.samples_id)
 
     if job.speculative:
-        result = p._transcribe(job.samples)
+        if p._spec.consume_stale(key):
+            # Discarded while queued (SegDiscard landed before this job
+            # reached the engine): the result would only be thrown away, and
+            # on CPU that wasted inference is what fills the queue that
+            # blocks the segmenter. store_result's stale check still covers
+            # the discard-while-transcribing case below.
+            if not stop.is_set():
+                p._stale_speculatives += 1
+            return
+        result = _call_engine(p, job.samples, stop, speculative=True)
         if result is _NO_ENGINE:
             return  # engine swapped out mid-flight: drop the job
         if stop.is_set():
@@ -152,10 +208,14 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     # nested inside _stt_lock), preserving lock ordering.
     result = p._spec.pop_result(key)
     if result is _MISSING:
-        result = p._transcribe(job.samples)
+        result = _call_engine(p, job.samples, stop, speculative=False)
         if result is _NO_ENGINE:
             _finalize_dropped(p, job.utterance_id)  # engine swapped out mid-flight
             return
+    elif not stop.is_set():
+        # Same guard _call_engine applies: a job that outlasted stop()'s join
+        # returns into the next run, whose counters it must not touch.
+        p._stats.record_reuse()
     if stop.is_set():
         _finalize_dropped(p, job.utterance_id)  # abandoned mid-call
         return

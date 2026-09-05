@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 from types import SimpleNamespace
 
 import numpy as np
 
 from vrcc.core.bus import EventBus
 from vrcc.core.config import AppConfig, OscConfig
-from vrcc.core.pipeline import Pipeline
+from vrcc.core.pipeline import JOB_QUEUE_MAX, Pipeline
+from vrcc.core.pipeline_jobs import _SttJob
 from vrcc.osc.chatbox import format_message
 from vrcc.stt.engine import SttResult
 
@@ -236,3 +238,19 @@ def running(pipeline: Pipeline):
 
 def sample(n: int = 512, v: float = 0.1) -> np.ndarray:
     return np.full(n, v, dtype=np.float32)
+
+
+def wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
+    """Poll `predicate` until it holds or `timeout` passes."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return bool(predicate())
+
+
+def fill_stt_queue(pipeline: Pipeline, start: int = 0) -> None:
+    """Fill the STT queue to capacity with final jobs nothing will drain."""
+    for i in range(start, start + JOB_QUEUE_MAX):
+        pipeline._stt_queue.put_nowait(_SttJob(i, sample(), False, i))
