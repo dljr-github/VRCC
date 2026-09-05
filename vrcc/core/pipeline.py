@@ -23,6 +23,7 @@ from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source, pipeline_
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_jobs import _NO_ENGINE
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
+from vrcc.core.pipeline_stats import SessionStats, SttCallStats, begin_run, log_summary
 
 if TYPE_CHECKING:
     from vrcc.audio.source import AudioSource
@@ -101,6 +102,13 @@ class Pipeline:
         self._typing = TypingTracker()
 
         self._dropped_frames = 0
+        self._skipped_speculatives = 0
+        self._stale_speculatives = 0
+        self._stats = SttCallStats()
+        # Cumulative across every start()/stop(restarting=True) cycle in
+        # this Pipeline's life, so a mid-session device swap never fragments
+        # or zeroes the picture the final summary shows (see pipeline_stats).
+        self._session = SessionStats()
         self._lifecycle_lock = threading.Lock()
         # Survives start()/stop() so a restart never reissues a still-live id.
         self._message_seq = 0
@@ -139,7 +147,7 @@ class Pipeline:
             self._typing.reset()
             self._segmenter.reset()
             self._frame_gated = False
-            self._dropped_frames = 0
+            begin_run(self)
 
             # Each worker is bound to THIS run's queue + stop event via thread
             # args (never re-read from self), so a worker abandoned by a
@@ -169,12 +177,18 @@ class Pipeline:
                 raise
             self._started = True
 
-    def stop(self) -> None:
+    def stop(self, *, restarting: bool = False) -> None:
         """Stop capture and join every worker (2 s each). Idempotent, safe
         before :meth:`start`. A pending speculative is abandoned (stop flag set
         -> in-flight jobs return without publishing). A join that times out
         abandons the worker as a daemon zombie bound to this run's queue/stop
         event, so it can't interfere with a subsequent :meth:`start`.
+
+        ``restarting`` is True when the caller (:meth:`restart_source`,
+        :meth:`reinit_audio_and_resume`) is about to call :meth:`start` again
+        right away for a live device swap: the run's numbers still fold into
+        the session totals, but no summary line is emitted for it, so the log
+        shows one line for the whole session instead of a fragment per swap.
         """
         with self._lifecycle_lock:
             if not self._started:
@@ -194,6 +208,8 @@ class Pipeline:
             self._terminate(self._stt_queue, self._stt_thread)
             self._terminate(self._mt_queue, self._mt_thread)
             self._seg_thread = self._stt_thread = self._mt_thread = None
+
+            log_summary(self, restarting=restarting)
 
         # Best-effort: drop the typing indicator we may have left on.
         self._set_typing(False)
@@ -267,7 +283,7 @@ class Pipeline:
         resumes capture instead of inheriting the stopped state."""
         want_running = self._started or self._resume_pending
         if self._started:
-            self.stop()
+            self.stop(restarting=True)
         self._source = new_source
         if want_running:
             self._resume_pending = True
@@ -282,7 +298,7 @@ class Pipeline:
         stop()/start() intent-preservation. Returns whether capture runs after."""
         want_running = self._started or self._resume_pending
         if self._started:
-            self.stop()
+            self.stop(restarting=True)
         reinit()
         self._source = make_source()
         if want_running:

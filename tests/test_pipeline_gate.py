@@ -9,12 +9,20 @@ from __future__ import annotations
 
 import threading
 
-from vrcc.audio.segmenter import SegDiscard
+from vrcc.audio.segmenter import SegDiscard, SegSpeculative
 from vrcc.core import pipeline_jobs
 from vrcc.core.events import PhraseRecognized
 from vrcc.core.pipeline_jobs import _SttJob
 
-from .conftest import FakeMute, FakeStt, collect, make_pipeline, make_result, sample
+from .conftest import (
+    FakeMute,
+    FakeStt,
+    collect,
+    fill_stt_queue,
+    make_pipeline,
+    make_result,
+    sample,
+)
 
 
 def _final_job(uid: int, s) -> _SttJob:
@@ -103,3 +111,63 @@ def test_final_stop_set_drop_resolves_typing():
     stop.set()
     pipeline_jobs.process_stt_job(env.pipeline, _final_job(1, sample()), stop)
     assert env.chatbox.typing[-1] is False
+
+
+# -- speculative discarded while queued (never reaches the engine) ----------
+
+
+def test_speculative_discarded_while_queued_never_reaches_engine():
+    # SegDiscard landing before the job reaches the engine must skip the
+    # transcribe call entirely, not just throw the result away afterward
+    # (store_result already covers a discard that lands mid-transcribe).
+    env = make_pipeline(stt=FakeStt())
+    s = sample()
+    env.pipeline._spec.note_speculative(1, id(s))
+    env.pipeline._spec.drop_discarded(1)  # marks (1, id(s)) stale
+    job = _SttJob(utterance_id=1, samples=s, speculative=True, samples_id=id(s))
+    pipeline_jobs.process_stt_job(env.pipeline, job, threading.Event())
+    assert env.stt.calls == 0
+
+
+def test_typing_never_turns_on_for_a_skipped_speculative_later_discarded():
+    # handle_speculative notes the speculative before the put and takes the
+    # note back on a full queue, never reaching _begin_typing, so a later
+    # discard for that utterance must not leave typing stuck on (it was
+    # never turned on to begin with).
+    env = make_pipeline()
+    pipeline = env.pipeline
+    fill_stt_queue(pipeline)
+    pipeline._on_seg_event(SegSpeculative(utterance_id=7, samples=sample()))
+    assert pipeline._skipped_speculatives == 1
+    assert env.chatbox.typing == []  # never turned on
+
+    pipeline._on_seg_event(SegDiscard(utterance_id=7))
+    assert 7 not in pipeline._typing._in_flight
+    assert True not in env.chatbox.typing  # still never turned on
+
+
+def test_speculative_is_noted_before_the_worker_can_see_its_job():
+    # A discarded speculative leaves its key stale, the next snapshot for the
+    # same utterance can land at the same address, and the worker may dequeue
+    # the job the moment it is put. The un-stale in note_speculative has to
+    # come first, or consume_stale eats the new job.
+    env = make_pipeline(stt=FakeStt())
+    p = env.pipeline
+    stop = threading.Event()
+    s = sample()
+    p._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
+    pipeline_jobs.process_stt_job(p, p._stt_queue.get_nowait(), stop)
+    p._on_seg_event(SegDiscard(utterance_id=1))
+    assert (1, id(s)) in p._spec._stale
+
+    real_put = p._stt_queue.put_nowait
+
+    def worker_wins_the_race(job):
+        real_put(job)
+        pipeline_jobs.process_stt_job(p, p._stt_queue.get_nowait(), stop)
+
+    p._stt_queue.put_nowait = worker_wins_the_race
+    p._on_seg_event(SegSpeculative(utterance_id=1, samples=s))  # the same key
+
+    assert env.stt.calls == 2
+    assert (1, id(s)) in p._spec._cache

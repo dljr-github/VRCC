@@ -43,6 +43,18 @@ class SpecCache:
             self._pending[utterance_id] = samples_id
             self._stale.discard((utterance_id, samples_id))
 
+    def forget_speculative(self, utterance_id: int, samples_id: int) -> None:
+        """Drop a speculative that was noted but never enqueued (the STT
+        queue was full), so a later discard has nothing of it to mark stale.
+
+        Keyed on the samples too, the way ``note_speculative`` is: dropping
+        by utterance alone would also forget an earlier speculative for the
+        same utterance that is still in flight, and a discard would then
+        have nothing to mark stale for it."""
+        with self._lock:
+            if self._pending.get(utterance_id) == samples_id:
+                del self._pending[utterance_id]
+
     def drop_discarded(self, utterance_id: int) -> None:
         """Discard: drop the pending speculative's cached result and mark its
         key stale so an in-flight transcription throws its result away."""
@@ -52,6 +64,17 @@ class SpecCache:
                 key = (utterance_id, samples_id)
                 self._cache.pop(key, None)
                 self._stale.add(key)
+
+    def consume_stale(self, key: tuple[int, int]) -> bool:
+        """Report and clear whether ``key`` was discarded while its job sat
+        queued, so a speculative can skip the engine call entirely instead of
+        paying for a transcription that store_result would only throw away.
+        Mirrors store_result's stale check for the pre-transcribe path."""
+        with self._lock:
+            if key in self._stale:
+                self._stale.discard(key)
+                return True
+            return False
 
     def store_result(self, key: tuple[int, int], result: "SttResult | None") -> bool:
         """Cache a finished speculative result. Returns False (clearing the
@@ -67,8 +90,9 @@ class SpecCache:
     def pop_result(self, key: tuple[int, int]) -> "SttResult | None | object":
         """Pop the cached result for a final, or ``_MISSING`` on a miss.
         Safe without extra locking: the single STT worker drains its queue
-        FIFO and the speculative is always enqueued before its final, so the
-        cache is populated before this lookup; a miss just re-transcribes."""
+        FIFO and a speculative that was enqueued at all went in before its
+        final, so a hit is populated before this lookup. A miss (no
+        speculative, or one shed on a full queue) just re-transcribes."""
         with self._lock:
             return self._cache.pop(key, _MISSING)
 

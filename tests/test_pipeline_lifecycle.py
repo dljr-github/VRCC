@@ -5,25 +5,27 @@ backpressure, and start/stop lifecycle (including the zombie-worker case).
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 import numpy as np
 import pytest
 
-from vrcc.audio.segmenter import SegFinal
+from vrcc.audio.segmenter import SegFinal, SegSpeculative
 from vrcc.core.config import AppConfig, AudioConfig
 from vrcc.core.events import AppError, MicLevel, PhraseRecognized
+from vrcc.core.pipeline import JOB_QUEUE_MAX
 
-from .conftest import FakeSource, FakeStt, collect, make_pipeline, running, sample
-
-
-def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return bool(predicate())
+from .conftest import (
+    FakeSource,
+    FakeStt,
+    collect,
+    fill_stt_queue,
+    make_pipeline,
+    running,
+    sample,
+    wait_until,
+)
 
 
 # -- energy pre-gate ---------------------------------------------------------
@@ -38,7 +40,7 @@ def test_energy_gate_blocks_quiet_frames_when_idle():
     levels = collect(env.bus, MicLevel)
     with running(env.pipeline):
         env.pipeline._on_frame(sample(v=0.001))  # rms 0.001 < 0.0305: gated
-        assert _wait_until(lambda: len(levels) == 1)  # meter still flows
+        assert wait_until(lambda: len(levels) == 1)  # meter still flows
         time.sleep(0.02)
     assert env.segmenter.frames == []  # never reached the VAD/segmenter
     assert levels[0].vad_prob == 0.0
@@ -49,7 +51,7 @@ def test_energy_gate_passes_loud_frames():
     env = make_pipeline(config=cfg)
     with running(env.pipeline):
         env.pipeline._on_frame(sample(v=0.1))  # rms 0.1 >= 0.0305: passes
-        assert _wait_until(lambda: len(env.segmenter.frames) == 1)
+        assert wait_until(lambda: len(env.segmenter.frames) == 1)
 
 
 def test_energy_gate_lets_quiet_frames_flow_mid_utterance():
@@ -62,14 +64,14 @@ def test_energy_gate_lets_quiet_frames_flow_mid_utterance():
     with running(env.pipeline):
         env.segmenter.active = True
         env.pipeline._on_frame(sample(v=0.001))
-        assert _wait_until(lambda: len(env.segmenter.frames) == 1)
+        assert wait_until(lambda: len(env.segmenter.frames) == 1)
 
 
 def test_energy_gate_disabled_frames_flow_unchanged():
     env = make_pipeline()  # default config: gate disabled
     with running(env.pipeline):
         env.pipeline._on_frame(sample(v=0.001))
-        assert _wait_until(lambda: len(env.segmenter.frames) == 1)
+        assert wait_until(lambda: len(env.segmenter.frames) == 1)
 
 
 # -- frame queue backpressure ----------------------------------------------
@@ -96,6 +98,83 @@ def test_frame_queue_drops_oldest_over_capacity(caplog):
     assert drained[0] == 2
     assert drained[-1] == 101
     assert sum("dropping oldest" in r.message for r in caplog.records) == 1
+
+
+# -- STT queue backpressure: speculative skips, final still blocks ----------
+
+
+def test_speculative_skipped_when_stt_queue_full_no_block_no_enqueue_no_typing():
+    env = make_pipeline()  # NOT started: nothing drains the STT queue
+    pipeline = env.pipeline
+    fill_stt_queue(pipeline)
+    assert pipeline._stt_queue.qsize() == JOB_QUEUE_MAX
+
+    done = threading.Event()
+
+    def call():
+        pipeline._on_seg_event(SegSpeculative(utterance_id=99, samples=sample()))
+        done.set()
+
+    threading.Thread(target=call, daemon=True).start()
+    assert done.wait(1.0)  # must return promptly, not block on the full queue
+
+    assert pipeline._stt_queue.qsize() == JOB_QUEUE_MAX  # nothing enqueued
+    assert pipeline._skipped_speculatives == 1
+    assert env.chatbox.typing == []  # no typing indicator turned on
+    assert 99 not in pipeline._typing._in_flight
+    assert 99 not in pipeline._spec._pending
+
+
+def test_handle_final_still_blocks_when_stt_queue_full():
+    # Finals keep the existing blocking backpressure: unlike a speculative, a
+    # final has no later re-transcribe to fall back on.
+    env = make_pipeline()  # NOT started: nothing drains the STT queue
+    pipeline = env.pipeline
+    fill_stt_queue(pipeline)
+
+    done = threading.Event()
+
+    def call():
+        pipeline._on_seg_event(SegFinal(utterance_id=42, samples=sample()))
+        done.set()
+
+    threading.Thread(target=call, daemon=True).start()
+    assert not done.wait(0.2)  # still blocked: queue full, nothing draining
+
+    pipeline._stt_queue.get_nowait()  # free one slot
+    assert done.wait(2.0)  # now unblocks and enqueues
+    assert pipeline._stt_queue.qsize() == JOB_QUEUE_MAX
+
+
+def test_final_still_captions_after_its_speculative_was_skipped():
+    # A skip must never stop the SAME utterance's final from transcribing and
+    # captioning once queue space frees up.
+    env = make_pipeline(stt=FakeStt())
+    recognized = collect(env.bus, PhraseRecognized)
+    env.stt.gate.clear()  # first transcribe call blocks until released
+    with running(env.pipeline):
+        env.pipeline._on_seg_event(SegFinal(utterance_id=0, samples=sample()))
+        assert env.stt.entered.wait(2.0)  # worker is now stuck inside transcribe
+
+        # Queue is empty (the blocker was dequeued); fill it to capacity so
+        # the speculative below has nowhere to go.
+        fill_stt_queue(env.pipeline, start=1)
+        assert env.pipeline._stt_queue.qsize() == JOB_QUEUE_MAX
+
+        target = sample()
+        env.pipeline._on_seg_event(SegSpeculative(utterance_id=99, samples=target))
+        assert env.pipeline._skipped_speculatives == 1
+        assert 99 not in env.pipeline._typing._in_flight
+
+        env.stt.gate.set()  # release the blocker; the filler jobs then drain
+        assert wait_until(lambda: env.pipeline._stt_queue.qsize() == 0)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= JOB_QUEUE_MAX)
+
+        # Space is free again: the real final for the same utterance goes
+        # through normally, transcribing fresh since no speculative cached.
+        env.pipeline._on_seg_event(SegFinal(utterance_id=99, samples=target))
+        assert wait_until(lambda: any(e.utterance_id == 99 for e in recognized))
+    assert any(e.utterance_id == 99 for e in recognized)
 
 
 # -- lifecycle --------------------------------------------------------------
@@ -132,14 +211,14 @@ def test_zombie_stt_worker_from_timed_out_stop_cannot_touch_new_run():
         stt.gate.set()  # release the zombie's transcribe call
 
         # Zombie exits via its OWN old queue's sentinel, publishing nothing.
-        assert _wait_until(lambda: not old_thread.is_alive())
+        assert wait_until(lambda: not old_thread.is_alive())
         assert old_queue.empty()  # the old sentinel was consumed
         assert recognized == []  # the abandoned result was discarded
 
         # The new run works normally and each job is routed exactly once.
         p._on_seg_event(SegFinal(utterance_id=2, samples=sample()))
-        assert _wait_until(lambda: p._spec._last_finalized >= 2)
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: p._spec._last_finalized >= 2)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
     finally:
         stt.gate.set()
         p.stop()

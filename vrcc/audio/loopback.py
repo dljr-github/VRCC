@@ -25,7 +25,8 @@ from typing import Callable
 
 import numpy as np
 
-from vrcc.audio.source import FRAME_LEN, SAMPLE_RATE, _Rechunker, _to_mono
+from vrcc.audio.frames import FRAME_LEN, SAMPLE_RATE
+from vrcc.audio.source import _Rechunker, _to_mono
 
 logger = logging.getLogger("vrcc.audio.loopback")
 

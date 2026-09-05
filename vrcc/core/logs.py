@@ -11,6 +11,12 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from vrcc.core.events import EngineStateChanged
+
+if TYPE_CHECKING:
+    from vrcc.core.bus import EventBus
 
 logger = logging.getLogger("vrcc.core.logs")
 
@@ -52,6 +58,9 @@ def setup_logging(logs_dir: Path, verbose: bool) -> None:
     """
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
+    # warnings.warn() bypasses logging and goes to stderr, which the windowed
+    # build has none of; route shown warnings to the root logger instead.
+    logging.captureWarnings(True)
     for name, level in _QUIET_LOGGERS.items():
         logging.getLogger(name).setLevel(level)
 
@@ -81,3 +90,18 @@ def setup_logging(logs_dir: Path, verbose: bool) -> None:
         console = logging.StreamHandler()
         console.setFormatter(fmt)
         root.addHandler(console)
+
+
+def log_engine_states(bus: "EventBus") -> None:
+    """Write every engine state transition to the log: the device an engine
+    came up on, and any fallback or failure on the way there. One subscriber
+    covers every transition, so a new engine or a new fallback path cannot
+    ship silent. Loading and ready reach the log only here; the fallback
+    sites also warn at their own publish, which is why a fallback appears
+    twice."""
+
+    def _log(event: EngineStateChanged) -> None:
+        detail = f": {event.detail}" if event.detail else ""
+        logger.info("%s engine %s%s", event.engine, event.state, detail)
+
+    bus.subscribe(EngineStateChanged, _log)
