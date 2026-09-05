@@ -18,16 +18,18 @@ from vrcc.audio.segmenter import (
 from vrcc.core.config import AppConfig, OscConfig
 from vrcc.core.events import AppError, MicLevel, PhraseRecognized, PhraseTranslated, SpeechStarted
 
-from .conftest import FakeChatbox, FakeMt, FakeMute, FakeStt, collect, make_pipeline, make_result, running, sample
-
-
-def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return bool(predicate())
+from .conftest import (
+    FakeChatbox,
+    FakeMt,
+    FakeMute,
+    FakeStt,
+    collect,
+    make_pipeline,
+    make_result,
+    running,
+    sample,
+    wait_until,
+)
 
 
 # -- SegLevel / SegSpeechStart passthrough ---------------------------------
@@ -61,7 +63,7 @@ def test_speculative_enqueues_stt_caches_result_and_does_not_forward():
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
         key = (1, id(s))
-        assert _wait_until(lambda: key in env.pipeline._spec._cache)
+        assert wait_until(lambda: key in env.pipeline._spec._cache)
         # cached but NOT forwarded
         time.sleep(0.02)
         assert env.stt.calls == 1
@@ -80,8 +82,8 @@ def test_final_reuses_cached_speculative_without_second_stt_call():
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=s))
-        assert _wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
-        assert _wait_until(lambda: len(recognized) == 1)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
+        assert wait_until(lambda: len(recognized) == 1)
     # exactly one transcribe: the speculative; the final reused the cache
     assert env.stt.calls == 1
     assert recognized[0].text == "hello world"
@@ -95,8 +97,8 @@ def test_final_with_different_samples_triggers_fresh_stt_call():
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s_spec))
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=s_final))
-        assert _wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
-        assert _wait_until(lambda: len(recognized) == 1)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
+        assert wait_until(lambda: len(recognized) == 1)
     assert env.stt.calls == 2
 
 
@@ -109,7 +111,7 @@ def test_discard_after_cache_drops_cached_result():
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
         key = (1, id(s))
-        assert _wait_until(lambda: key in env.pipeline._spec._cache)
+        assert wait_until(lambda: key in env.pipeline._spec._cache)
         env.pipeline._on_seg_event(SegDiscard(utterance_id=1))
         assert key not in env.pipeline._spec._cache
 
@@ -127,7 +129,7 @@ def test_inflight_speculative_result_discarded_is_thrown_away():
         # A later, good final for a different utterance flushes the FIFO.
         good = sample()
         env.pipeline._on_seg_event(SegFinal(utterance_id=2, samples=good))
-        assert _wait_until(lambda: env.pipeline._spec._last_finalized >= 2)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= 2)
     # the discarded speculative never cached and never published anything
     assert (1, id(s)) not in env.pipeline._spec._cache
     assert [e.utterance_id for e in recognized] == [2]
@@ -142,7 +144,7 @@ def test_none_stt_result_produces_nothing_downstream():
     translated = collect(env.bus, PhraseTranslated)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
     assert recognized == []
     assert translated == []
     assert env.chatbox.submits == []
@@ -157,8 +159,8 @@ def test_final_publishes_recognized_translates_and_submits_formatted():
     translated = collect(env.bus, PhraseTranslated)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=3, samples=sample()))
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
-        assert _wait_until(lambda: len(translated) == 1)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: len(translated) == 1)
     assert [e.text for e in recognized] == ["hello world"]
     tr = translated[0]
     assert tr.utterance_id == 3
@@ -176,7 +178,7 @@ def test_translation_disabled_sends_original_directly():
     translated = collect(env.bus, PhraseTranslated)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
     assert [e.text for e in recognized] == ["hello world"]
     assert translated == []  # no MT -> no PhraseTranslated
     assert env.chatbox.submits[0] == ("hello world", 1)
@@ -265,7 +267,7 @@ def test_typing_true_on_speculative():
     env = make_pipeline()
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.chatbox.typing[:1] == [True])
+        assert wait_until(lambda: env.chatbox.typing[:1] == [True])
 
 
 def test_typing_false_after_submit():
@@ -274,8 +276,8 @@ def test_typing_false_after_submit():
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=s))
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
-        assert _wait_until(lambda: env.chatbox.typing[-1] is False)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: env.chatbox.typing[-1] is False)
     assert env.chatbox.typing[0] is True
     # Typing must stay ON through the whole MT wait: the first typing-off
     # comes strictly AFTER the chatbox submit, never during translation.
@@ -288,9 +290,9 @@ def test_typing_false_on_discard_when_nothing_in_flight():
     env = make_pipeline()
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.chatbox.typing[:1] == [True])
+        assert wait_until(lambda: env.chatbox.typing[:1] == [True])
         env.pipeline._on_seg_event(SegDiscard(utterance_id=1))
-        assert _wait_until(lambda: env.chatbox.typing[-1] is False)
+        assert wait_until(lambda: env.chatbox.typing[-1] is False)
 
 
 def test_typing_false_when_result_gated_to_none():
@@ -298,9 +300,9 @@ def test_typing_false_when_result_gated_to_none():
     s = sample()
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
-        assert _wait_until(lambda: env.chatbox.typing[:1] == [True])
+        assert wait_until(lambda: env.chatbox.typing[:1] == [True])
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=s))
-        assert _wait_until(lambda: env.chatbox.typing[-1] is False)
+        assert wait_until(lambda: env.chatbox.typing[-1] is False)
 
 
 def test_orphaned_speculative_typing_cleared_by_later_finalize():
@@ -311,11 +313,11 @@ def test_orphaned_speculative_typing_cleared_by_later_finalize():
     env = make_pipeline()
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.chatbox.typing[:1] == [True])
+        assert wait_until(lambda: env.chatbox.typing[:1] == [True])
         # Utterance 1 is never resolved; utterance 2 finalizes normally.
         env.pipeline._on_seg_event(SegFinal(utterance_id=2, samples=sample()))
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
-        assert _wait_until(lambda: env.chatbox.typing[-1] is False)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: env.chatbox.typing[-1] is False)
         assert 1 not in env.pipeline._typing._in_flight
 
 
@@ -331,7 +333,7 @@ def test_send_to_vrchat_false_skips_chatbox_but_publishes_events():
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=s))
-        assert _wait_until(lambda: len(translated) == 1)
+        assert wait_until(lambda: len(translated) == 1)
         time.sleep(0.02)
     assert len(recognized) == 1
     assert env.chatbox.submits == []  # nothing sent to VRChat
@@ -348,9 +350,9 @@ def test_stt_worker_exception_publishes_apperror_and_continues():
     errors = collect(env.bus, AppError)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: any(e.code == "STT_JOB_FAILED" for e in errors))
+        assert wait_until(lambda: any(e.code == "STT_JOB_FAILED" for e in errors))
         env.pipeline._on_seg_event(SegFinal(utterance_id=2, samples=sample()))
-        assert _wait_until(lambda: env.pipeline._spec._last_finalized >= 2)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= 2)
     err = next(e for e in errors if e.code == "STT_JOB_FAILED")
     assert "stt boom" in err.message
 
@@ -361,8 +363,8 @@ def test_mt_translation_failure_falls_back_to_original_text():
     recognized = collect(env.bus, PhraseRecognized)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
-        assert _wait_until(lambda: any(e.code == "MT_JOB_FAILED" for e in errors))
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: any(e.code == "MT_JOB_FAILED" for e in errors))
     assert [e.text for e in recognized] == ["hello world"]
     # caption did not vanish: original text was sent instead
     assert env.chatbox.submits[0] == ("hello world", 1)
@@ -378,7 +380,7 @@ def test_mt_failure_with_sending_off_still_resolves_the_caption_row():
     translated = collect(env.bus, PhraseTranslated)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: len(translated) == 1)
+        assert wait_until(lambda: len(translated) == 1)
     assert env.chatbox.submits == []  # nothing was sent, as configured
     assert translated[0].utterance_id == 1
     assert translated[0].original == "hello world"
@@ -399,7 +401,7 @@ def test_unmatched_detected_language_resolves_the_caption_row():
     errors = collect(env.bus, AppError)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: len(translated) == 1)
+        assert wait_until(lambda: len(translated) == 1)
     assert any(e.code == "SOURCE_LANG_UNSUPPORTED" for e in errors)
     assert translated[0].translations == ()
     assert env.mt.calls == []  # the translator was never asked
@@ -416,9 +418,9 @@ def test_chatbox_failure_with_translation_disabled_publishes_chatbox_error():
     s = sample()
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegSpeculative(utterance_id=1, samples=s))
-        assert _wait_until(lambda: chatbox.typing[:1] == [True])
+        assert wait_until(lambda: chatbox.typing[:1] == [True])
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=s))
-        assert _wait_until(lambda: any(e.code == "CHATBOX_SEND_FAILED" for e in errors))
-        assert _wait_until(lambda: chatbox.typing[-1] is False)
+        assert wait_until(lambda: any(e.code == "CHATBOX_SEND_FAILED" for e in errors))
+        assert wait_until(lambda: chatbox.typing[-1] is False)
     assert not any(e.code == "STT_JOB_FAILED" for e in errors)
     assert len(recognized) == 1  # recognition still published

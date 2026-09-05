@@ -39,8 +39,8 @@ import time
 
 import numpy as np
 
+from vrcc.audio.frames import SAMPLE_RATE
 from vrcc.audio.segmenter import SegFinal, SegLevel
-from vrcc.audio.source import SAMPLE_RATE
 from vrcc.core.events import HeardLevel, HeardPhrase
 from vrcc.core.languages import from_whisper, get
 

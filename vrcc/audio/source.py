@@ -16,11 +16,9 @@ import sounddevice as sd
 import soxr
 
 from vrcc.audio.denoise import Denoiser
+from vrcc.audio.frames import FRAME_LEN, SAMPLE_RATE
 
 logger = logging.getLogger("vrcc.audio")
-
-FRAME_LEN = 512
-SAMPLE_RATE = 16000
 
 
 class AudioSource(Protocol):

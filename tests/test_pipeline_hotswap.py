@@ -11,7 +11,18 @@ import time
 from vrcc.audio.segmenter import SegFinal
 from vrcc.core.events import AppError, PhraseRecognized, PhraseTranslated
 
-from .conftest import FakeChatbox, FakeMt, FakeMute, FakeStt, collect, make_pipeline, make_result, running, sample
+from .conftest import (
+    FakeChatbox,
+    FakeMt,
+    FakeMute,
+    FakeStt,
+    collect,
+    make_pipeline,
+    make_result,
+    running,
+    sample,
+    wait_until,
+)
 
 
 class _FullQueue:
@@ -29,15 +40,6 @@ class _FullQueue:
     def put(self, item, timeout=None) -> None:
         self.put_calls += 1
         raise AssertionError("submit_typed must not use the blocking enqueue")
-
-
-def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return bool(predicate())
 
 
 # -- typed path -------------------------------------------------------------
@@ -58,8 +60,8 @@ def test_submit_typed_bypasses_stt_and_mute_and_translates():
     translated = collect(env.bus, PhraseTranslated)
     with running(env.pipeline):
         env.pipeline.submit_typed("typed hello")
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
-        assert _wait_until(lambda: len(translated) == 1)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: len(translated) == 1)
     assert env.stt.calls == 0  # STT bypassed
     # A typed submission gets a unique negative id (never the segmenter's 0+
     # ids), so a first-message id must be -1 here.
@@ -75,7 +77,7 @@ def test_submit_typed_without_mt_sends_original():
     recognized = collect(env.bus, PhraseRecognized)
     with running(env.pipeline):
         env.pipeline.submit_typed("just this")
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
     assert [(e.utterance_id, e.text) for e in recognized] == [(-1, "just this")]
     assert env.chatbox.submits[0] == ("just this", -1)
 
@@ -91,7 +93,7 @@ def test_submit_typed_uses_unique_ids_across_calls():
     with running(env.pipeline):
         env.pipeline.submit_typed("first")
         env.pipeline.submit_typed("second")
-        assert _wait_until(lambda: len(env.chatbox.submits) == 2)
+        assert wait_until(lambda: len(env.chatbox.submits) == 2)
     ids = [e.utterance_id for e in recognized]
     assert len(ids) == 2
     assert len(set(ids)) == 2  # never repeats
@@ -136,7 +138,7 @@ def test_submit_typed_works_after_start():
     errors = collect(env.bus, AppError)
     with running(env.pipeline):
         assert env.pipeline.submit_typed("after start") is True
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
     assert not any(e.code == "PIPELINE_NOT_RUNNING" for e in errors)
 
 
@@ -174,7 +176,7 @@ def test_submit_typed_enqueues_normally_when_queue_has_room():
     errors = collect(env.bus, AppError)
     with running(env.pipeline):
         assert env.pipeline.submit_typed("room to spare") is True
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
     assert not any(e.code == "PIPELINE_BUSY" for e in errors)
 
 
@@ -188,12 +190,12 @@ def test_set_stt_swaps_engine_used_by_next_job():
     env = make_pipeline(stt=a)
     with running(env.pipeline):
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= 1)
         assert a.calls == 1  # first utterance used the original engine
 
         env.pipeline.set_stt(b)
         env.pipeline._on_seg_event(SegFinal(utterance_id=2, samples=sample()))
-        assert _wait_until(lambda: env.pipeline._spec._last_finalized >= 2)
+        assert wait_until(lambda: env.pipeline._spec._last_finalized >= 2)
     assert b.calls == 1, "second utterance must use the swapped-in engine"
     assert a.calls == 1, "original engine must not be called again after swap"
 
@@ -213,7 +215,7 @@ def test_swapping_gate_blocks_new_stt_jobs():
 
         env.pipeline.set_swapping(False)
         env.pipeline._on_seg_event(SegFinal(utterance_id=2, samples=sample()))
-        assert _wait_until(lambda: stt.calls == 1), "captioning resumes after the swap"
+        assert wait_until(lambda: stt.calls == 1), "captioning resumes after the swap"
 
 
 def test_detach_stt_returns_engine_and_none_result_drops_job():
@@ -241,7 +243,7 @@ def test_set_mt_none_sends_original_text():
     with running(env.pipeline):
         env.pipeline.set_mt(None)
         env.pipeline._on_seg_event(SegFinal(utterance_id=1, samples=sample()))
-        assert _wait_until(lambda: len(env.chatbox.submits) == 1)
+        assert wait_until(lambda: len(env.chatbox.submits) == 1)
     assert any("hello" in text for text, _uid in env.chatbox.submits)
 
 
