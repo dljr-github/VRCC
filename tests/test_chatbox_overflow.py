@@ -16,7 +16,7 @@ from vrcc.osc.chatbox import (
     fit_message,
     format_message,
 )
-from vrcc.osc.chatbox_format import _balanced_slices
+from vrcc.osc.chatbox_slice import _balanced_slices
 
 
 def make_cfg(**overrides) -> OscConfig:

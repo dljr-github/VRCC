@@ -6,9 +6,10 @@ Run from the repo root:
     python tools/bench_chatbox_budget.py
     python tools/bench_chatbox_budget.py --against main
 
-``--against`` loads `vrcc/osc/chatbox_format.py` from a git ref and reports
-that column beside the working tree's, which is how the before/after numbers
-in the chatbox budget commits were produced.
+``--against`` loads `vrcc/osc/chatbox_format.py` from a git ref, serving every
+`vrcc.osc` module it imports from that same ref, and reports that column
+beside the working tree's, which is how the before/after numbers in the
+chatbox budget commits were produced.
 
 The fixtures are imported from `tests/test_chatbox_budget.py` rather than
 copied, so the numbers here always describe the strings the tests pin.
@@ -17,8 +18,11 @@ copied, so the numbers here always describe the strings the tests pin.
 from __future__ import annotations
 
 import argparse
+import atexit
+import importlib.abc
 import importlib.util
 import itertools
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,23 +36,107 @@ from vrcc.core.config import OscConfig  # noqa: E402
 
 TARGETS = [("ja", JA), ("es", ES), ("de", DE)]
 
+_REF_PACKAGE = "vrcc.osc."
 
-def _load_module_from_ref(ref: str):
-    """Import `vrcc/osc/chatbox_format.py` as it exists at `ref`."""
-    source = subprocess.run(
-        ["git", "show", f"{ref}:vrcc/osc/chatbox_format.py"],
+
+def _resolve(ref: str) -> str:
+    """The commit `ref` names. Raises on a ref git cannot resolve, so a
+    mistyped ref fails here rather than loading the working tree under its
+    label."""
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _git_show(commit: str, rel_path: str) -> str | None:
+    """`git show <commit>:<rel_path>`'s stdout, or `None` when the commit has
+    no such path.
+
+    Existence is asked first, so `git show` keeps `check=True`: any other git
+    failure (a corrupt object, a lock) raises here rather than reading as a
+    missing path, which would let the ref's chatbox_format fall through to
+    the working tree's modules and report a hybrid under the ref's label."""
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"{commit}:{rel_path}"],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    if exists.returncode != 0:
+        return None
+    return subprocess.run(
+        ["git", "show", f"{commit}:{rel_path}"],
         cwd=ROOT,
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=True,
     ).stdout
-    tmp = Path(tempfile.mkdtemp()) / "chatbox_format_ref.py"
-    tmp.write_text(source, encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("chatbox_format_ref", tmp)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+
+
+class _RefFinder(importlib.abc.MetaPathFinder):
+    """Serve every `vrcc.osc` import from `commit` while a ref's
+    chatbox_format.py is being executed, whatever modules it reaches and in
+    whatever order: a hand-kept list of them goes stale at the next split."""
+
+    def __init__(self, commit: str, tmp_dir: Path) -> None:
+        self._commit = commit
+        self._dir = tmp_dir
+
+    def find_spec(self, fullname, path, target=None):
+        if not fullname.startswith(_REF_PACKAGE):
+            return None
+        source = _git_show(self._commit, fullname.replace(".", "/") + ".py")
+        if source is None:
+            return None
+        file = self._dir / f"{fullname.rpartition('.')[2]}_ref.py"
+        file.write_text(source, encoding="utf-8")
+        return importlib.util.spec_from_file_location(fullname, file)
+
+
+def _load_module_from_ref(ref: str):
+    """Import `vrcc/osc/chatbox_format.py` as it exists at `ref`.
+
+    The working tree's `vrcc.osc` modules are evicted from `sys.modules` for
+    the duration and a finder serves the ref's copies in their place, so a
+    ref's chatbox_format cannot fall through to today's chatbox_slice or
+    linebreak and report a hybrid under the ref's label. Everything is
+    restored on exit, since `main()` imports the real modules afterwards in
+    the same process. The extracted sources outlive the call, so a traceback
+    inside the ref's code still shows its lines.
+    """
+    commit = _resolve(ref)
+    tmp_dir = Path(tempfile.mkdtemp())
+    atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
+    package = sys.modules["vrcc.osc"]
+    evicted = {
+        name: sys.modules.pop(name)
+        for name in list(sys.modules)
+        if name.startswith(_REF_PACKAGE)
+    }
+    finder = _RefFinder(commit, tmp_dir)
+    sys.meta_path.insert(0, finder)
+    try:
+        source = _git_show(commit, "vrcc/osc/chatbox_format.py")
+        if source is None:
+            raise FileNotFoundError(f"{ref} has no vrcc/osc/chatbox_format.py")
+        file = tmp_dir / "chatbox_format_ref.py"
+        file.write_text(source, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("chatbox_format_ref", file)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.meta_path.remove(finder)
+        for name in [n for n in sys.modules if n.startswith(_REF_PACKAGE)]:
+            del sys.modules[name]
+            package.__dict__.pop(name.rpartition(".")[2], None)
+        for name, module in evicted.items():
+            sys.modules[name] = module
+            setattr(package, name.rpartition(".")[2], module)
 
 
 def _delivered(module, ordering) -> dict[str, int]:
@@ -70,7 +158,7 @@ def _delivered(module, ordering) -> dict[str, int]:
 
 def _report(module, label: str) -> None:
     print(f"\n{label}")
-    print(f"  fixture lengths: " + ", ".join(f"{n}={len(t)}" for n, t in TARGETS))
+    print("  fixture lengths: " + ", ".join(f"{n}={len(t)}" for n, t in TARGETS))
     for ordering in itertools.permutations(TARGETS):
         kept = _delivered(module, ordering)
         cells = " ".join(

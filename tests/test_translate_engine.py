@@ -252,6 +252,28 @@ def test_madlad_per_target_source_encodings_and_no_target_prefix(model_dir: Path
     assert [name for name, _ in out] == ["Japanese", "Korean"]
 
 
+def test_translate_normalizes_each_hypothesis_against_its_own_target(
+    model_dir: Path, monkeypatch
+):
+    # Two targets sharing one decoded string: Japanese takes the ideographic
+    # marks and Korean keeps the ASCII ones, so an entry normalized against
+    # the wrong target fails here. decode is patched rather than the
+    # translator because the toy SPM vocabulary is trained on plain English
+    # words and has no pieces for CJK text.
+    raw = "田中さんが外で待っています,元気."
+    factory = _RecordingFactory()
+    eng = TranslateEngine(_spec("nllb"), model_dir, _cfg(), EventBus(), translator_factory=factory)
+    eng.load()
+    monkeypatch.setattr(eng._tokenizer, "decode", lambda tokens: raw)
+
+    out = eng.translate("hello world", get("English"), [get("Japanese"), get("Korean")])
+
+    assert out == [
+        ("Japanese", "田中さんが外で待っています、元気。"),
+        ("Korean", raw),
+    ]
+
+
 def test_translate_batch_kwargs_merge_extra_overrides_beam_size(model_dir: Path):
     factory = _RecordingFactory()
     cfg = _cfg(beam_size=4, extra_translate_kwargs={"beam_size": 9, "no_repeat_ngram_size": 3})

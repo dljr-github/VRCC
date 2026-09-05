@@ -7,11 +7,13 @@ threads.
 
 from __future__ import annotations
 
-import unicodedata
-
 from vrcc.core.config import OscConfig
+from vrcc.osc.chatbox_slice import CHATBOX_LIMIT, _assemble, _settle
+from vrcc.osc.linebreak import safe_cut
 
-CHATBOX_LIMIT = 144
+# CHATBOX_LIMIT lives in chatbox_slice.py (arranging n parts across
+# languages); chatbox.py re-exports it from here so existing
+# `from vrcc.osc.chatbox import CHATBOX_LIMIT` call sites keep working.
 
 # Cap on how many parallel slices fit_message tries before falling back to
 # greedy word packing: past this a message is degenerate (separator overhead
@@ -64,7 +66,10 @@ def _budget_original(original: str, texts: list[str], separator: str) -> str:
     elif budget == 1:
         shortened = "…"
     else:
-        shortened = original[: budget - 1] + "…"
+        # safe_cut, not a raw index: a Thai or Devanagari boundary landing
+        # between a base and its mark drops the mark and renders a different
+        # syllable.
+        shortened = original[: safe_cut(original, budget - 1)] + "…"
     return separator.join([shortened, *texts]).strip()
 
 
@@ -138,8 +143,9 @@ def resolve_overflow(text: str, mode: str) -> str:
 
 def fit_chatbox(text: str, mode: str) -> list[str]:
     """Fit `text` to VRChat's 144-char display limit per ``mode``: ``truncate``
-    clips over-limit text to ``text[:143] + "…"``; ``split`` greedily packs
-    whole words into <=144-char chunks (hard-splitting a lone over-long word);
+    clips over-limit text to 143 characters plus an ellipsis, the cut backed
+    off an attached character (`safe_cut`); ``split`` greedily packs whole
+    words into <=144-char chunks (hard-splitting a lone over-long word);
     ``send`` passes through unchanged. Empty text -> ``[]``.
     """
     if not text:
@@ -150,113 +156,10 @@ def fit_chatbox(text: str, mode: str) -> list[str]:
     if mode == "truncate":
         if len(text) <= CHATBOX_LIMIT:
             return [text]
-        return [text[: CHATBOX_LIMIT - 1] + "…"]
+        return [text[: safe_cut(text, CHATBOX_LIMIT - 1)] + "…"]
     if mode == "split":
         return _split_words(text, CHATBOX_LIMIT)
     raise ValueError(f"Unknown overflow mode: {mode!r}")
-
-
-def _safe_cut(text: str, index: int) -> int:
-    """Back a prospective slice boundary at `index` up past any combining
-    marks (`unicodedata.combining(ch) != 0`, e.g. Thai vowel/tone marks) so
-    a cut never separates one from its base character. Falls back to the
-    original `index` if nudging would collapse to 0 (an adversarial run of
-    nothing but combining marks), so callers always make forward progress.
-    """
-    cut = index
-    while 0 < cut < len(text) and unicodedata.combining(text[cut]) != 0:
-        cut -= 1
-    return cut if cut > 0 else index
-
-
-def _is_spaceless(text: str) -> bool:
-    """Whether `text` is written in a script that does not separate words.
-
-    `text.split()` returns ONE token for a Japanese or Chinese sentence, and
-    that token is usually under the 144-char limit, so the word packer accepts
-    it and drops the whole translation into ONE slice while leaving the other
-    parts blank of it. A translation short enough to travel whole is repeated
-    by :func:`_assemble` and never arrives here; one too long has to be cut,
-    and cutting it by character is the only way every part carries a share.
-
-    Whitespace anywhere means the script separates words (Korean does, and packs
-    correctly), so only a run of unseparated text reaches the character branch
-    the docstring above already promises it.
-
-    Thai is here for the same reason as CJK: written without spaces between
-    words, so `.split()` returns one token. Those are the only scripts among
-    the languages vrcc.core.languages offers that do this, so the ranges stop
-    there rather than guessing at ones nothing can produce.
-    """
-    if any(ch.isspace() for ch in text):
-        return False
-    return any(
-        "　" <= ch <= "鿿"      # CJK punctuation, kana, unified ideographs
-        or "가" <= ch <= "힯"   # hangul syllables
-        or "豈" <= ch <= "﫿"   # CJK compatibility ideographs
-        or "･" <= ch <= "ﾟ"   # halfwidth katakana
-        or "ก" <= ch <= "๛"      # Thai
-        for ch in text
-    )
-
-
-def _balanced_slices(
-    text: str, n: int, limit: int, anchor: str = "start"
-) -> list[str]:
-    """Split `text` into exactly `n` ordered slices of near-equal length.
-
-    Word-based whenever the text splits into words that each fit `limit`:
-    each slice takes whole words greedily toward a running
-    remaining-length/remaining-slices target (last slice takes the rest), so
-    joining the slices with spaces preserves every word in order.
-    Character-based ceil-division runs only for spaceless scripts or a
-    pathological over-long word, where the concatenation reproduces `text`
-    exactly (boundaries are nudged off combining marks). Callers drop empty
-    slices.
-
-    Fewer words than slices leaves blank slices, positioned per `anchor`.
-    ``"start"`` leaves them at the end, so the original fades out once
-    exhausted. ``"end"`` puts them first, so a text that runs out early still
-    lands in the final part: parts drain one at a time and a new utterance
-    clears the queue, so the last part is the one still on screen when the user
-    stops talking, and a translation absent from it is one the reader never
-    ends up with.
-    """
-    words = text.split()
-    # A spaceless run within its per-part share is better carried whole, which
-    # _assemble already does where it fits.
-    spaceless = _is_spaceless(text) and len(text) > limit // n
-    if words and not spaceless and all(len(word) <= limit for word in words):
-        slices: list[str] = []
-        idx = 0
-        for k in range(n - 1):
-            target = len(" ".join(words[idx:])) / (n - k)
-            piece = words[idx]
-            idx += 1
-            while idx < len(words):
-                grown = len(piece) + 1 + len(words[idx])
-                # Take the next word only while it moves the slice at least
-                # as close to the target -- overshoot stays within one word.
-                if abs(grown - target) > abs(len(piece) - target):
-                    break
-                piece = f"{piece} {words[idx]}"
-                idx += 1
-            slices.append(piece)
-            if idx >= len(words):
-                break
-        slices.extend([""] * (n - 1 - len(slices)))
-        slices.append(" ".join(words[idx:]))
-        if anchor == "end":
-            content = [piece for piece in slices if piece]
-            slices = [""] * (n - len(content)) + content
-        return slices
-    size = -(-len(text) // n)  # ceil division
-    bounds = [0]
-    for i in range(1, n):
-        cut = _safe_cut(text, min(i * size, len(text)))
-        bounds.append(max(cut, bounds[-1]))
-    bounds.append(len(text))
-    return [text[bounds[i] : bounds[i + 1]] for i in range(n)]
 
 
 def fit_message(
@@ -323,14 +226,17 @@ def fit_message(
         # trade wins at one target (delivery 75% to 100%) and is what the
         # ceiling protects: unbounded, the same growth cost three targets 75%
         # to 71.7%, because a part nobody reads is worse than a shorter one.
-        if n + 1 <= _MAX_REPEAT_PARTS:
+        # No candidate left to gain: grown_repeated cannot outgrow a repeated
+        # set that already holds every translation, so the extra _assemble
+        # would be thrown away.
+        if n + 1 <= _MAX_REPEAT_PARTS and len(repeated) < sum(translated):
             grown, grown_repeated = _assemble(texts, translated, n + 1, cfg)
             fits = grown and all(len(part) <= CHATBOX_LIMIT for part in grown)
             if fits and len(grown_repeated) > len(repeated):
-                return _end_anchored(
+                return _settle(
                     texts, translated, grown_repeated, n + 1, cfg, grown
                 )
-        return _end_anchored(texts, translated, repeated, n, cfg, parts)
+        return _settle(texts, translated, repeated, n, cfg, parts)
     # Degenerate input that no slice count could balance: split EACH
     # language's own text independently rather than the flat joined string
     # (whose ``.split()`` would treat the "\n" separator as just more
@@ -342,106 +248,6 @@ def fit_message(
     return parts
 
 
-def _end_anchored(
-    texts: list[str],
-    translated: list[bool],
-    repeated: set[int],
-    n: int,
-    cfg: OscConfig,
-    parts: list[str],
-) -> list[str]:
-    """`parts` with any sliced translation moved to the last parts, if it fits.
-
-    A translation with fewer words than parts leaves the trailing ones blank,
-    and the last part is the one still on screen once the queue drains, so a
-    translation missing from it is one the reader never ends up with. Applied
-    only after the part count is settled, and only when every part still fits.
-    """
-    if all(i in repeated for i, is_tr in enumerate(translated) if is_tr):
-        return parts
-    moved = _join(texts, translated, repeated, n, cfg, anchored=True)
-    if moved and all(len(part) <= CHATBOX_LIMIT for part in moved):
-        return moved
-    return parts
-
-
-def _assemble(
-    texts: list[str], translated: list[bool], n: int, cfg: OscConfig
-) -> tuple[list[str], set[int]]:
-    """Build `n` parts, repeating each translation that fits rather than
-    slicing it. Returns the parts and which texts were repeated.
-
-    Parts drain one every `max(split_delay_s, min_interval_s)`, and a new
-    utterance clears the queue, so anything past roughly the third part is
-    rarely seen at conversational pace. Slicing a translation therefore spread
-    it across parts the reader would never receive; putting a short one in
-    EVERY part means it arrives in the first and is still on screen when the
-    user stops talking. Measured over a 12-turn conversation at four paces,
-    that beat slicing on delivery and on what survives afterwards, in every
-    combination tried.
-
-    Repeated shortest first and only while every part still fits, so a long
-    translation falls back to being sliced across the parts in order. The
-    original is always sliced: it is the one text the reader can afford to lose
-    the tail of, since it is not what a non-speaker is reading.
-    """
-    # Shortest first so a long translation cannot crowd out two short ones it
-    # could not fit beside anyway. Swept 2875 realistic messages through
-    # fit_message with the order reversed and the output was identical every
-    # time, so this is insurance rather than a measured win: keep it because it
-    # is the order that can only help, not because it is currently doing work.
-    order = sorted(
-        (i for i, is_tr in enumerate(translated) if is_tr), key=lambda i: len(texts[i])
-    )
-    repeated: set[int] = set()
-    for i in order:
-        candidate = repeated | {i}
-        if all(
-            len(part) <= CHATBOX_LIMIT
-            for part in _join(texts, translated, candidate, n, cfg)
-        ):
-            repeated = candidate
-    return _join(texts, translated, repeated, n, cfg), repeated
-
-
-def _join(
-    texts: list[str],
-    translated: list[bool],
-    repeated: set[int],
-    n: int,
-    cfg: OscConfig,
-    anchored: bool = False,
-) -> list[str]:
-    """`n` parts, with the `repeated` texts whole in each and the rest sliced.
-
-    ``anchored`` moves a sliced translation's content to the LAST parts. Off
-    while a part count is being judged, because anchoring changes which
-    original slice a translation shares a part with, and a count that only fits
-    because of it would be chosen over a larger one that repeats the
-    translation outright, which measured better.
-    """
-    sliced = {
-        i: _balanced_slices(
-            text,
-            n,
-            CHATBOX_LIMIT,
-            anchor="end" if anchored and translated[i] else "start",
-        )
-        for i, text in enumerate(texts)
-        if i not in repeated
-    }
-    parts = []
-    for slot in range(n):
-        pieces = [
-            texts[i] if i in repeated else sliced[i][slot]
-            for i in range(len(texts))
-        ]
-        part = cfg.translation_separator.join(p for p in pieces if p).strip()
-        if part:
-            parts.append(part)
-    return parts
-
-
 def _split_words(text: str, limit: int) -> list[str]:
     chunks: list[str] = []
     current = ""
@@ -450,7 +256,7 @@ def _split_words(text: str, limit: int) -> list[str]:
             if current:
                 chunks.append(current)
                 current = ""
-            cut = _safe_cut(word, limit)
+            cut = safe_cut(word, limit)
             chunks.append(word[:cut])
             word = word[cut:]
 
