@@ -26,9 +26,10 @@ from vrcc.osc.chatbox_format import (  # noqa: F401 -- re-exported, see below
 
 logger = logging.getLogger("vrcc.osc")
 
-# fit_chatbox/fit_message/format_message/CHATBOX_LIMIT live in
-# chatbox_format.py (pure text shaping, no OSC/threads) and are re-exported
-# here so existing `from vrcc.osc.chatbox import ...` call sites keep working.
+# fit_chatbox/fit_message/format_message live in chatbox_format.py (pure text
+# shaping, no OSC/threads) and CHATBOX_LIMIT in chatbox_slice.py; all are
+# re-exported here so existing `from vrcc.osc.chatbox import ...` call sites
+# keep working.
 
 # Cap on each wait-for-token sleep so stop() stays responsive instead of
 # committing to one long sleep.

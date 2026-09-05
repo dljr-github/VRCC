@@ -7,14 +7,16 @@ a message overflows at all.
 
 from __future__ import annotations
 
+import random
+
 from tests.test_chatbox_overflow import make_cfg
 from vrcc.osc.chatbox import fit_message
-from vrcc.osc.chatbox_format import CHATBOX_LIMIT, _balanced_slices, _join, _settle
+from vrcc.osc.chatbox_slice import CHATBOX_LIMIT, _balanced_slices, _join, _settle
 
 # The regression report's Japanese translation, split into its three expected
-# slices. Escaped per the branch-wide ruling: a raw glyph here survived one
-# NFC-normalizing write path already (see tests/test_linebreak.py). Extracted
-# character for character from design.md's own pinned example.
+# slices. Escaped: a raw glyph can be recomposed by a normalizing write path
+# where an escape cannot (see tests/test_linebreak.py). Pinned line by line
+# from the report's own example.
 _JA_LINE_1 = "\u79c1\u306e\u53cb\u9054\u304c\u6559\u3048\u3066\u304f\u308c\u305f\u3093\u3060\u3051\u3069\u3001"
 _JA_LINE_2 = (
     "\u99c5\u306e\u8fd1\u304f\u306e\u65b0\u3057\u3044\u30ab\u30d5\u30a7\u306f"
@@ -94,7 +96,7 @@ def test_end_anchoring_never_costs_a_repeat():
 def test_fit_message_split_pins_the_three_clause_cuts_end_to_end():
     """The bug report this task exists for: a Japanese translation with no
     ASCII space anywhere in it (`_JA_TRANSLATION`), cut mid-word by plain
-    ceil-division. Each expected line is `design.md`'s own pinned example,
+    ceil-division. Each expected line is the report's own pinned example,
     reproduced end to end through `fit_message`. The original is long enough,
     and `_MAX_REPEAT_PARTS` low enough, that n=3 is the first count the search
     tries and the translation is too long to repeat, so it is always sliced."""
@@ -120,7 +122,7 @@ def test_balanced_slices_snap_true_lands_on_the_clause_marks():
 
 def test_balanced_slices_snap_false_matches_todays_ceil_division():
     # size = ceil(69 / 3) = 23, with no combining mark to nudge off of, so
-    # today's plain boundaries are 23 and 46, unrelated to the clause marks.
+    # the plain boundaries are 23 and 46, unrelated to the clause marks.
     default = _balanced_slices(_JA_TRANSLATION, 3, CHATBOX_LIMIT)
     explicit_false = _balanced_slices(_JA_TRANSLATION, 3, CHATBOX_LIMIT, snap=False)
     expected = [_JA_TRANSLATION[0:23], _JA_TRANSLATION[23:46], _JA_TRANSLATION[46:69]]
@@ -148,8 +150,8 @@ def test_snap_never_produces_an_empty_slice_for_terminated_text():
     # n starts at 3, not 2: at n=2, limit // n (72) exceeds len(_JA_TRANSLATION)
     # (69), so _balanced_slices' own spaceless-routing guard sends the whole
     # text down the word path as a single over-long token instead of the
-    # character path snap touches. That routing threshold is a pre-existing
-    # question this task does not change.
+    # character path snap touches. That routing threshold is a separate
+    # question from snapping.
     for n in range(3, 6):
         slices = _balanced_slices(_JA_TRANSLATION, n, CHATBOX_LIMIT, snap=True)
         assert len(slices) == n
@@ -316,6 +318,54 @@ def test_snap_never_touches_the_word_path():
     )
 
 
+def _clause_marked_text(rng: random.Random, length: int) -> str:
+    """CJK filler `length` characters long, with a clause mark planted every
+    3 to 30 percent of it: the shape a real captioned sentence breaks into,
+    for `test_snap_keeps_interior_slices_within_half_to_double_share`."""
+    out: list[str] = []
+    total = 0
+    while total < length:
+        run = min(max(1, round(rng.uniform(0.03, 0.30) * length)), length - total)
+        out.append("中" * run)
+        total += run
+        if total < length:
+            out.append("。")
+            total += 1
+    return "".join(out)
+
+
+def test_snap_keeps_interior_slices_within_half_to_double_share():
+    """`_balanced_slices`' own docstring claims that with `snap=True` no
+    interior slice (excluding the first and the last, whose bounds are not
+    both a choose_cut result) falls under half its share or over twice it.
+    Generates CJK text 60 to 320 characters long with a clause mark every 3
+    to 30 percent of it, at every part count 2 through 6, and checks every
+    interior slice against `share = ceil(len(text) / n)`.
+
+    The lower bound compares against `share // 2`, not the exact half: the
+    window `choose_cut` is handed for the cut before an interior slice, and
+    the one after it, is built from that same floored `size // 2`, so an odd
+    share can legitimately land a slice one character under the exact half
+    without either window having done anything wrong.
+    """
+    rng = random.Random(20260905)
+    checked = 0
+    for _ in range(3000):
+        length = rng.randint(60, 320)
+        text = _clause_marked_text(rng, length)
+        n = rng.randint(2, 6)
+        share = -(-len(text) // n)  # ceil division, same as _balanced_slices' size
+        if len(text) <= share:
+            continue  # routes to the word path instead; snap never touches it
+        slices = _balanced_slices(text, n, CHATBOX_LIMIT, snap=True)
+        assert len(slices) == n
+        assert "".join(slices) == text
+        for piece in slices[1:-1]:
+            checked += 1
+            assert share // 2 <= len(piece) <= 2 * share, (length, n, share, piece)
+    assert checked > 0  # the loop must have actually exercised the character path
+
+
 # -- routing: a lone spaceless word too long for its share goes to the
 # character path even when the text as a whole contains an ASCII space ------
 
@@ -329,14 +379,14 @@ _STRAY_SPACE_JA = (
 
 
 def test_balanced_slices_routes_a_lone_long_word_to_the_character_path():
-    """The bug report this task exists for. `normalize` never converts `!`
+    """The bug report this test exists for. `normalize` never converts `!`
     or `?`, so the ASCII space the model emits after one survives, and
-    `is_spaceless` on the WHOLE text sees it and returns False. The old
-    guard then sent this to the word packer, which took the 4-character
-    first word whole and had nothing left to balance the 35-character
-    second word against: 4, 35, empty. Checked per word instead, the second
-    word alone is spaceless-script and longer than its 16-character share
-    (48 // 3), so the fixed guard reroutes to the character path."""
+    `is_spaceless` on the WHOLE text sees it and returns False. A guard
+    keyed on that sends this to the word packer, which takes the
+    4-character first word whole and has nothing left to balance the
+    35-character second word against: 4, 35, empty. Checked per word, the
+    second word alone is spaceless-script and longer than its 16-character
+    share (48 // 3), so the guard reroutes to the character path."""
     slices = _balanced_slices(_STRAY_SPACE_JA, 3, 48)
 
     assert slices == [
@@ -350,10 +400,10 @@ def test_balanced_slices_routes_a_lone_long_word_to_the_character_path():
 
 
 def test_balanced_slices_routes_and_snaps_the_lone_long_word_case():
-    """Same text and share as above, with `snap=True`: this is the path
-    Task 2 changed, and the routing fix now sends this text down it, so the
-    two changes must be checked together, not just the routing decision in
-    isolation. The text's only clause mark, U+3001 at index 28, falls inside
+    """Same text and share as above, with `snap=True`: per-word routing and
+    snapping meet on this text, so they are checked together rather than
+    the routing decision in isolation. The text's only clause mark, U+3001
+    at index 28, falls inside
     the second cut's window (21 to 35) and is picked over the raw
     ceil-division index 28 itself, moving the boundary to 29 so the second
     slice ends right after the comma instead of splitting before it."""
@@ -376,15 +426,10 @@ _KOREAN_SHORT_TOKENS = (
 
 
 def test_balanced_slices_still_word_packs_korean():
-    """Korean tokens are genuinely space separated and each is far under a
-    16-character share (48 // 3), so the per-word guard stays False for
-    every one of them and the text keeps taking the word path, unlike the
-    Japanese case above where a single token clears its share. This is
-    numerically Korean-safe rather than structurally so: a spaced Korean
-    text whose longest token is 14 characters reroutes once n reaches 11
-    (144 // 11 == 13 < 14), which is unreachable in production since `_join`
-    always passes `CHATBOX_LIMIT` and reaching n=11 there needs roughly a
-    1500-character message."""
+    """Korean tokens are space separated, and hangul is not an unspaced
+    script, so the per-word guard never fires for Korean however long a
+    token runs: the text keeps taking the word path, unlike the Japanese
+    case above where a single token clears its share."""
     slices = _balanced_slices(_KOREAN_SHORT_TOKENS, 3, CHATBOX_LIMIT)
 
     assert slices == [
@@ -397,8 +442,7 @@ def test_balanced_slices_still_word_packs_korean():
 
 def test_balanced_slices_latin_only_text_is_byte_for_byte_unchanged():
     """Latin words never satisfy `is_spaceless`, so the per-word guard is
-    identical to the old whole-text guard for this text: both are always
-    False, and the word path runs exactly as it always has."""
+    always False for this text and the word path runs unchanged."""
     text = " ".join(f"word{i}" for i in range(30))
 
     slices = _balanced_slices(text, 3, CHATBOX_LIMIT)
@@ -414,8 +458,8 @@ def test_balanced_slices_a_long_latin_word_does_not_trigger_the_guard():
     """`internationalization` is 20 characters, past the 16-character share
     (48 // 3), which is exactly the length relationship that reroutes a
     spaceless-script word above. `is_spaceless` is still False for it,
-    since it holds no CJK, Hangul or Thai codepoints, so the guard does not
-    misfire on a merely-long Latin word."""
+    since it holds no CJK or Thai codepoints, so the guard does not misfire
+    on a merely-long Latin word."""
     text = "hello there my friend this is an internationalization test right now"
 
     slices = _balanced_slices(text, 3, 48)
@@ -429,8 +473,8 @@ def test_balanced_slices_a_long_latin_word_does_not_trigger_the_guard():
 
 
 def test_fit_message_split_pins_a_latin_only_conversation_unchanged():
-    # Pinned against today's output: wiring snap through _join/_settle must
-    # not perturb a conversation that never reaches the character path.
+    # Wiring snap through _join/_settle must not perturb a conversation that
+    # never reaches the character path.
     cfg = make_cfg(overflow="split")
     original = " ".join(f"word{i}" for i in range(50))
     translation = " ".join(f"mot{i}" for i in range(50))

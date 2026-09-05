@@ -8,19 +8,12 @@ threads.
 from __future__ import annotations
 
 from vrcc.core.config import OscConfig
-from vrcc.osc.chatbox_slice import (  # noqa: F401 -- re-exported, see below
-    CHATBOX_LIMIT,
-    _assemble,
-    _balanced_slices,
-    _join,
-    _settle,
-)
+from vrcc.osc.chatbox_slice import CHATBOX_LIMIT, _assemble, _settle
 from vrcc.osc.linebreak import safe_cut
 
-# CHATBOX_LIMIT/_balanced_slices/_join/_assemble/_settle live in
-# chatbox_slice.py (arranging n parts across languages) and are
-# re-exported here so existing `from vrcc.osc.chatbox_format import ...`
-# call sites keep working.
+# CHATBOX_LIMIT lives in chatbox_slice.py (arranging n parts across
+# languages); chatbox.py re-exports it from here so existing
+# `from vrcc.osc.chatbox import CHATBOX_LIMIT` call sites keep working.
 
 # Cap on how many parallel slices fit_message tries before falling back to
 # greedy word packing: past this a message is degenerate (separator overhead
@@ -73,7 +66,10 @@ def _budget_original(original: str, texts: list[str], separator: str) -> str:
     elif budget == 1:
         shortened = "…"
     else:
-        shortened = original[: budget - 1] + "…"
+        # safe_cut, not a raw index: a Thai or Devanagari boundary landing
+        # between a base and its mark drops the mark and renders a different
+        # syllable.
+        shortened = original[: safe_cut(original, budget - 1)] + "…"
     return separator.join([shortened, *texts]).strip()
 
 
@@ -147,8 +143,9 @@ def resolve_overflow(text: str, mode: str) -> str:
 
 def fit_chatbox(text: str, mode: str) -> list[str]:
     """Fit `text` to VRChat's 144-char display limit per ``mode``: ``truncate``
-    clips over-limit text to ``text[:143] + "…"``; ``split`` greedily packs
-    whole words into <=144-char chunks (hard-splitting a lone over-long word);
+    clips over-limit text to 143 characters plus an ellipsis, the cut backed
+    off an attached character (`safe_cut`); ``split`` greedily packs whole
+    words into <=144-char chunks (hard-splitting a lone over-long word);
     ``send`` passes through unchanged. Empty text -> ``[]``.
     """
     if not text:
@@ -159,7 +156,7 @@ def fit_chatbox(text: str, mode: str) -> list[str]:
     if mode == "truncate":
         if len(text) <= CHATBOX_LIMIT:
             return [text]
-        return [text[: CHATBOX_LIMIT - 1] + "…"]
+        return [text[: safe_cut(text, CHATBOX_LIMIT - 1)] + "…"]
     if mode == "split":
         return _split_words(text, CHATBOX_LIMIT)
     raise ValueError(f"Unknown overflow mode: {mode!r}")
@@ -229,7 +226,10 @@ def fit_message(
         # trade wins at one target (delivery 75% to 100%) and is what the
         # ceiling protects: unbounded, the same growth cost three targets 75%
         # to 71.7%, because a part nobody reads is worse than a shorter one.
-        if n + 1 <= _MAX_REPEAT_PARTS:
+        # No candidate left to gain: grown_repeated cannot outgrow a repeated
+        # set that already holds every translation, so the extra _assemble
+        # would be thrown away.
+        if n + 1 <= _MAX_REPEAT_PARTS and len(repeated) < sum(translated):
             grown, grown_repeated = _assemble(texts, translated, n + 1, cfg)
             fits = grown and all(len(part) <= CHATBOX_LIMIT for part in grown)
             if fits and len(grown_repeated) > len(repeated):

@@ -16,6 +16,7 @@ from vrcc.osc.chatbox import ChatboxSender
 from vrcc.osc.chatbox_format import (
     CHATBOX_LIMIT,
     _MAX_REPEAT_PARTS,
+    fit_chatbox,
     fit_message,
     format_message,
     resolve_overflow,
@@ -137,6 +138,50 @@ def test_a_cut_keeps_a_combining_mark_with_its_base():
     body = line.rstrip("…")
     assert thai.startswith(body)
     assert unicodedata.combining(thai[len(body)]) == 0
+
+
+def test_budget_original_keeps_a_thai_combining_mark_with_its_base():
+    # _budget_original cuts the original at a raw budget, and a cut index
+    # landing on a combining mark would drop it and render a different
+    # syllable.
+    cfg = OscConfig(overflow="truncate")
+    thai = "ก" * 42 + "้" + "ก" * 10
+    parts = fit_message(thai, [("EN", "t" * 100)], cfg)
+
+    assert len(parts) == 1
+    body = parts[0].split("\n")[0].rstrip("…")
+    assert thai.startswith(body)
+    assert unicodedata.category(thai[len(body)]) not in ("Mn", "Mc")
+
+
+def test_fit_chatbox_truncate_keeps_a_thai_combining_mark_with_its_base():
+    # A caption sent without translation reaches fit_chatbox's own truncate
+    # cut, which has to back off a mark the same way _budget_original does.
+    thai = "ก" * 143 + "้" + "ก" * 10
+    parts = fit_message(thai, [], OscConfig(overflow="truncate"))
+
+    assert len(parts) == 1
+    body = parts[0].rstrip("…")
+    assert thai.startswith(body)
+    assert unicodedata.category(thai[len(body)]) not in ("Mn", "Mc")
+
+
+def test_every_cut_keeps_a_thai_vowel_sign_with_its_consonant():
+    # SARA AM is category Lo, not a combining mark, and attaches backward all
+    # the same: a line opening on it renders a dotted circle. Every cut path
+    # is covered: fit_chatbox's truncate and split, _budget_original, the
+    # per-target share, and the balanced slices.
+    thai = "ก" * 143 + "ทำ" + "ก" * 10
+    for parts in (
+        fit_chatbox(thai, "truncate"),
+        fit_chatbox(thai, "split"),
+        fit_message(thai, [("EN", "t" * 100)], OscConfig(overflow="truncate")),
+        fit_message("x", [("TH", thai), ("EN", "t" * 100)], OscConfig(overflow="truncate")),
+        fit_message(thai, [], OscConfig(overflow="split")),
+    ):
+        for part in parts:
+            for line in part.split("\n"):
+                assert not line.startswith("ำ"), parts
 
 
 def test_send_mode_still_sends_the_whole_thing():

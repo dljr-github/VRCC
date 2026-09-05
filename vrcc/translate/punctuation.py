@@ -1,23 +1,21 @@
 """Post-decode CJK punctuation normalization.
 
-Both shipped MT families write CJK with the ASCII period and comma. Decodes
-`normalize` had to repair, measured 2026-08-31 on CPU int8 at the live
-settings (beam 4, repetition penalty 1.1, no_repeat_ngram_size 3), six
-English sentences per target:
-
-    nllb-600M-int8, nllb-1.3B-int8      Jpan 6/6  Hans 6/6  Hant 6/6
-    m2m100-418M-int8, m2m100-1.2B-int8  Jpan 0/6  Hans 5/6  Hant 5/6
-
-nllb-600M-int8 turned "I bought apples, oranges and pears. They were cheap."
-into "\u6211\u4E70\u4E86\u679C,\u5B50\u548C\u68A8.\u5B83\u4EEC\u5F88\u4FBF\u5B9C."
-The m2m100 Jpan cell rules out tokenizer damage. Applying the repair to
-every family is deliberate: the table finds the defect in both. It keys on
-the target's FLORES script subtag, which its only caller
-(`vrcc.translate.engine.TranslateEngine.translate`) already holds.
+A decode can carry the ASCII period and comma into CJK output instead of
+the ideographic marks the script expects (see the "observed" cases in
+`tests/test_translate_punctuation.py`, recorded from real checkpoint
+output). `normalize` repairs that after the fact rather than depending on
+either MT family to emit the right glyph on its own. It keys on the
+target's FLORES script subtag, not on which model produced the text: a
+checkpoint that already writes the ideographic mark has nothing left to
+convert, so running the same repair regardless of family costs nothing
+where the defect is absent and fixes it where it is not. That subtag is
+what its only caller (`vrcc.translate.engine.TranslateEngine.translate`)
+already holds.
 """
 
 from __future__ import annotations
 
+from vrcc.core.charclass import is_cjk, is_closer, is_opener
 from vrcc.core.languages import Language
 
 # Per-script mapping for the ASCII '.' and ',' the checkpoints emit, keyed on
@@ -32,43 +30,19 @@ _MARKS: dict[str, dict[str, str]] = {
     "Hant": {".": "\u3002", ",": "\uFF0C"},
 }
 
-# A mark converts only when what it attaches to falls in one of these ranges,
-# written out rather than via unicodedata.east_asian_width, which also matches
-# fullwidth Latin. U+3000 IDEOGRAPHIC SPACE is out: nothing attaches to it.
-_CJK_RANGES: tuple[tuple[int, int], ...] = (
-    (0x3001, 0x303F),    # CJK symbols and punctuation
-    (0x3040, 0x309F),    # Hiragana
-    (0x30A0, 0x30FF),    # Katakana
-    (0x3400, 0x4DBF),    # CJK unified ideographs extension A
-    (0x4E00, 0x9FFF),    # CJK unified ideographs
-    (0xF900, 0xFAFF),    # CJK compatibility ideographs
-    (0xFF66, 0xFF9F),    # Halfwidth katakana, dakuten and handakuten included
-    (0x20000, 0x2FA1F),  # CJK extension B and later, plus compatibility supplement
-)
-
-# Closing marks carry no script of their own, so a terminator after one is
-# judged on what the bracket or quote closes over: without this a quoted
-# clause keeps its ASCII comma where the same clause unquoted converts. Both
-# checkpoints quote with ASCII " as well as the fullwidth and curly forms.
-_CLOSERS = "\"'\u2019\u201D)]}\uFF09\uFF3D\uFF5D\u300D\u300F\u3011\u3009\u300B\u3015\uFF63"
-
 # Terminators the target script already uses. A mark beside one is left alone
 # rather than converted, which would double the glyph: a checkpoint mixing
 # conventions puts an ASCII stop straight after an ideographic one.
 _ALREADY = "\u3002\u3001\uFF0C\uFF0E\uFF61\uFF64"
 
 
-def _is_cjk(ch: str) -> bool:
-    """True if ``ch`` falls in one of the ranges above."""
-    cp = ord(ch)
-    return any(lo <= cp <= hi for lo, hi in _CJK_RANGES)
-
-
 def _anchor(text: str, i: int) -> int:
     """Index of the character the mark at ``text[i]`` attaches to, looking
-    through any run of closing brackets and quotes, or -1 if there is none."""
+    through any run of closing brackets and quotes (they carry no script of
+    their own, so a terminator after one is judged on what the bracket
+    closes over), or -1 if there is none."""
     j = i - 1
-    while j >= 0 and text[j] in _CLOSERS:
+    while j >= 0 and is_closer(text[j]):
         j -= 1
     return j
 
@@ -81,8 +55,9 @@ def _should_convert(text: str, i: int) -> bool:
     domain label, not a sentence end. A repeated mark is left alone, an ASCII
     ellipsis reading better than three ideographic stops; that test looks past
     one space, since :func:`normalize` absorbs the space and the converted
-    stop would then land against the ellipsis. The last test, the anchor being
-    CJK, is what leaves decimals, ``e.g.`` and URLs alone."""
+    stop would then land against the ellipsis. An opening bracket anchors
+    nothing: it has opened, not closed. The last test, the anchor being CJK,
+    is what leaves decimals, ``e.g.`` and URLs alone."""
     mark = text[i]
     if i + 1 < len(text):
         if mark == "." and text[i + 1].isascii() and text[i + 1].isalnum():
@@ -91,9 +66,9 @@ def _should_convert(text: str, i: int) -> bool:
         if k < len(text) and (text[k] == mark or text[k] in _ALREADY):
             return False
     j = _anchor(text, i)
-    if j < 0 or text[j] in _ALREADY:
+    if j < 0 or text[j] in _ALREADY or is_opener(text[j]):
         return False
-    return _is_cjk(text[j])
+    return is_cjk(text[j])
 
 
 def normalize(text: str, target: Language) -> str:
@@ -107,6 +82,11 @@ def normalize(text: str, target: Language) -> str:
     the ideographic glyph carrying its own advance width."""
     marks = _MARKS.get(target.nllb.rpartition("_")[2])
     if marks is None:
+        return text
+    # Two C-level scans against a per-character Python loop over the whole
+    # hypothesis. One family writes Japanese with the ideographic marks
+    # already, so this is the common case there, not a rare one.
+    if not any(mark in text for mark in marks):
         return text
 
     out: list[str] = []

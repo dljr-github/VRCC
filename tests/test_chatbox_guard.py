@@ -46,17 +46,16 @@ def test_fit_message_reroutes_an_ordinary_message_at_the_real_chatbox_limit():
     `_GUARD_TRANSLATION` is `_STRAY_SPACE_JA`'s shape at a size where the
     guard fires at production scale: a 5-character "sugoi? " opener plus
     an 81-character clause-marked body, one word far longer than any
-    per-slice share the search tries here. Measured by loading the pre-fix
-    `chatbox_slice.py` under its own module name and calling `fit_message`
-    unchanged: the word packer cannot split an 81-character indivisible
-    token at all, so `_assemble` can only repeat it whole once the
-    original's own share has shrunk enough to leave room, which does not
-    happen until n=4 -- 4 parts of [141, 138, 138, 135], the same
-    86-character translation duplicated in full, unchanged, in every one
-    of them. With the fix, the per-word guard reroutes that body to the
-    character path at n=3 already, where it snaps onto its own clause
-    marks: 3 parts of [97, 90, 107], each carrying a DIFFERENT slice of
-    the translation, cut right after each of its three \u3001 marks.
+    per-slice share the search tries here. Under a whole-text routing guard
+    the word packer cannot split an 81-character indivisible token at all,
+    so `_assemble` can only repeat it whole once the original's own share
+    has shrunk enough to leave room, which does not happen until n=4 -- 4
+    parts of [141, 138, 138, 135], the same 86-character translation
+    duplicated in full, unchanged, in every one of them. The per-word guard
+    reroutes that body to the character path at n=3 already, where it
+    snaps onto its own clause marks: 3 parts of [97, 90, 107], each
+    carrying a DIFFERENT slice of the translation, cut right after each of
+    its three \u3001 marks.
     """
     cfg = make_cfg()  # live defaults: overflow "auto", include_original True, "\n"
 
@@ -81,13 +80,11 @@ def test_balanced_slices_does_not_sever_a_latin_word_in_mixed_text():
     """A code-switched translation: a 35-character spaceless CJK run, the
     ASCII word "without", then a 21-character spaceless CJK run. At n=5
     (144 // 5 = 28) the 35-character run clears its share and the whole
-    text routes to the character path. Measured against the pre-fix
-    `linebreak.py` (loaded under its own module name, unchanged otherwise):
-    the raw ceil-division boundary for slice 3 lands inside "without",
-    severing it into "wit" (ending slice 2) and "hout" (starting slice 3).
-    The fix is in `linebreak._legal`, not here: this test exercises it
-    through the character path `_balanced_slices` actually takes, the
-    only path where the severing could happen.
+    text routes to the character path. The raw ceil-division boundary for
+    slice 3 lands inside "without", severing it into "wit" (ending slice 2)
+    and "hout" (starting slice 3); `linebreak._legal` refuses that position
+    on the snapped path, and this test exercises it through the character
+    path `_balanced_slices` actually takes.
     """
     cjk1 = (
         "\u56db\u65b9\u5c71\u8a71\u3067\u3059\u304c"
@@ -109,6 +106,65 @@ def test_balanced_slices_does_not_sever_a_latin_word_in_mixed_text():
     assert [len(s) for s in slices] == [13, 13, 10, 16, 13]
     assert any("without" in s for s in slices), "without" + " was severed across a boundary"
     assert "".join(slices) == text
+
+
+def test_balanced_slices_plain_path_does_not_sever_a_latin_word_in_mixed_text():
+    # The plain (snap=False) path is what _assemble sizes every part count
+    # with, and it ships whenever _settle finds no snapped candidate that
+    # fits, so it has to keep a Latin island whole on its own.
+    cjk1 = "四方山話ですが"
+    cjk2 = "何とかかんとか"
+    text = cjk1 * 5 + " without " + cjk2 * 3
+
+    for n in range(2, 7):
+        slices = _balanced_slices(text, n, CHATBOX_LIMIT)
+        assert "".join(s for s in slices) == text or " ".join(s for s in slices if s) == text
+        assert any("without" in s for s in slices), f"n={n} severed the word: {slices!r}"
+
+
+def test_a_latin_run_wider_than_a_slice_is_severed_rather_than_emptying_one():
+    """An ASCII run longer than half a slice: a model code, a handle, a URL
+    slug the checkpoint copied through. Keeping it whole would walk the
+    boundary back to the run's start, leaving this slice empty and the next
+    one carrying the rest of the text, which no part count in `fit_message`'s
+    2..16 search can then fit. Both languages have to keep advancing
+    together, so the run is cut instead.
+    """
+    ja = "これはテスト" + "a1b2c3d4e5" * 30 + "これはテスト"
+    es = (
+        "Hola, esto es una prueba de traduccion bastante larga para llenar "
+        "la caja de texto del chat de VRChat sin problemas."
+    )
+
+    for n in (2, 3, 4):
+        slices = _balanced_slices(ja, n, CHATBOX_LIMIT)
+        assert "".join(slices) == ja
+        assert all(slices), f"n={n} collapsed a slice: {[len(s) for s in slices]}"
+
+    parts = fit_message("", [("JA", ja), ("ES", es)], make_cfg())
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+    # Every part carries a line of each language, not a run of one then the
+    # other: the reader of either sees something in the first part.
+    assert all(len(part.split("\n")) == 2 for part in parts), parts
+
+
+def test_no_part_line_opens_or_closes_on_the_stray_space():
+    """The per-word routing guard sends a translation carrying one stray
+    ASCII space down the character path, where nothing forbids a boundary
+    on or after that space. Stripping the assembled part only reaches its
+    outermost ends, so a slice opening on the space would ship as an
+    indented translation line under the original.
+    """
+    original = " ".join(f"word{i}" for i in range(40))
+    translation = "あ" * 50 + "! " + "い" * 100
+
+    parts = fit_message(original, [("JA", translation)], make_cfg())
+
+    assert len(parts) > 1
+    for part in parts:
+        for line in part.split("\n"):
+            assert line == line.strip(), f"padded line {line!r} in {part!r}"
+
 
 # -- a caption with no translation: the character path still snaps ----------
 
@@ -152,11 +208,60 @@ def test_fit_message_snaps_a_caption_sent_without_any_translation():
     assert all(len(part) <= CHATBOX_LIMIT for part in parts)
 
 
+def test_settle_snaps_the_original_even_when_every_translation_repeats():
+    # Anchoring has nothing to move when every translation is repeated
+    # whole, but the ORIGINAL is never one of the repeated texts: its own
+    # cuts still want snapping in that shape.
+    cfg = make_cfg()
+    original = "あ" * 35 + "。" + "い" * 44
+    texts = [original, "OK"]
+    translated = [False, True]
+
+    plain = _join(texts, translated, {1}, 2, cfg)
+    settled = _settle(texts, translated, {1}, 2, cfg, plain)
+
+    assert settled != plain
+    assert settled[0].split("\n")[0].endswith("。")
+    assert not plain[0].split("\n")[0].endswith("。")
+
+
+def test_snap_windows_keep_the_slice_between_two_cuts_at_half_a_share():
+    # Measured from the grid alone, the two clause marks here pull the cuts
+    # to 41 and 51 and leave a 10-character middle slice. The window opens
+    # no nearer than half a slice (15) past the previous cut, so the second
+    # mark is out of reach and the middle slice keeps its share.
+    original = "あ" * 40 + "。" + "い" * 9 + "、" + "う" * 39
+    size = -(-len(original) // 3)
+
+    slices = _balanced_slices(original, 3, CHATBOX_LIMIT, snap=True)
+
+    assert [len(s) for s in slices] == [41, 19, 30]
+    assert slices[0].endswith("。")
+    assert min(len(s) for s in slices) >= size // 2
+    assert "".join(slices) == original
+
+
+def test_snap_windows_keep_a_translation_slice_from_collapsing_to_a_mark():
+    # Two marks two characters apart, one per window: measured from the grid
+    # both would be taken and the middle slice would be the two characters
+    # between them, shipped as a part whose translation line reads "中。".
+    cfg = make_cfg()
+    original = " ".join(f"word{i}" for i in range(36))
+    translation = "中" * 60 + "。" + "中" + "。" + "中" * 60
+
+    parts = fit_message(original, [("ZH", translation)], cfg)
+
+    lines = [part.split("\n")[-1] for part in parts]
+    assert len(parts) == 3
+    assert min(len(line) for line in lines) >= 20
+    assert "".join(lines) == translation
+
+
 def test_settle_snaps_when_nothing_in_the_message_is_translated():
-    """The skip is keyed on every translation already being repeated whole,
-    which is vacuously satisfied when there are no translations at all.
-    Called at the shape `fit_message` builds for a caption-only message,
-    `_settle` must return a snapped arrangement rather than its argument.
+    """With no translations there is nothing to anchor, and the snapped
+    arrangement alone is tried. Called at the shape `fit_message` builds for
+    a caption-only message, `_settle` must return that arrangement rather
+    than its argument.
     """
     cfg = make_cfg()
     texts = [_CAPTION_ONLY_JA]

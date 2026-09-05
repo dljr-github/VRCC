@@ -221,3 +221,36 @@ def test_latin_inside_a_quote_keeps_the_mark_ascii():
     assert normalize('他说"OK",然后走了.', get("Chinese Simplified")) == (
         '他说"OK",然后走了。'
     )
+
+
+def test_mark_right_after_an_opening_bracket_does_not_convert():
+    # The bracket has just opened: there is nothing before the mark for it
+    # to attach to, even though an opener falls inside the CJK punctuation
+    # block that is_cjk otherwise treats as a valid anchor.
+    text = "「.」"
+    assert normalize(text, get("Japanese")) == text
+
+
+def test_mark_inside_a_closer_converts_whatever_follows_the_closer():
+    # The doubling rule stops at the closer: a mark on the far side of 」
+    # sits outside the quote, so the one inside still converts. The outer
+    # ASCII period anchors, through the closer, on an ASCII period, which is
+    # no CJK character, and stays as it was.
+    assert normalize("です.」。", get("Japanese")) == "です。」。"
+    assert normalize("です.」.", get("Japanese")) == "です。」."
+
+
+def test_a_mark_after_any_cjk_closer_anchors_on_what_it_closes():
+    # Every closing bracket is transparent, not only the six the checkpoints
+    # usually emit: the anchor is the character inside, whichever bracket.
+    assert normalize("他说〖OK〗.", get("Chinese Simplified")) == "他说〖OK〗."
+    assert normalize("他说〖是〗.", get("Chinese Simplified")) == "他说〖是〗。"
+
+
+def test_hangul_compatibility_jamo_and_hangul_syllable_both_leave_the_mark_ascii():
+    # Korean is absent from _MARKS, so neither anchors a conversion; before
+    # is_cjk excluded Hangul Compatibility Jamo, the jamo case converted
+    # while the syllable case did not, splitting one script across the
+    # predicate. Both are unchanged now.
+    assert normalize("ㄱ.", get("Japanese")) == "ㄱ."
+    assert normalize("가.", get("Japanese")) == "가."

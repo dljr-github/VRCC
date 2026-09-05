@@ -10,7 +10,7 @@ needs is decided in :mod:`vrcc.osc.chatbox_format`, which calls in here.
 from __future__ import annotations
 
 from vrcc.core.config import OscConfig
-from vrcc.osc.linebreak import choose_cut, is_spaceless, safe_cut
+from vrcc.osc.linebreak import choose_cut, is_spaceless, slice_cut
 
 CHATBOX_LIMIT = 144
 
@@ -23,27 +23,34 @@ def _balanced_slices(
     Word-based whenever every word fits `limit` AND no word is both
     spaceless-script and over its per-slice share (`limit // n`), each slice
     taking whole words greedily toward a remaining-length/remaining-slices
-    target. Otherwise character-based ceil-division, whose concatenation
-    reproduces `text` exactly. Callers drop empty slices.
+    target. Otherwise character-based ceil-division, each boundary backed off
+    an attached character and out of any ASCII word it would sever
+    (`linebreak.slice_cut`), whose concatenation reproduces `text` exactly.
+    Callers drop empty slices.
 
     Fewer words than slices leaves blanks, per `anchor`: ``"start"`` puts
     them last, ``"end"`` first so a short text still reaches the final part.
 
     `snap` only changes the character path: each ceil-division boundary is
     nudged with `linebreak.choose_cut` to the nearest clause mark within
-    half a slice either way, so a slice spanning two chosen cuts can reach
-    `size + 2 * (size // 2)`, a structural bound rather than an empirical
-    one. One 98,924-slice corpus (n=2, n=3, 60-220 chars, clause marks
-    every 6-28) measured roughly 300 slices over 1.5x their share and none
-    collapsed. The word path ignores `snap`: a word boundary reads right.
+    half a slice of its grid position, and never nearer than half a slice to
+    the cut before it, so no interior slice falls under half its share or
+    over twice it, property-checked over generated text by
+    `tests.test_chatbox_split.test_snap_keeps_interior_slices_within_half_to_double_share`.
+    The word path ignores `snap`: a word boundary reads right.
     """
     words = text.split()
     # A spaceless run inside its per-part share travels better whole, which
     # _assemble already does. Checked per WORD: a translation carrying one
     # stray ASCII space (normalize leaves `!` and `?` alone) still holds a
-    # spaceless word over its share. Korean stays on the word path on the
-    # length half; is_spaceless is true of a hangul run like any other.
-    spaceless = any(is_spaceless(word) and len(word) > limit // n for word in words)
+    # spaceless word over its share. Korean stays on the word path however
+    # long a token runs: hangul is not an unspaced script, so is_spaceless
+    # is false of it (see linebreak.is_spaceless).
+    # Length first: it is a C-level int compare where is_spaceless is a
+    # Python scan of every character, and this runs on every word of every
+    # text on every part count the search tries.
+    share = limit // n
+    spaceless = any(len(word) > share and is_spaceless(word) for word in words)
     if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []
         idx = 0
@@ -73,15 +80,26 @@ def _balanced_slices(
     for i in range(1, n):
         ideal = min(i * size, len(text))
         if snap:
-            # bounds[-1] + 1, not bounds[-1]: floor is an inclusive candidate,
-            # so the window's only clause mark could be the previous boundary
-            # itself, handed back unchanged and collapsing this slice.
+            # The floor is the previous cut plus one (an inclusive candidate
+            # handed back unchanged would collapse this slice), and the window
+            # opens no nearer than half a slice past that cut: measured from
+            # the grid alone, two cuts drawn toward the same marks leave a few
+            # characters between them.
             cut = choose_cut(
-                text, ideal, bounds[-1] + 1, ideal - size // 2, ideal + size // 2
+                text,
+                ideal,
+                bounds[-1] + 1,
+                max(ideal - size // 2, bounds[-1] + size // 2),
+                ideal + size // 2,
             )
         else:
-            cut = safe_cut(text, ideal)
-        # safe_cut does not honor floor, and both paths need bounds monotonic.
+            # Same lower bound the snapped window opens at: a Latin run
+            # wider than half a slice is severed rather than kept whole,
+            # since walking to its start would empty this slice and hand the
+            # rest of the text to the next one.
+            cut = slice_cut(text, ideal, max(bounds[-1], ideal - size // 2))
+        # Neither path is asked to honor the previous bound below its own
+        # floor, and both need bounds monotonic.
         bounds.append(max(cut, bounds[-1]))
     bounds.append(len(text))
     return [text[bounds[i] : bounds[i + 1]] for i in range(n)]
@@ -120,7 +138,11 @@ def _join(
             texts[i] if i in repeated else sliced[i][slot]
             for i in range(len(texts))
         ]
-        part = cfg.translation_separator.join(p for p in pieces if p).strip()
+        # Stripped per piece, not once over the join: a character-path slice
+        # can open or close on the stray ASCII space a translation carries,
+        # and inside a separator that space ships as an indented line.
+        pieces = [piece.strip() for piece in pieces]
+        part = cfg.translation_separator.join(p for p in pieces if p)
         if part:
             parts.append(part)
     return parts
@@ -150,14 +172,15 @@ def _assemble(
         (i for i, is_tr in enumerate(translated) if is_tr), key=lambda i: len(texts[i])
     )
     repeated: set[int] = set()
+    parts: list[str] | None = None
     for i in order:
         candidate = repeated | {i}
-        if all(
-            len(part) <= CHATBOX_LIMIT
-            for part in _join(texts, translated, candidate, n, cfg)
-        ):
-            repeated = candidate
-    return _join(texts, translated, repeated, n, cfg), repeated
+        grown = _join(texts, translated, candidate, n, cfg)
+        if all(len(part) <= CHATBOX_LIMIT for part in grown):
+            repeated, parts = candidate, grown
+    if parts is None:
+        parts = _join(texts, translated, repeated, n, cfg)
+    return parts, repeated
 
 
 def _settle(
@@ -177,16 +200,14 @@ def _settle(
     settled and only when every part still fits, so the search keeps seeing
     the plain ceil-division sizes `fit_message`'s delivery numbers describe.
 
-    Returns `parts` untouched only when a translation exists and every one is
-    repeated whole. A caption with NO translations reaches the loop instead,
-    its original still a spaceless run whose cuts want snapping: an ordinary
-    mode, since `pipeline_send.safe_submit` takes an empty translation list
-    from five call sites, translation switched off among them."""
-    if any(translated) and all(
-        i in repeated for i, is_tr in enumerate(translated) if is_tr
-    ):
-        return parts
-    for anchored, snap in ((True, True), (True, False), (False, True)):
+    Anchoring has nothing to move when every translation is repeated whole,
+    or when there are none (a caption with translation off is an ordinary
+    shape: `pipeline_send.safe_submit` takes an empty translation list from
+    five call sites). The ORIGINAL is never repeated, so its cuts still want
+    snapping in both, and the snapped arrangement alone is tried there."""
+    movable = any(is_tr and i not in repeated for i, is_tr in enumerate(translated))
+    attempts = ((True, True), (True, False), (False, True)) if movable else ((False, True),)
+    for anchored, snap in attempts:
         candidate = _join(
             texts, translated, repeated, n, cfg, anchored=anchored, snap=snap
         )
