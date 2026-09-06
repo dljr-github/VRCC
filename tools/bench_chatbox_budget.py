@@ -1,5 +1,6 @@
 """Measure how much of each target language survives the 144-char chatbox in
-"truncate" mode, for every ordering of the targets.
+"truncate" mode, for every ordering of the targets, and how often "split"
+mode ships a part carrying none of the translation at all.
 
 Run from the repo root:
 
@@ -12,7 +13,10 @@ beside the working tree's, which is how the before/after numbers in the
 chatbox budget commits were produced.
 
 The fixtures are imported from `tests/test_chatbox_budget.py` rather than
-copied, so the numbers here always describe the strings the tests pin.
+copied, so the numbers here always describe the strings the tests pin. The
+split-mode corpus sweeps lengths built from those same fixtures (JA repeated
+to a target length, ORIGINAL's own words cycled to a target count) rather
+than inventing prose, for the same reason.
 """
 
 from __future__ import annotations
@@ -186,6 +190,90 @@ def _report(module, label: str) -> None:
         print(f"  {' > '.join(n for n, _ in ordering):<12} {cells}{flag}")
 
 
+# Word count and JA character count swept to build the split-mode corpus.
+# Wide enough to carry a message from one part out to five, which is where
+# a JA translation stops being cheap enough to repeat whole in every part
+# (vrcc.osc.chatbox_slice._assemble) yet is still short enough per part that
+# _balanced_slices takes its word path instead of cutting it by character.
+_SPLIT_WORD_COUNTS = range(1, 121)
+_SPLIT_CHAR_COUNTS = range(1, 116)
+
+
+def _sized_original(word_count: int) -> str:
+    """`word_count` words, cycling ORIGINAL's own vocabulary rather than
+    inventing any: a length past `len(ORIGINAL.split())` just repeats it."""
+    words = ORIGINAL.split()
+    cycle = words * (word_count // len(words) + 1)
+    return " ".join(cycle[:word_count])
+
+
+def _sized_translation(char_count: int) -> str:
+    """`char_count` characters of JA repeated whole and cut to length. JA
+    carries no whitespace, so every length here stays the one word
+    `_balanced_slices` sees, the same as the pinned fixture itself."""
+    reps = char_count // len(JA) + 1
+    return (JA * reps)[:char_count]
+
+
+def _split_corpus() -> list[tuple[str, str]]:
+    """Every (original, JA translation) pair the split-mode measurement
+    covers: JA and ORIGINAL don't share a character, so a line detected as
+    carrying the translation can only be a real slice of it, never a
+    coincidental match against the original."""
+    return [
+        (_sized_original(wc), _sized_translation(cc))
+        for wc in _SPLIT_WORD_COUNTS
+        for cc in _SPLIT_CHAR_COUNTS
+    ]
+
+
+def _carries_translation(part: str, translation: str, separator: str) -> bool:
+    """Whether `part` holds any piece of `translation`.
+
+    A part in split mode is one slice of the translation, not the whole
+    string, so testing `translation in part` (or the reverse) is the wrong
+    direction. Splitting on the separator and asking whether a resulting
+    line is itself a substring of `translation` reads correctly whether that
+    line is a whole repeat, a character slice, or a word-packed fragment."""
+    return any(line and line in translation for line in part.split(separator))
+
+
+def _split_report(module, label: str) -> None:
+    """Over `_split_corpus()`, how often "split" mode ships a message with a
+    part that carries no piece of the translation at all: the defect in
+    `_balanced_slices`'s word path, where a spaceless single-token
+    translation that `_assemble` could not repeat whole is dumped entirely
+    into one slice and leaves the others silent."""
+    cfg = OscConfig(overflow="split")
+    corpus = _split_corpus()
+    total = len(corpus)
+    multipart = 0
+    total_parts = 0
+    silent = 0
+    silent_by_n: dict[int, int] = {}
+    for original, translation in corpus:
+        parts = module.fit_message(original, [("JA", translation)], cfg)
+        total_parts += len(parts)
+        if len(parts) > 1:
+            multipart += 1
+        dropped = not all(
+            _carries_translation(part, translation, cfg.translation_separator)
+            for part in parts
+        )
+        if dropped:
+            silent += 1
+            silent_by_n[len(parts)] = silent_by_n.get(len(parts), 0) + 1
+
+    print(f"\nsplit mode, {label}  ({total} messages, JA x ORIGINAL cross)")
+    print(f"  multi-part: {multipart}/{total}")
+    print(f"  parts produced: {total_parts}")
+    pct = 100 * silent / total
+    print(f"  shipped a silent part: {silent}/{total}  ({pct:.2f}%)")
+    if silent_by_n:
+        by_n = ", ".join(f"n={n}:{count}" for n, count in sorted(silent_by_n.items()))
+        print(f"    by part count  {by_n}")
+
+
 def _policies() -> None:
     """What each way of dividing the limit gives the fixture trio."""
     from vrcc.osc.chatbox_format import CHATBOX_LIMIT, _share_limit
@@ -231,10 +319,14 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.against:
-        _report(_load_module_from_ref(args.against), f"as of {args.against}")
+        ref_module = _load_module_from_ref(args.against)
+        ref_label = f"as of {args.against}"
+        _report(ref_module, ref_label)
+        _split_report(ref_module, ref_label)
     from vrcc.osc import chatbox_format
 
     _report(chatbox_format, "working tree")
+    _split_report(chatbox_format, "working tree")
     if args.policies:
         _policies()
 
