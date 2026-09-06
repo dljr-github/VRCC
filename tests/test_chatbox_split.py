@@ -355,8 +355,8 @@ def test_snap_keeps_interior_slices_within_half_to_double_share():
         text = _clause_marked_text(rng, length)
         n = rng.randint(2, 6)
         share = -(-len(text) // n)  # ceil division, same as _balanced_slices' size
-        if len(text) <= share:
-            continue  # routes to the word path instead; snap never touches it
+        if max(len(w) for w in text.split()) <= CHATBOX_LIMIT // n:
+            continue  # word-packed, not character-sliced: snap never touches it
         slices = _balanced_slices(text, n, CHATBOX_LIMIT, snap=True)
         assert len(slices) == n
         assert "".join(slices) == text

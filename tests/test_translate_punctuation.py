@@ -254,3 +254,13 @@ def test_hangul_compatibility_jamo_and_hangul_syllable_both_leave_the_mark_ascii
     # predicate. Both are unchanged now.
     assert normalize("ㄱ.", get("Japanese")) == "ㄱ."
     assert normalize("가.", get("Japanese")) == "가."
+
+
+def test_a_mark_beside_a_different_ascii_mark_is_left_alone():
+    # The neighbour test covers any ASCII mark, not only a repeat of the same
+    # one. Converting the first and absorbing the space between them puts an
+    # ideographic glyph straight onto an unconverted ASCII one, which is the
+    # doubling the neighbour test exists to prevent.
+    assert normalize("中. ,", get("Japanese")) == "中. ,"
+    assert normalize("中, .", get("Japanese")) == "中, ."
+    assert normalize("中.,", get("Chinese Simplified")) == "中.,"

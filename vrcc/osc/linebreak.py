@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import unicodedata
 
-from vrcc.core.charclass import is_cjk, is_closer, is_opener
+from vrcc.core.charclass import anchor, is_cjk, is_closer, is_opener
 
 # Terminators, their halfwidth forms, and the ellipsis. A cut is welcome
 # right after one, so none may lead the line it would otherwise end.
@@ -144,9 +144,7 @@ def _legal(text: str, i: int) -> bool:
 def _ends_clause(text: str, i: int) -> bool:
     """Whether cutting before `i` lands right after a clause mark, looking
     back through any run of closers the mark might sit behind."""
-    j = i - 1
-    while j >= 0 and is_closer(text[j]):
-        j -= 1
+    j = anchor(text, i)
     return j >= 0 and text[j] in _BREAK_AFTER
 
 
@@ -170,13 +168,23 @@ def choose_cut(text: str, index: int, floor: int, lo: int, hi: int) -> int:
     ceiling = len(text) - 2
     lo = max(lo, floor)
     hi = min(hi, ceiling)
-    if lo <= hi:
-        clause = [
-            i for i in range(lo, hi + 1) if _ends_clause(text, i) and _legal(text, i)
-        ]
-        if clause:
-            return min(clause, key=lambda i: abs(i - index))
-    start = min(index, ceiling)
+    if lo > hi:
+        # The window closed above the terminal clamp, so no position satisfies
+        # both. `floor` is the only bound left that the caller depends on, and
+        # answering above it would put the boundary past the text.
+        return floor
+    # `_legal` first: it is pointwise, and it already refuses every closer,
+    # so it short-circuits the unbounded backward walk `_ends_clause` would
+    # otherwise run at every position of a long run of quotes or brackets.
+    clause = [
+        i for i in range(lo, hi + 1) if _legal(text, i) and _ends_clause(text, i)
+    ]
+    if clause:
+        return min(clause, key=lambda i: abs(i - index))
+    # Clamped to `hi`, not just to `ceiling`: an `index` above the window
+    # would start the backward walk outside it and hand back a boundary the
+    # caller's size bound never allowed for.
+    start = min(index, hi)
     # Bounded by `lo`, not `floor`: a long ASCII run makes every interior
     # position illegal, and a walk that ran to `floor` would escape the
     # caller's window entirely and hand back a boundary half a text away.

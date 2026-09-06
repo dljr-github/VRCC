@@ -206,8 +206,8 @@ def _settle(
     five call sites). The ORIGINAL is never repeated, so its cuts still want
     snapping in both, and the snapped arrangement alone is tried there."""
     movable = any(is_tr and i not in repeated for i, is_tr in enumerate(translated))
-    attempts = ((True, True), (True, False), (False, True)) if movable else ((False, True),)
-    for anchored, snap in attempts:
+    anchoring = [(True, True), (True, False)] if movable else []
+    for anchored, snap in [*anchoring, (False, True)]:
         candidate = _join(
             texts, translated, repeated, n, cfg, anchored=anchored, snap=snap
         )

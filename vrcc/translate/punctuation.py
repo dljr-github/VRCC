@@ -15,7 +15,7 @@ already holds.
 
 from __future__ import annotations
 
-from vrcc.core.charclass import is_cjk, is_closer, is_opener
+from vrcc.core.charclass import anchor, is_cjk, is_opener
 from vrcc.core.languages import Language
 
 # Per-script mapping for the ASCII '.' and ',' the checkpoints emit, keyed on
@@ -36,36 +36,27 @@ _MARKS: dict[str, dict[str, str]] = {
 _ALREADY = "\u3002\u3001\uFF0C\uFF0E\uFF61\uFF64"
 
 
-def _anchor(text: str, i: int) -> int:
-    """Index of the character the mark at ``text[i]`` attaches to, looking
-    through any run of closing brackets and quotes (they carry no script of
-    their own, so a terminator after one is judged on what the bracket
-    closes over), or -1 if there is none."""
-    j = i - 1
-    while j >= 0 and is_closer(text[j]):
-        j -= 1
-    return j
-
-
 def _should_convert(text: str, i: int) -> bool:
     """True if the mark at ``text[i]`` converts, judged only against the
     ORIGINAL ``text`` so the walk never reads its own output.
 
     A period followed by an ASCII letter or digit is a file extension or a
-    domain label, not a sentence end. A repeated mark is left alone, an ASCII
-    ellipsis reading better than three ideographic stops; that test looks past
-    one space, since :func:`normalize` absorbs the space and the converted
-    stop would then land against the ellipsis. An opening bracket anchors
-    nothing: it has opened, not closed. The last test, the anchor being CJK,
-    is what leaves decimals, ``e.g.`` and URLs alone."""
+    domain label, not a sentence end. A mark standing next to another one is
+    left alone: an ASCII ellipsis reads better than three ideographic stops,
+    and a converted glyph beside an unconverted neighbour reads as a mix of
+    conventions. That test looks past one space, since :func:`normalize`
+    absorbs the space and the converted mark would then land against its
+    neighbour. An opening bracket anchors nothing: it has opened, not closed.
+    The last test, the anchor being CJK, is what leaves decimals, ``e.g.``
+    and URLs alone."""
     mark = text[i]
     if i + 1 < len(text):
         if mark == "." and text[i + 1].isascii() and text[i + 1].isalnum():
             return False
         k = i + 2 if text[i + 1] == " " else i + 1
-        if k < len(text) and (text[k] == mark or text[k] in _ALREADY):
+        if k < len(text) and (text[k] in ".," or text[k] in _ALREADY):
             return False
-    j = _anchor(text, i)
+    j = anchor(text, i)
     if j < 0 or text[j] in _ALREADY or is_opener(text[j]):
         return False
     return is_cjk(text[j])

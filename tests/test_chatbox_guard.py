@@ -112,13 +112,23 @@ def test_balanced_slices_plain_path_does_not_sever_a_latin_word_in_mixed_text():
     # The plain (snap=False) path is what _assemble sizes every part count
     # with, and it ships whenever _settle finds no snapped candidate that
     # fits, so it has to keep a Latin island whole on its own.
+    #
+    # Routing is on the longest word against CHATBOX_LIMIT // n, so the
+    # 35-character CJK run only clears its share from n=5 up: below that the
+    # word packer runs and keeps "without" whole for free. The reconstruction
+    # is asserted against the path each n actually takes, not as a disjunction
+    # that either one satisfies.
     cjk1 = "四方山話ですが"
     cjk2 = "何とかかんとか"
     text = cjk1 * 5 + " without " + cjk2 * 3
+    character_path = range(5, 7)
 
     for n in range(2, 7):
         slices = _balanced_slices(text, n, CHATBOX_LIMIT)
-        assert "".join(s for s in slices) == text or " ".join(s for s in slices if s) == text
+        if n in character_path:
+            assert "".join(slices) == text, f"n={n} lost characters: {slices!r}"
+        else:
+            assert " ".join(s for s in slices if s) == text, f"n={n}: {slices!r}"
         assert any("without" in s for s in slices), f"n={n} severed the word: {slices!r}"
 
 
@@ -191,9 +201,11 @@ def test_fit_message_snaps_a_caption_sent_without_any_translation():
     all of them, and `_settle` has to snap that arrangement like any other.
 
     This 161-character caption divides into two 81/80 slices, and the raw
-    ceil-division boundary at 81 lands between \u30B1 and its prolonged sound
-    mark \u30FC, which may never begin a line. Snapping moves it one back,
-    onto the \u3002 at index 80.
+    ceil-division boundary at 81 lands between \u30B1 (index 80) and its
+    prolonged sound mark \u30FC (index 81), which may never begin a line.
+    Snapping moves the cut one back, to 80, which is the position right
+    after the \u3002 at index 79: a clause boundary, so `choose_cut` takes it
+    from the clause scan rather than from the `_legal` walk.
     """
     cfg = make_cfg()
 

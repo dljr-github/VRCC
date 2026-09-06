@@ -63,3 +63,14 @@ def is_opener(ch: str) -> bool:
 def is_closer(ch: str) -> bool:
     """A closing bracket or quote, in any script."""
     return ch in _ASCII_QUOTES or unicodedata.category(ch) in ("Pe", "Pf")
+
+
+def anchor(text: str, i: int) -> int:
+    """Index of the character ``text[i]`` attaches backward to, looking
+    through any run of closing brackets and quotes, or -1 if there is none.
+    A closer carries no script of its own, so what it closes over is what
+    decides both whether a mark converts and whether a cut ends a clause."""
+    j = i - 1
+    while j >= 0 and is_closer(text[j]):
+        j -= 1
+    return j
