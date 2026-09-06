@@ -8,7 +8,14 @@ threads.
 from __future__ import annotations
 
 from vrcc.core.config import OscConfig
-from vrcc.osc.chatbox_slice import CHATBOX_LIMIT, _assemble, _settle
+from vrcc.osc.chatbox_slice import (
+    CHATBOX_LIMIT,
+    _assemble,
+    _covers_translations,
+    _join,
+    _lone_spaceless_run_fits_a_share,
+    _settle,
+)
 from vrcc.osc.linebreak import safe_cut
 
 # CHATBOX_LIMIT lives in chatbox_slice.py (arranging n parts across
@@ -221,6 +228,48 @@ def fit_message(
         parts, repeated = _assemble(texts, translated, n, cfg)
         if not (parts and all(len(part) <= CHATBOX_LIMIT for part in parts)):
             continue
+        # A part carrying none of a translation is worse than one more part,
+        # so a count that ships one is not a candidate at all: the search
+        # moves on to n+1, where the original's own share per part is
+        # smaller and a short translation that could not fit repeated here
+        # usually can there.
+        if not _covers_translations(texts, translated, repeated, n):
+            continue
+        # A lone spaceless translation that fits inside a part's share
+        # reads best repeated whole, not sliced into a few characters per
+        # part in every one: the same measured preference `_assemble`
+        # already applies within a count, just not yet across one. When
+        # repeating it would overflow even the first part here, this count
+        # can only ship it fragmented, so the search looks one part
+        # further before settling for that. Not capped at
+        # _MAX_REPEAT_PARTS: that ceiling weighs a marginal, optional extra
+        # part against a gain split across several translations, where
+        # this corrects one translation's worst arrangement rather than
+        # angling for a better one. Bounded by _MAX_MESSAGE_SLICES instead,
+        # and one part ahead only: a translation still unable to repeat at
+        # n+1 is no likelier to at n+2.
+        share_sized = [
+            i
+            for i, text in enumerate(texts)
+            if translated[i]
+            and i not in repeated
+            and _lone_spaceless_run_fits_a_share(text, n)
+        ]
+        cannot_repeat_here = any(
+            len(_join(texts, translated, repeated | {i}, n, cfg)[0]) > CHATBOX_LIMIT
+            for i in share_sized
+        )
+        if cannot_repeat_here and n + 1 <= _MAX_MESSAGE_SLICES:
+            grown, grown_repeated = _assemble(texts, translated, n + 1, cfg)
+            fits = (
+                grown
+                and all(len(part) <= CHATBOX_LIMIT for part in grown)
+                and _covers_translations(texts, translated, grown_repeated, n + 1)
+            )
+            if fits and grown_repeated:
+                return _settle(
+                    texts, translated, grown_repeated, n + 1, cfg, grown
+                )
         # One more part, never past the third, when the extra room lets a
         # translation travel whole that could not at this count. Measured, that
         # trade wins at one target (delivery 75% to 100%) and is what the
@@ -231,7 +280,11 @@ def fit_message(
         # would be thrown away.
         if n + 1 <= _MAX_REPEAT_PARTS and len(repeated) < sum(translated):
             grown, grown_repeated = _assemble(texts, translated, n + 1, cfg)
-            fits = grown and all(len(part) <= CHATBOX_LIMIT for part in grown)
+            fits = (
+                grown
+                and all(len(part) <= CHATBOX_LIMIT for part in grown)
+                and _covers_translations(texts, translated, grown_repeated, n + 1)
+            )
             if fits and len(grown_repeated) > len(repeated):
                 return _settle(
                     texts, translated, grown_repeated, n + 1, cfg, grown

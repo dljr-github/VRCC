@@ -9,12 +9,15 @@ Latin word once mixed Latin/CJK text is routed onto it.
 
 from __future__ import annotations
 
+from tests.test_chatbox_budget import JA, ORIGINAL
 from tests.test_chatbox_overflow import make_cfg
 from vrcc.osc.chatbox import fit_message
 from vrcc.osc.chatbox_slice import (
     CHATBOX_LIMIT,
     _balanced_slices,
+    _covers_translations,
     _join,
+    _lone_spaceless_run_fits_a_share,
     _settle,
 )
 
@@ -284,3 +287,88 @@ def test_settle_snaps_when_nothing_in_the_message_is_translated():
 
     assert [len(part) for part in plain] == [81, 80]
     assert [len(part) for part in settled] == [80, 81]
+
+
+# -- routing: a lone spaceless translation spreads across every slice -------
+
+
+def test_balanced_slices_lone_spaceless_word_spreads_across_every_slice():
+    """A single spaceless-script token short enough to sit inside a part's
+    share (`CHATBOX_LIMIT // n`) still has to spread across every slice. The
+    word path has nothing to distribute a ONE-word list across, so it piles
+    the whole run into the first slice and leaves the rest empty:
+    `_balanced_slices("中" * 46, 3, 144)` as `[46, 0, 0]`. `_join` calls here
+    only for a text `_assemble` did NOT repeat, so nothing else is carrying
+    that text across the parts."""
+    text = "中" * 46
+
+    start = _balanced_slices(text, 3, CHATBOX_LIMIT)
+    end = _balanced_slices(text, 3, CHATBOX_LIMIT, anchor="end")
+
+    assert all(start), f"a slice collapsed to empty: {start!r}"
+    assert all(end), f"a slice collapsed to empty: {end!r}"
+    assert "".join(start) == text
+    assert "".join(end) == text
+
+
+def test_lone_spaceless_run_fits_a_share_true_only_for_a_single_token_within_it():
+    assert _lone_spaceless_run_fits_a_share("中" * 46, 3)  # 46 <= 144 // 3
+    assert not _lone_spaceless_run_fits_a_share("中" * 50, 3)  # 50 > 48
+    assert not _lone_spaceless_run_fits_a_share("word0 word1", 3)  # not lone
+    assert not _lone_spaceless_run_fits_a_share("word0", 3)  # not spaceless
+
+
+# -- search: growing the part count when nothing else covers every part -----
+
+
+def test_covers_translations_flags_a_translation_too_short_to_fill_every_part():
+    """A translation with fewer characters than parts cannot reach every
+    slot by slicing, however it is distributed: three characters over four
+    parts leaves one part with none of it. Spreading cannot answer this
+    shape, since there is nothing left to give the empty part."""
+    texts = ["word0 word1 word2 word3", "中中中"]
+    translated = [False, True]
+
+    assert not _covers_translations(texts, translated, set(), 4)
+    assert _covers_translations(texts, translated, set(), 3)
+
+
+def test_fit_message_split_grows_a_part_count_for_a_translation_too_short_to_slice():
+    """Defect B: a translation too short to reach every part by slicing, and
+    which does not fit repeated at the part count the raw message length
+    estimates. The search must not settle for that count with the
+    translation silent from most of it; it grows until repeating fits,
+    which happens once the original's own share per part has shrunk enough
+    to leave room."""
+    cfg = make_cfg(overflow="split")
+    original = " ".join(f"word{i}" for i in range(153))
+    translation = "中"
+
+    parts = fit_message(original, [("ZH", translation)], cfg)
+
+    assert len(parts) == 9
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+    assert all(translation in part for part in parts)
+
+
+def test_fit_message_split_keeps_its_part_count_when_a_share_sized_run_spreads():
+    """A share-sized spaceless translation that spreads across every part at
+    this count needs no extra one. Repeating it whole would fit here as well,
+    so nothing forces the search further, and a count that already carries a
+    piece of every translation in every part is the cheaper answer. `ORIGINAL`
+    and `JA` are the fixtures `tools/bench_chatbox_budget.py` sweeps; wc=61,
+    cc=47 is one of the messages that tool reports covered at this count
+    rather than a larger one.
+    """
+    cfg = make_cfg(overflow="split")
+    words = ORIGINAL.split()
+    original = " ".join((words * (61 // len(words) + 1))[:61])
+    translation = (JA * (47 // len(JA) + 1))[:47]
+
+    parts = fit_message(original, [("JA", translation)], cfg)
+
+    assert len(parts) == 3
+    assert all(len(part) <= CHATBOX_LIMIT for part in parts)
+    translation_lines = [part.split("\n")[-1] for part in parts]
+    assert all(translation_lines), f"a part shipped silent: {parts!r}"
+    assert "".join(translation_lines) == translation
