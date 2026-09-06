@@ -40,17 +40,25 @@ def _balanced_slices(
     The word path ignores `snap`: a word boundary reads right.
     """
     words = text.split()
-    # A spaceless run inside its per-part share travels better whole, which
-    # _assemble already does. Checked per WORD: a translation carrying one
-    # stray ASCII space (normalize leaves `!` and `?` alone) still holds a
-    # spaceless word over its share. Korean stays on the word path however
-    # long a token runs: hangul is not an unspaced script, so is_spaceless
-    # is false of it (see linebreak.is_spaceless).
+    # A spaceless run inside its per-part share travels better whole only
+    # when something else repeats that text across the parts this function
+    # never sees: _join calls in here for the texts NOT in `repeated`, so
+    # that premise is false whenever the run IS the whole text (one word
+    # from .split()). Such a lone run is always routed to the character path
+    # below instead, where its characters spread across every slice rather
+    # than piling into the first. Checked per WORD otherwise: a translation
+    # carrying one stray ASCII space (normalize leaves `!` and `?` alone)
+    # still holds a spaceless word over its share. Korean stays on the word
+    # path however long a token runs: hangul is not an unspaced script, so
+    # is_spaceless is false of it (see linebreak.is_spaceless).
     # Length first: it is a C-level int compare where is_spaceless is a
     # Python scan of every character, and this runs on every word of every
     # text on every part count the search tries.
     share = limit // n
-    spaceless = any(len(word) > share and is_spaceless(word) for word in words)
+    lone = len(words) == 1
+    spaceless = any(
+        (lone or len(word) > share) and is_spaceless(word) for word in words
+    )
     if words and not spaceless and all(len(word) <= limit for word in words):
         slices: list[str] = []
         idx = 0
@@ -105,16 +113,19 @@ def _balanced_slices(
     return [text[bounds[i] : bounds[i + 1]] for i in range(n)]
 
 
-def _join(
+def _slot_pieces(
     texts: list[str],
     translated: list[bool],
     repeated: set[int],
     n: int,
-    cfg: OscConfig,
     anchored: bool = False,
     snap: bool = False,
-) -> list[str]:
-    """`n` parts, with the `repeated` texts whole in each and the rest sliced.
+) -> list[list[str]]:
+    """Per slot 0..n-1, the piece each text in `texts` contributes there,
+    stripped: the whole text for an index in `repeated`, else that index's
+    slice at this slot. `_join` joins these into parts; `_covers_translations`
+    reads them before an all-empty slot is dropped, to see which text a
+    shipped part is still missing.
 
     ``anchored`` moves a sliced translation's content to the LAST parts;
     ``snap`` nudges each character-based boundary onto the nearest clause
@@ -132,20 +143,73 @@ def _join(
         for i, text in enumerate(texts)
         if i not in repeated
     }
-    parts = []
-    for slot in range(n):
-        pieces = [
-            texts[i] if i in repeated else sliced[i][slot]
+    return [
+        [
+            # Stripped per piece, not once over the join: a character-path
+            # slice can open or close on the stray ASCII space a translation
+            # carries, and inside a separator that space ships as an
+            # indented line.
+            (texts[i] if i in repeated else sliced[i][slot]).strip()
             for i in range(len(texts))
         ]
-        # Stripped per piece, not once over the join: a character-path slice
-        # can open or close on the stray ASCII space a translation carries,
-        # and inside a separator that space ships as an indented line.
-        pieces = [piece.strip() for piece in pieces]
+        for slot in range(n)
+    ]
+
+
+def _lone_spaceless_run_fits_a_share(text: str, n: int) -> bool:
+    """Whether `text` is a single spaceless-script token short enough to sit
+    inside one part's share (`CHATBOX_LIMIT // n`): the shape that reads
+    best repeated whole in every part rather than spread a few characters
+    at a time. `chatbox_format` uses this to single out a translation worth
+    spending an extra part on when repeating it does not fit at the
+    current count."""
+    words = text.split()
+    return (
+        len(words) == 1
+        and is_spaceless(words[0])
+        and len(words[0]) <= CHATBOX_LIMIT // n
+    )
+
+
+def _join(
+    texts: list[str],
+    translated: list[bool],
+    repeated: set[int],
+    n: int,
+    cfg: OscConfig,
+    anchored: bool = False,
+    snap: bool = False,
+) -> list[str]:
+    """`n` parts, with the `repeated` texts whole in each and the rest sliced.
+
+    ``anchored`` moves a sliced translation's content to the LAST parts;
+    ``snap`` nudges each character-based boundary onto the nearest clause
+    mark. Both default off while a part count is being judged, or a count
+    that only fits because of one of them would win over the larger one the
+    search would otherwise have picked."""
+    parts = []
+    for pieces in _slot_pieces(texts, translated, repeated, n, anchored, snap):
         part = cfg.translation_separator.join(p for p in pieces if p)
         if part:
             parts.append(part)
     return parts
+
+
+def _covers_translations(
+    texts: list[str], translated: list[bool], repeated: set[int], n: int
+) -> bool:
+    """Whether every part `_join` would actually ship at this arrangement
+    carries some piece of every translated text.
+
+    A slot where every text's piece is empty ships no part at all, so it is
+    skipped here the same way `_join` drops it; anything else missing a
+    translated text's piece would ship a part silent of it instead."""
+    for pieces in _slot_pieces(texts, translated, repeated, n):
+        if not any(pieces):
+            continue
+        if any(not piece for piece, is_tr in zip(pieces, translated) if is_tr):
+            return False
+    return True
 
 
 def _assemble(
