@@ -36,7 +36,11 @@ from vrcc.core.config import OscConfig  # noqa: E402
 
 TARGETS = [("ja", JA), ("es", ES), ("de", DE)]
 
-_REF_PACKAGE = "vrcc.osc."
+# Every module the shaping code reaches that decides how a text is cut.
+# `vrcc.core.charclass` is named rather than the whole `vrcc.core` package:
+# the harness builds the OscConfig it hands the ref's fit_message, so
+# `vrcc.core.config` has to stay the working tree's one type.
+_REF_PREFIXES = ("vrcc.osc.", "vrcc.core.charclass")
 
 
 def _resolve(ref: str) -> str:
@@ -77,8 +81,12 @@ def _git_show(commit: str, rel_path: str) -> str | None:
     ).stdout
 
 
+def _is_ref_module(fullname: str) -> bool:
+    return any(fullname.startswith(prefix) for prefix in _REF_PREFIXES)
+
+
 class _RefFinder(importlib.abc.MetaPathFinder):
-    """Serve every `vrcc.osc` import from `commit` while a ref's
+    """Serve every shaping import from `commit` while a ref's
     chatbox_format.py is being executed, whatever modules it reaches and in
     whatever order: a hand-kept list of them goes stale at the next split."""
 
@@ -87,12 +95,15 @@ class _RefFinder(importlib.abc.MetaPathFinder):
         self._dir = tmp_dir
 
     def find_spec(self, fullname, path, target=None):
-        if not fullname.startswith(_REF_PACKAGE):
+        if not _is_ref_module(fullname):
             return None
         source = _git_show(self._commit, fullname.replace(".", "/") + ".py")
         if source is None:
             return None
-        file = self._dir / f"{fullname.rpartition('.')[2]}_ref.py"
+        # Named for the full dotted path: two packages can hold a module of
+        # the same last segment, and the file backs a traceback's line
+        # numbers for the lifetime of the process.
+        file = self._dir / f"{fullname.replace('.', '_')}_ref.py"
         file.write_text(source, encoding="utf-8")
         return importlib.util.spec_from_file_location(fullname, file)
 
@@ -100,22 +111,21 @@ class _RefFinder(importlib.abc.MetaPathFinder):
 def _load_module_from_ref(ref: str):
     """Import `vrcc/osc/chatbox_format.py` as it exists at `ref`.
 
-    The working tree's `vrcc.osc` modules are evicted from `sys.modules` for
-    the duration and a finder serves the ref's copies in their place, so a
-    ref's chatbox_format cannot fall through to today's chatbox_slice or
-    linebreak and report a hybrid under the ref's label. Everything is
-    restored on exit, since `main()` imports the real modules afterwards in
-    the same process. The extracted sources outlive the call, so a traceback
-    inside the ref's code still shows its lines.
+    The working tree's shaping modules (`_REF_PREFIXES`) are evicted from
+    `sys.modules` for the duration and a finder serves the ref's copies in
+    their place, so a ref's chatbox_format cannot fall through to today's
+    chatbox_slice, linebreak or charclass and report a hybrid under the ref's
+    label. Everything is restored on exit, since `main()` imports the real
+    modules afterwards in the same process. The extracted sources outlive the
+    call, so a traceback inside the ref's code still shows its lines.
     """
     commit = _resolve(ref)
     tmp_dir = Path(tempfile.mkdtemp())
     atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
-    package = sys.modules["vrcc.osc"]
     evicted = {
         name: sys.modules.pop(name)
         for name in list(sys.modules)
-        if name.startswith(_REF_PACKAGE)
+        if _is_ref_module(name)
     }
     finder = _RefFinder(commit, tmp_dir)
     sys.meta_path.insert(0, finder)
@@ -131,12 +141,19 @@ def _load_module_from_ref(ref: str):
         return module
     finally:
         sys.meta_path.remove(finder)
-        for name in [n for n in sys.modules if n.startswith(_REF_PACKAGE)]:
+        # The parent package keeps an attribute per submodule alongside the
+        # sys.modules entry, so both have to be put back or a later
+        # `vrcc.osc.chatbox_slice` attribute lookup finds the ref's copy.
+        for name in [n for n in sys.modules if _is_ref_module(n)]:
             del sys.modules[name]
-            package.__dict__.pop(name.rpartition(".")[2], None)
+            parent, _, leaf = name.rpartition(".")
+            if parent in sys.modules:
+                sys.modules[parent].__dict__.pop(leaf, None)
         for name, module in evicted.items():
             sys.modules[name] = module
-            setattr(package, name.rpartition(".")[2], module)
+            parent, _, leaf = name.rpartition(".")
+            if parent in sys.modules:
+                setattr(sys.modules[parent], leaf, module)
 
 
 def _delivered(module, ordering) -> dict[str, int]:

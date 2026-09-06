@@ -392,3 +392,22 @@ def test_choose_cut_never_offers_the_last_character_as_a_cut():
     for index in range(len(text)):
         result = choose_cut(text, index=index, floor=0, lo=0, hi=len(text))
         assert result < len(text) - 1
+
+
+def test_choose_cut_never_answers_past_the_end_when_the_window_closes_high():
+    # A window that opens above the len(text) - 2 ceiling leaves no position
+    # satisfying both bounds. Answering from `lo` handed back an index past
+    # the end of the string, which `_balanced_slices` then read an empty tail
+    # slice out of. `floor` is the caller's own monotonic bound and the only
+    # answer that stays inside the text.
+    assert choose_cut("x" * 98, index=98, floor=97, lo=99, hi=101) == 97
+    assert choose_cut("aa", index=0, floor=0, lo=1, hi=1) == 0
+
+
+def test_choose_cut_backward_walk_starts_inside_the_window():
+    # The walk starts at min(index, hi), not min(index, ceiling): an index
+    # above the window would otherwise begin the scan outside it and return a
+    # boundary the caller's size bound never allowed for.
+    text = "ab" + "あ" * 8
+    assert _legal(text, 8) is True  # legal, but four positions above hi
+    assert choose_cut(text, index=9, floor=0, lo=2, hi=4) == 4
