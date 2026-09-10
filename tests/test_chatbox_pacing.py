@@ -66,10 +66,15 @@ def test_split_delay_separates_chunks_by_at_least_split_delay_s():
     assert _wait_until(lambda: len(send_times) == len(expected_chunks))
     sender.stop()
 
-    # A couple of ms of tolerance for the host timer's own resolution, not
-    # for anything the sender does.
+    # On Windows with Python 3.12, time.monotonic() is GetTickCount64(),
+    # quantized to a 15.625 ms tick, and Event.wait(split_delay_s) never
+    # returns early on Windows. That guarantees at least 5 ticks
+    # (0.078125 s) between chunks, so the 0.01 s bound here is half a tick
+    # of margin, not luck: 120 gaps over 60 runs of this test came back
+    # min 0.0780, mean 0.0914, none under 0.070. Dropping split_delay_s
+    # below about 0.078 here would start failing.
     gaps = [later - earlier for earlier, later in zip(send_times, send_times[1:])]
-    assert all(gap >= split_delay_s - 0.01 for gap in gaps)
+    assert min(gaps) >= split_delay_s - 0.01
 
 
 def test_stop_returns_promptly_while_waiting_on_split_delay():

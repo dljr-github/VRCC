@@ -306,9 +306,15 @@ class ChatboxSender:
 
     def _pop_next(self) -> tuple[str, int, bool, float] | None:
         with self._queue_lock:
-            if self._queue:
-                return self._queue.popleft()
-            return None
+            if not self._queue:
+                return None
+            # Cleared under the same lock as the pop, so a coalescing _enqueue
+            # either preempts this chunk's pause or lands after it. Never while
+            # stop is pending: stop() sets _stop_flag before _preempt, so seeing
+            # the flag here means its set is still to come and must survive.
+            if not self._stop_flag.is_set():
+                self._preempt.clear()
+            return self._queue.popleft()
 
     def _run(self) -> None:
         while not self._stop_flag.is_set():
@@ -317,9 +323,6 @@ class ChatboxSender:
                 self._wake.wait(timeout=_IDLE_POLL_S)
                 self._wake.clear()
                 continue
-            # Cleared before the token wait, not after: a preempt arriving
-            # during that wait must still gate THIS chunk's delay.
-            self._preempt.clear()
             if not self._wait_for_token():
                 continue  # stop requested while waiting; drop this item
             text, utterance_id, truncated, delay_after = item

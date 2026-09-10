@@ -88,11 +88,7 @@ def test_heard_rows_cannot_collide_with_a_real_utterance():
 
 
 def _dialog(tmp_path):
-    from vrcc.core.config import ConfigStore, default_paths
-    from vrcc.gui.settings import SettingsDialog
-
-    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
-    return SettingsDialog(store), store
+    return _dialog_with(tmp_path)
 
 
 def test_the_speaker_picker_is_usable_with_the_feature_off(qapp, tmp_path):
@@ -187,7 +183,7 @@ def test_the_language_warning_shows_for_a_model_that_cannot_report_it(
     try:
         assert dlg._hear_note.isVisibleTo(dlg)
         assert "graphics card" not in dlg._hear_note.text()
-        assert dlg._hear_note.text()
+        assert "cannot tell which language" in dlg._hear_note.text()
     finally:
         dlg.close()
         dlg.deleteLater()
