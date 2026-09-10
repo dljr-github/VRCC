@@ -13,8 +13,10 @@ codes) restricts a model to a language subset (``None`` = no restriction) and
 drives the Settings greying; ``auto_language`` is False for models that cannot
 detect the spoken language themselves (they transcribe as English unless told
 otherwise, so "auto" greys them out); ``reports_language`` is False for models
-that detect the language but cannot tell us which one they heard, which is a
-separate defect because it mislabels the translator's source.
+that detect the language but cannot tell us which one they heard: the main
+pipeline's "auto" source still tags every result "en" (a fallback the
+translator depends on), while the heard stream's detect_language path
+reports no language at all rather than guess one.
 """
 
 from __future__ import annotations
@@ -43,7 +45,9 @@ class WhisperSpec:
     # Whether the model detects the spoken language by itself ("auto" source).
     auto_language: bool = True
     # Whether it reports the language it detected, so the translator can be
-    # told the right source. False = detects but tags every result "en".
+    # told the right source. False = detects within its set but source ==
+    # "auto" still tags "en"; detect_language (the heard stream) reports
+    # None instead of guessing.
     reports_language: bool = True
     backend: str = "whisper"       # "whisper" | "onnx_asr" | "sensevoice"
     repo: str | None = None        # HF repo for the onnx_asr backend
@@ -94,7 +98,9 @@ WHISPER_MODELS: dict[str, WhisperSpec] = {
             False,
             languages=_EUROPEAN_25_LANGUAGES,
             language_note="European languages only",
-            # Detects within its set but tags every result "en".
+            # Detects within its set; source == "auto" still tags "en", but
+            # detect_language (the heard stream) reports None instead of
+            # guessing.
             reports_language=False,
             backend="onnx_asr",
             repo="istupakov/parakeet-tdt-0.6b-v3-onnx",

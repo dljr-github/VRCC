@@ -62,8 +62,13 @@ def _is_cuda_unusable(exc: Exception) -> bool:
 
 @dataclass(frozen=True)
 class SttResult:
+    """One transcribed utterance. ``language`` is a Whisper-style code when
+    the engine can name one; ``None`` means it transcribed the audio but
+    cannot report which language it heard (Parakeet's detect_language path
+    -- see :meth:`vrcc.stt.onnx_asr.OnnxAsrEngine.transcribe`)."""
+
     text: str
-    language: str
+    language: str | None
     avg_logprob: float
     no_speech_prob: float
 

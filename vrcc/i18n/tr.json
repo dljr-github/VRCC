@@ -276,6 +276,7 @@
   "This picks the voice and translation models for your hardware and spoken language, returns the device, thread and search settings to their recommended values, and sets the performance mode, which also rewrites the pause timings on the Advanced page. Your languages, microphone, OSC address and appearance stay as they are.": "Bu, donanımına ve konuştuğun dile uygun ses ve çeviri modellerini seçer; aygıt, iş parçacığı ve arama ayarlarını önerilen değerlere döndürür ve performans modunu belirler. Bu mod, Gelişmiş sayfasındaki duraklama zamanlamalarını da yeniden yazar. Dillerin, mikrofonun, OSC adresin ve görünümün olduğu gibi kalır.",
   "This puts sensitivity, timing and other tuning back to their normal values. Your microphone, languages, models, chatbox address and appearance stay as they are.": "Bu, hassasiyeti, zamanlamayı ve diğer ince ayarları normal değerlerine döndürür. Mikrofonun, dillerin, modellerin, sohbet kutusu adresin ve görünümün olduğu gibi kalır.",
   "This version of VRCC cannot use your graphics card. The CUDA download can use it.": "VRCC'nin bu sürümü ekran kartını kullanamıyor. İndirilebilir CUDA sürümü kullanabilir.",
+  "This voice model cannot tell which language it heard, so speech captured from the speakers is not translated.": "Bu ses modeli hangi dili duyduğunu belirleyemiyor, bu yüzden hoparlörlerden yakalanan konuşma çevrilmiyor.",
   "Tiny": "Minik",
   "Total download: {size}": "Toplam indirme: {size}",
   "Transcription failed for the last utterance.": "Son söylenenler yazıya dökülemedi.",

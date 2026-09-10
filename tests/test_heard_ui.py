@@ -160,6 +160,55 @@ def test_no_cpu_warning_on_a_machine_with_a_graphics_card(qapp, tmp_path, monkey
         dlg.deleteLater()
 
 
+def _dialog_with(tmp_path, **stt_and_translate):
+    """A dialog whose store is configured before construction, since the note
+    is only read at build time (matching the CPU warning's own timing)."""
+    from vrcc.core.config import ConfigStore, default_paths
+    from vrcc.gui.settings import SettingsDialog
+
+    store = ConfigStore(default_paths(portable=True, app_dir=tmp_path).config_file)
+    for key, value in stt_and_translate.items():
+        section, field = key.split("__")
+        setattr(getattr(store.config, section), field, value)
+    return SettingsDialog(store), store
+
+
+def test_the_language_warning_shows_for_a_model_that_cannot_report_it(
+    qapp, tmp_path, monkeypatch
+):
+    """Without this the failure was silent: a user whose translations simply
+    stopped had nothing on screen saying why."""
+    from vrcc.gui import settings_heard
+
+    monkeypatch.setattr(settings_heard.recommend, "detect_tier", lambda index=0: "gpu_high")
+    dlg, _store_ = _dialog_with(
+        tmp_path, stt__model="parakeet-tdt-0.6b-v3", translate__enabled=True
+    )
+    try:
+        assert dlg._hear_note.isVisibleTo(dlg)
+        assert "graphics card" not in dlg._hear_note.text()
+        assert dlg._hear_note.text()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_no_language_warning_once_translation_is_off(qapp, tmp_path, monkeypatch):
+    """The heard stream never asks for a translation with it off, so there is
+    nothing this model could mislabel."""
+    from vrcc.gui import settings_heard
+
+    monkeypatch.setattr(settings_heard.recommend, "detect_tier", lambda index=0: "gpu_high")
+    dlg, _store_ = _dialog_with(
+        tmp_path, stt__model="parakeet-tdt-0.6b-v3", translate__enabled=False
+    )
+    try:
+        assert not dlg._hear_note.isVisibleTo(dlg)
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
 # -- the main-window toggle and meter -----------------------------------------
 
 

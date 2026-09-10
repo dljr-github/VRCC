@@ -412,6 +412,23 @@ def test_transcribe_language_auto_falls_back_to_english(model_dir):
     assert eng.transcribe(np.zeros(160, dtype=np.float32)).language == "en"
 
 
+def test_transcribe_detect_language_reports_none(model_dir):
+    """Nobody has evidence for what these decoders actually heard; "en" was a
+    fabricated tag that fed the translator a source it never detected."""
+    eng, _ = _loaded_engine(model_dir, source_language="French")
+    result = eng.transcribe(np.zeros(160, dtype=np.float32), detect_language=True)
+    assert result.language is None
+
+
+def test_transcribe_detect_language_overrides_the_auto_fallback(model_dir):
+    """The two branches must not collapse into one: detect_language=True is
+    the heard stream asking about someone else's speech, and must return None
+    even when source_language is also "auto"."""
+    eng, _ = _loaded_engine(model_dir, source_language="auto")
+    result = eng.transcribe(np.zeros(160, dtype=np.float32), detect_language=True)
+    assert result.language is None
+
+
 def test_transducer_passes_no_language_option(model_dir):
     eng, factory = _loaded_engine(model_dir, source_language="French")
     eng.transcribe(np.zeros(160, dtype=np.float32))

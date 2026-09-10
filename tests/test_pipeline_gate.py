@@ -11,7 +11,8 @@ import threading
 
 from vrcc.audio.segmenter import SegDiscard, SegSpeculative
 from vrcc.core import pipeline_jobs
-from vrcc.core.events import PhraseRecognized
+from vrcc.core.config import AppConfig
+from vrcc.core.events import AppError, PhraseRecognized
 from vrcc.core.pipeline_jobs import _SttJob
 
 from .conftest import (
@@ -46,6 +47,25 @@ def test_forward_final_valid_src_publishes_enqueues_mt_and_finalizes():
     assert (job.utterance_id, job.text, job.manage_typing) == (1, result.text, True)
     assert 1 in env.pipeline._typing._owned_by_mt
     assert env.pipeline._spec._last_finalized >= 1
+
+
+def test_forward_final_parakeet_auto_untranslated_still_reaches_chatbox():
+    """Pins the downstream half of the narrow-scope guard: an "en" arriving
+    from the auto path (what OnnxAsrEngine.transcribe still echoes; see
+    test_transcribe_language_auto_falls_back_to_english for the engine-level
+    guard) must reach the chatbox without a SOURCE_LANG_UNSUPPORTED AppError.
+    This is the config the wizard already ships by default on a CPU-tier
+    machine; nulling this branch alongside detect_language would break it."""
+    config = AppConfig()
+    config.stt.model = "parakeet-tdt-0.6b-v3"
+    config.stt.source_language = "auto"
+    config.translate.enabled = False
+    env = make_pipeline(config=config, mt=None)
+    errors = collect(env.bus, AppError)
+    result = make_result(language="en")
+    pipeline_jobs.forward_final(env.pipeline, 1, result)
+    assert errors == []
+    assert env.chatbox.submits == [(result.text, 1)]
 
 
 def test_forward_final_regated_by_captioning_off_does_not_send():

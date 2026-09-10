@@ -123,5 +123,7 @@ class HeardPhrase:
     """
 
     text: str
-    language: str
+    # None means the engine detected speech but cannot say which language
+    # (Parakeet's detect_language path; see SttResult.language).
+    language: str | None
     translations: list[tuple[str, str]]

@@ -149,15 +149,17 @@ class OnnxAsrEngine:
         """Transcribe ``samples`` (mono float32, 16 kHz) into an :class:`SttResult`.
 
         Returns ``None`` for empty text. The transducers auto-detect within
-        their set but don't report it, so ``language`` echoes the configured
-        source ("en" when set to auto, the MT source fallback). Raises
-        ``RuntimeError`` if called before :meth:`load`.
+        their set but don't report it. ``detect_language=True`` (the heard
+        stream, captioning someone else's speech) gets ``language=None``:
+        nobody has evidence for what these decoders heard, and a fabricated
+        code would hand the translator a source it never detected. Otherwise
+        ``language`` echoes the configured source ("en" when set to auto, the
+        MT source fallback the main pipeline already depends on -- do not
+        also null this branch, it is a separate case from detect_language).
+        Raises ``RuntimeError`` if called before :meth:`load`.
 
         ``detect_language`` is accepted for parity with :class:`SttEngine`, so
-        one caller can serve either engine, and reports "en" rather than the
-        user's configured language: these decoders cannot report what they
-        heard, and echoing a language nobody has evidence for would have the
-        translator work from a source it invented.
+        one caller can serve either engine.
         """
         if self._model is None:
             raise RuntimeError(
@@ -174,7 +176,9 @@ class OnnxAsrEngine:
             return None
 
         source = self._cfg.source_language
-        if detect_language or source == "auto":
+        if detect_language:
+            language = None
+        elif source == "auto":
             language = "en"
         else:
             language = get(source).whisper

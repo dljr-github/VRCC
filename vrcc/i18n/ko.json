@@ -276,6 +276,7 @@
   "This picks the voice and translation models for your hardware and spoken language, returns the device, thread and search settings to their recommended values, and sets the performance mode, which also rewrites the pause timings on the Advanced page. Your languages, microphone, OSC address and appearance stay as they are.": "하드웨어와 사용 언어에 맞는 음성 및 번역 모델을 고르고, 장치와 스레드, 탐색 설정을 권장값으로 되돌리며, 성능 모드를 설정합니다. 이 모드는 고급 페이지의 멈춤 시간도 다시 씁니다. 언어, 마이크, OSC 주소, 외관은 그대로 유지됩니다.",
   "This puts sensitivity, timing and other tuning back to their normal values. Your microphone, languages, models, chatbox address and appearance stay as they are.": "감도, 타이밍 등 세부 조정을 기본값으로 되돌립니다. 마이크, 언어, 모델, 채팅박스 주소, 화면 모양은 그대로 유지됩니다.",
   "This version of VRCC cannot use your graphics card. The CUDA download can use it.": "이 버전의 VRCC는 그래픽 카드를 사용할 수 없습니다. CUDA 다운로드 버전은 사용할 수 있습니다.",
+  "This voice model cannot tell which language it heard, so speech captured from the speakers is not translated.": "이 음성 모델은 어떤 언어를 들었는지 알 수 없어서, 스피커에서 가져온 음성은 번역되지 않습니다.",
   "Tiny": "초소형",
   "Total download: {size}": "총 다운로드: {size}",
   "Transcription failed for the last utterance.": "마지막 발화를 텍스트로 변환하지 못했습니다.",
