@@ -68,11 +68,8 @@ def test_split_delay_separates_chunks_by_at_least_split_delay_s():
 
     # On Windows with Python 3.12, time.monotonic() is GetTickCount64(),
     # quantized to a 15.625 ms tick, and Event.wait(split_delay_s) never
-    # returns early on Windows. That guarantees at least 5 ticks
-    # (0.078125 s) between chunks, so the 0.01 s bound here is half a tick
-    # of margin, not luck: 120 gaps over 60 runs of this test came back
-    # min 0.0780, mean 0.0914, none under 0.070. Dropping split_delay_s
-    # below about 0.078 here would start failing.
+    # returns early here. That puts a 5-tick floor (0.078125 s) under the
+    # gap, so the 0.01 s bound is half a tick of margin, not luck.
     gaps = [later - earlier for earlier, later in zip(send_times, send_times[1:])]
     assert min(gaps) >= split_delay_s - 0.01
 
@@ -98,6 +95,20 @@ def test_stop_returns_promptly_while_waiting_on_split_delay():
 
     assert elapsed < 1.0  # well under both the 5s delay and the 2s join timeout
     assert not worker_thread.is_alive()
+
+
+def test_wait_for_token_refuses_once_stop_is_set_even_with_a_token_ready():
+    # Deterministic: forces the interleaving a stop() racing _pop_next can
+    # leave behind, where _stop_flag is set while the bucket still holds a
+    # token. No thread, no wall clock.
+    cfg = make_cfg()
+    bus = EventBus()
+    clock = FakeClock()
+    sender, _client = make_sender(cfg, bus, clock)
+
+    sender._stop_flag.set()
+
+    assert sender._wait_for_token() is False
 
 
 def test_a_newer_submit_replaces_the_whole_remaining_split_chunk_group():

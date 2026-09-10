@@ -191,6 +191,10 @@ class ChatboxSender:
             thread = self._thread
             self._thread = None
             if thread is not None:
+                # _stop_flag first: _pop_next and _wait_for_token both treat a
+                # set _stop_flag as proof that any wipe of _preempt is already
+                # accounted for, so a worker that observes _preempt set must
+                # also be able to observe stop pending.
                 self._stop_flag.set()
                 self._wake.set()
                 self._preempt.set()
@@ -309,9 +313,10 @@ class ChatboxSender:
             if not self._queue:
                 return None
             # Cleared under the same lock as the pop, so a coalescing _enqueue
-            # either preempts this chunk's pause or lands after it. Never while
-            # stop is pending: stop() sets _stop_flag before _preempt, so seeing
-            # the flag here means its set is still to come and must survive.
+            # either preempts this chunk's pause or lands after it. A stop()
+            # can still race this clear and have its _preempt set wiped; that
+            # is safe because _wait_for_token checks the level-triggered
+            # _stop_flag before every wait, so a wiped set can never delay it.
             if not self._stop_flag.is_set():
                 self._preempt.clear()
             return self._queue.popleft()
@@ -338,13 +343,15 @@ class ChatboxSender:
 
     def _wait_for_token(self) -> bool:
         """Block (via the injected `sleep`) until a token is available.
-        Returns False if `stop()` was requested before one became
-        available."""
+        Returns False if stop has been requested, even with a token already
+        sitting in the bucket: _stop_flag is checked before every acquire
+        attempt, not only after one fails.
+        """
         while True:
-            if self._bucket.try_acquire():
-                return True
             if self._stop_flag.is_set():
                 return False
+            if self._bucket.try_acquire():
+                return True
             remaining = self._bucket.seconds_until_token()
             slice_s = (
                 min(remaining, _MAX_POLL_SLICE_S) if remaining > 0 else _MAX_POLL_SLICE_S
