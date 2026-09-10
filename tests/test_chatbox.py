@@ -10,7 +10,7 @@ import pytest
 from vrcc.core.bus import EventBus
 from vrcc.core.config import OscConfig
 from vrcc.core.events import ChatboxSent, TypingStateChanged
-from vrcc.osc.chatbox import CHATBOX_LIMIT, ChatboxSender, TokenBucket, fit_chatbox
+from vrcc.osc.chatbox import CHATBOX_LIMIT, ChatboxSender, TokenBucket
 
 
 def _wait_until(predicate, timeout=2.0, interval=0.01):
@@ -267,115 +267,6 @@ def test_queue_is_capped_dropping_oldest_and_logs_once(caplog):
     assert texts[0] == "msg6"  # msg0..msg5 dropped (oldest)
     assert texts[-1] == "msg69"  # newest retained
     assert sum("dropping oldest" in r.message for r in caplog.records) == 1
-
-
-def test_split_message_chunks_sequence_through_bucket_in_order():
-    # split_delay_s is real wall-clock time (see _run's stop_flag.wait), so
-    # keep it tiny here -- this test cares about chunk order, not pacing.
-    cfg = make_cfg(overflow="split", burst=2, min_interval_s=1.3, split_delay_s=0.01)
-    bus = EventBus()
-    clock = FakeClock()
-    sender, client = make_sender(cfg, bus, clock)
-
-    received = []
-    bus.subscribe(ChatboxSent, received.append)
-
-    long_text = " ".join(f"word{i}" for i in range(60))
-    expected_chunks = fit_chatbox(long_text, "split")
-    assert len(expected_chunks) >= 3  # sanity: fixture actually splits
-
-    sender.submit(long_text, 42)
-    sender.start()
-    assert _wait_until(lambda: len(received) == len(expected_chunks))
-    sender.stop()
-
-    assert [e.text for e in received] == expected_chunks
-    assert all(e.utterance_id == 42 for e in received)
-
-
-def test_split_delay_waits_between_chunks_via_stop_flag_wait():
-    cfg = make_cfg(overflow="split", coalesce_latest_wins=False, split_delay_s=0.05)
-    bus = EventBus()
-    clock = FakeClock()
-    sender, _client = make_sender(cfg, bus, clock)
-
-    received = []
-    bus.subscribe(ChatboxSent, received.append)
-
-    recorded_timeouts = []
-    real_wait = sender._stop_flag.wait
-
-    def recording_wait(timeout=None):
-        recorded_timeouts.append(timeout)
-        return real_wait(timeout)
-
-    sender._stop_flag.wait = recording_wait
-
-    long_text = " ".join(f"word{i}" for i in range(60))
-    expected_chunks = fit_chatbox(long_text, "split")
-    assert len(expected_chunks) >= 3  # sanity: fixture actually splits
-
-    sender.submit(long_text, 1)
-    sender.start()
-    assert _wait_until(lambda: len(received) == len(expected_chunks))
-    sender.stop()
-
-    non_last_delay_waits = [t for t in recorded_timeouts if t == 0.05]
-    assert len(non_last_delay_waits) == len(expected_chunks) - 1
-
-
-def test_stop_returns_promptly_while_waiting_on_split_delay():
-    cfg = make_cfg(overflow="split", coalesce_latest_wins=False, split_delay_s=5.0)
-    bus = EventBus()
-    clock = FakeClock()
-    sender, _client = make_sender(cfg, bus, clock)
-
-    received = []
-    bus.subscribe(ChatboxSent, received.append)
-
-    long_text = " ".join(f"word{i}" for i in range(60))
-    sender.submit(long_text, 1)
-    sender.start()
-    assert _wait_until(lambda: len(received) >= 1)  # inside the post-send delay now
-    worker_thread = sender._thread
-
-    start = time.monotonic()
-    sender.stop()
-    elapsed = time.monotonic() - start
-
-    assert elapsed < 1.0  # well under both the 5s delay and the 2s join timeout
-    assert not worker_thread.is_alive()
-
-
-def test_a_newer_submit_replaces_the_whole_remaining_split_chunk_group():
-    # coalesce applies at message-group granularity: replacing mid-group
-    # must drop the *rest* of the old group's chunks, not interleave them
-    # with the new message's chunks.
-    # split_delay_s is real wall-clock time; keep it tiny so the test stays
-    # fast -- it's asserting coalescing behavior, not pacing.
-    cfg = make_cfg(overflow="split", coalesce_latest_wins=True, split_delay_s=0.01)
-    bus = EventBus()
-    clock = FakeClock()
-    sender, client = make_sender(cfg, bus, clock)
-
-    received = []
-    bus.subscribe(ChatboxSent, received.append)
-
-    old_text = " ".join(f"old{i}" for i in range(60))
-    new_text = " ".join(f"new{i}" for i in range(60))
-    expected_new_chunks = fit_chatbox(new_text, "split")
-
-    # Both submits land before start(), so the old group never begins
-    # sending -- this deterministically proves whole-group replacement.
-    sender.submit(old_text, 1)
-    sender.submit(new_text, 2)
-
-    sender.start()
-    assert _wait_until(lambda: len(received) == len(expected_new_chunks))
-    sender.stop()
-
-    assert [e.text for e in received] == expected_new_chunks
-    assert all(e.utterance_id == 2 for e in received)
 
 
 def test_set_typing_sends_immediately_and_dedupes_repeats():

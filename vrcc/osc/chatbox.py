@@ -159,6 +159,9 @@ class ChatboxSender:
         self._overflow_logged = False
         self._queue_lock = threading.Lock()
         self._wake = threading.Event()
+        # Not _wake: that fires on every submit(), which would also collapse
+        # the pause between parts of the SAME message.
+        self._preempt = threading.Event()
 
         self._typing_lock = threading.Lock()
         self._last_typing: bool | None = None
@@ -190,6 +193,7 @@ class ChatboxSender:
             if thread is not None:
                 self._stop_flag.set()
                 self._wake.set()
+                self._preempt.set()
                 thread.join(timeout=_JOIN_TIMEOUT_S)
         self.set_typing(False)
 
@@ -245,6 +249,8 @@ class ChatboxSender:
         ]
         with self._queue_lock:
             if self._cfg.coalesce_latest_wins:
+                if self._queue:  # empty: nothing queued to preempt
+                    self._preempt.set()
                 self._queue.clear()
             overflowing = len(self._queue) + len(items) > _QUEUE_MAX
             self._queue.extend(items)
@@ -311,6 +317,9 @@ class ChatboxSender:
                 self._wake.wait(timeout=_IDLE_POLL_S)
                 self._wake.clear()
                 continue
+            # Cleared before the token wait, not after: a preempt arriving
+            # during that wait must still gate THIS chunk's delay.
+            self._preempt.clear()
             if not self._wait_for_token():
                 continue  # stop requested while waiting; drop this item
             text, utterance_id, truncated, delay_after = item
@@ -318,11 +327,11 @@ class ChatboxSender:
             # Wait after the send attempt regardless of whether it actually
             # succeeded (VRChat may be offline -- rare, and the pacing goal is
             # about readability, not about the ack we don't get over OSC
-            # anyway). `Event.wait` both provides the pause and makes stop()
-            # responsive: it returns True immediately if stop() sets the flag
-            # mid-wait, so we bail out of the loop instead of popping again.
-            if delay_after > 0 and self._stop_flag.wait(delay_after):
-                break
+            # anyway). stop() and a coalescing submit() both set `_preempt`,
+            # so either wakes this early instead of sleeping out the pause.
+            if delay_after > 0 and self._preempt.wait(delay_after):
+                if self._stop_flag.is_set():
+                    break
 
     def _wait_for_token(self) -> bool:
         """Block (via the injected `sleep`) until a token is available.
