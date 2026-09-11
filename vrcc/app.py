@@ -131,6 +131,16 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     for warning in store.load_warnings:
         logger.warning("config: %s", warning)
 
+    # Deliberately ahead of any window: the first-run wizard (below, when
+    # models_ready() is False) reads can_run_cuda() for its device
+    # recommendation, and that probe caches its result for the process, so
+    # calling it before the nvidia wheel DLL dirs are registered pins a
+    # wheels-only GPU install to CPU for the rest of the run (see
+    # hardware._cublas_available). In-situ cost on this machine, warm OS
+    # cache, onnxruntime already imported by this point: 0.079-0.080s over
+    # three runs, all DLL work, no import left to pay -- too small to chase a
+    # deferral that would have to outrace EngineLoader's background thread,
+    # which calls resolve() the moment it starts.
     hardware.setup_cuda_dlls()
 
     # Qt imports are deliberately lazy so this module (and build_engine_stack /

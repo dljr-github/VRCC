@@ -413,3 +413,60 @@ class TestGracefulDegradation:
     def test_total_vram_bytes_none_without_pynvml(self, monkeypatch):
         monkeypatch.setattr(hardware, "_pynvml", lambda: None)
         assert hardware.total_vram_bytes() is None
+
+
+@pytest.mark.skipif(
+    hardware.cuda_device_count() <= 0, reason="no CUDA device visible"
+)
+class TestDeviceLabelMatchesRealProvider:
+    """can_run_cuda() is the label every STT/MT engine's resolve() trusts for
+    its device pick; every other test in this file mocks cuda_device_count
+    and _probe_cublas, which proves the branch logic but not that a True
+    answer means CUDA actually works. These call the real, unmocked probe
+    (after the real setup_cuda_dlls(), same order as vrcc.app.run) and check
+    it against the two runtimes that would actually build a session.
+
+    Only cuda_device_count gates the class skip, so a GPU-visible box with no
+    usable cuBLAS runtime is exactly the case can_run_cuda() exists to catch
+    and must not fail these tests: neither ctranslate2.get_supported_compute_
+    types nor onnxruntime.get_available_providers depends on cuBLAS actually
+    loading (the former enumerates via the statically-linked cudart driver
+    query, the latter is the compile-time provider list baked into the wheel),
+    so a plain True/False assertion on either would pass identically whether
+    or not CUDA is actually usable. Each assertion below instead builds a real
+    session and checks can_run_cuda() against what the session actually did,
+    which is the same class of bug this repo's own history caught elsewhere
+    (test_stt_onnx_asr.py, test_stt_sensevoice_runtime.py): a run-time
+    CUDA-to-CPU fallback that a provider-list check alone would miss. Skipped
+    (not xfailed) on a CPU-only runner, where there is nothing to prove."""
+
+    def test_ctranslate2_agrees_with_can_run_cuda(self):
+        hardware.setup_cuda_dlls()
+        supported = len(ctranslate2.get_supported_compute_types("cuda", 0)) > 0
+        assert supported == hardware.can_run_cuda()
+
+    def test_onnxruntime_session_actually_runs_on_cuda(self):
+        import onnx
+        import onnxruntime
+        from onnx import TensorProto, helper
+
+        hardware.setup_cuda_dlls()
+        node = helper.make_node("Identity", ["x"], ["y"])
+        graph = helper.make_graph(
+            [node],
+            "identity",
+            [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1])],
+            [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])],
+        )
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+        # onnx's own default IR version can outrun what an installed
+        # onnxruntime build parses; pin to the IR version onnxruntime 1.17+
+        # has supported since it added opset 13, well below either's ceiling.
+        model.ir_version = 8
+        onnx.checker.check_model(model)
+        session = onnxruntime.InferenceSession(
+            model.SerializeToString(),
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+        used_cuda = "CUDAExecutionProvider" in session.get_providers()
+        assert used_cuda == hardware.can_run_cuda()
