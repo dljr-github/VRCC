@@ -10,12 +10,19 @@ references and hypotheses).
 Run from the repo root:
     python tools/bench_stt.py --device cuda
     python tools/bench_stt.py --device cpu
+    python tools/bench_stt.py --device cuda --noise babble --snr 10
     python tools/bench_stt.py --export benchmarks/my-machine.json
 
 The first run downloads the dataset (~350 MB) into ``<user data>/bench`` and
 any missing models into the app's models dir (``--download-only`` does just
 that). One JSON per (model, device) lands in ``--out`` (default
 ``bench_results/``); existing results are skipped (``--force`` re-runs).
+``--noise babble|white --snr N`` overlays noise (babble: several corpus
+speakers overlaid; white: Gaussian) on every utterance before transcribing,
+at N dB SNR against that utterance's own level; see tools/bench_noise.py.
+A noisy run's filename and utterance-set fingerprint both carry the noise
+condition, so it never overwrites or gets exported alongside a clean run
+(point ``--out`` at its own directory, e.g. ``bench_results/babble10``).
 ``--export`` bundles every result with the machine's hardware info into one
 shareable file -- see benchmarks/README.md for contributing yours. Dev tool
 only -- not packaged, no test coverage.
@@ -41,6 +48,7 @@ import soundfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import bench_noise  # noqa: E402
 from vrcc.core.bus import EventBus  # noqa: E402
 from vrcc.core.config import SttConfig  # noqa: E402
 from vrcc.core.events import EngineStateChanged  # noqa: E402
@@ -181,10 +189,21 @@ def export_results(results_dir: Path, target: Path) -> int:
     if len(sets) > 1:
         print(
             "refusing to export: results were measured on different utterance "
-            "sets; re-run the odd ones with --force (or delete them) so every "
+            "sets (sampling, beam or noise settings differ across the files "
+            f"in {results_dir}); re-run the odd ones with --force, delete "
+            "them, or export a noisy run from its own --out dir, so every "
             "record used the same set"
         )
         return 1
+
+    # Sets already agree (checked above), so every record shares one noise
+    # condition; None/None for a clean run.
+    noise_type, noise_snr_db = next(
+        iter({(r.get("noise_type"), r.get("noise_snr_db")) for r in records})
+    )
+    dataset = "LibriSpeech test-clean"
+    if noise_type:
+        dataset += f" + {noise_type} noise @ {noise_snr_db:g} dB SNR"
 
     # Prefer the machine info captured when the benchmarks ran; a fresh
     # snapshot could describe a different driver than the one measured.
@@ -198,7 +217,7 @@ def export_results(results_dir: Path, target: Path) -> int:
         json.dumps(
             {
                 "schema": 1,
-                "dataset": "LibriSpeech test-clean",
+                "dataset": dataset,
                 "machine": machine,
                 "results": records,
             },
@@ -216,11 +235,17 @@ def export_results(results_dir: Path, target: Path) -> int:
     return 0
 
 
-def _utterance_set_id(utts: list[tuple[str, np.ndarray, str]]) -> str:
+def _utterance_set_id(
+    utts: list[tuple[str, np.ndarray, str]],
+    noise: tuple[str, float] | None = None,
+) -> str:
     """Short fingerprint of exactly which utterances a record measured, so
     skip/export logic can refuse to mix runs whose sets differ (a sampling
-    change keeps the count at N while changing the members)."""
+    change keeps the count at N while changing the members; a noise
+    condition leaves the ids and count alone but changes every sample)."""
     joined = "\n".join(utt_id for utt_id, _, _ in utts)
+    if noise is not None:
+        joined += f"\n__noise__{noise[0]}:{noise[1]:g}"
     return hashlib.sha256(joined.encode()).hexdigest()[:12]
 
 
@@ -240,10 +265,14 @@ def bench_model(
     utts: list[tuple[str, np.ndarray, str]],
     models_dir: Path,
     beam: int = 1,
+    noise_type: str | None = None,
+    noise_snr_db: float | None = None,
 ) -> dict:
     """Load one model on ``device``, transcribe every utterance, and return
     the timing/WER record. The engine is fed pre-segmented utterances exactly
-    as the app's VAD hands them over.
+    as the app's VAD hands them over. ``utts`` already carries noise if the
+    caller applied it (via ``bench_noise.apply_noise``); ``noise_type`` and
+    ``noise_snr_db`` are recorded here, not applied.
 
     The quality gates are opened for the run (``avg_logprob``/``no_speech``)
     so WER measures what the model recognized, not what the gates suppressed:
@@ -319,7 +348,11 @@ def bench_model(
         "resolved_device": resolved_device,
         "compute": compute,
         "beam": beam,
-        "utterance_set": _utterance_set_id(utts),
+        "utterance_set": _utterance_set_id(
+            utts, (noise_type, noise_snr_db) if noise_type else None
+        ),
+        "noise_type": noise_type,
+        "noise_snr_db": noise_snr_db,
         "size_mb": WHISPER_MODELS[model_id].size_mb,
         "load_s": round(load_s, 2),
         "warmup_s": round(warmup_s, 2),
@@ -368,6 +401,16 @@ def main() -> int:
         "--export", type=Path, metavar="FILE",
         help="bundle --out results + hardware info into FILE and exit",
     )
+    parser.add_argument(
+        "--noise", choices=("babble", "white"), default=None,
+        help="overlay noise on every utterance before transcribing (babble: "
+        "corpus speakers overlaid; white: Gaussian); requires --snr",
+    )
+    parser.add_argument(
+        "--snr", type=float, default=None,
+        help="signal-to-noise ratio in dB for --noise, against each "
+        "utterance's own level (e.g. 10)",
+    )
     args = parser.parse_args()
 
     if args.export:
@@ -377,6 +420,8 @@ def main() -> int:
         parser.error("--utterances must be at least 1")
     if args.beam < 1:
         parser.error("--beam must be at least 1")
+    if bool(args.noise) != (args.snr is not None):
+        parser.error("--noise and --snr must be given together")
 
     model_ids = (
         args.models.split(",") if args.models else list(WHISPER_MODELS)
@@ -398,19 +443,24 @@ def main() -> int:
         hardware.setup_cuda_dlls()
 
     utts = load_utterances(dataset_root, args.utterances)
+    if args.noise:
+        print(f"synthesizing {args.noise} noise at {args.snr:g} dB SNR ...", flush=True)
+        utts = bench_noise.apply_noise(utts, dataset_root, args.noise, args.snr)
     args.out.mkdir(parents=True, exist_ok=True)
     meta_path = args.out / "meta.json"
     if not meta_path.is_file():
         meta_path.write_text(json.dumps(machine_info(), indent=2))
 
+    noise_desc = (args.noise, args.snr) if args.noise else None
     suffix = "" if args.beam == 1 else f"__beam{args.beam}"
+    suffix += "" if not args.noise else f"__{args.noise}{args.snr:g}"
     for model_id in model_ids:
         out_path = args.out / f"{model_id}__{args.device}{suffix}.json"
         if out_path.is_file() and not args.force:
             # A result from a different utterance set is stale, not done:
             # keeping it would let --export mix incomparable runs.
             existing = json.loads(out_path.read_text())
-            if existing.get("utterance_set") == _utterance_set_id(utts):
+            if existing.get("utterance_set") == _utterance_set_id(utts, noise_desc):
                 print(f"{model_id} [{args.device}]: exists, skipping", flush=True)
                 continue
             print(
@@ -420,7 +470,8 @@ def main() -> int:
             )
         print(f"{model_id} [{args.device}]: benchmarking ...", flush=True)
         result = bench_model(
-            model_id, args.device, utts, args.models_dir, beam=args.beam
+            model_id, args.device, utts, args.models_dir, beam=args.beam,
+            noise_type=args.noise, noise_snr_db=args.snr,
         )
         out_path.write_text(json.dumps(result, indent=2))
         print(

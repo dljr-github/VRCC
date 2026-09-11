@@ -34,6 +34,33 @@ not change them. Per model and device it records:
 The dataset is English read speech, so WER only ranks English accuracy;
 speed numbers transfer to other languages.
 
+## Noise conditions
+
+Clean LibriSpeech is not what breaks a model in the app: a model that ranks
+well on clean speech can rank worst once another person is talking in the
+room. `--noise babble --snr N` overlays several corpus speakers (seeded,
+so the same command always builds the same babble); `--noise white --snr N`
+overlays seeded Gaussian noise instead. Either way `N` is the SNR in dB
+against each utterance's own level. See `tools/bench_noise.py` for exactly
+how the noise is built and mixed.
+
+```
+python tools/bench_stt.py --device cuda --noise babble --snr 10 --out bench_results/babble10
+```
+
+Point `--out` at a directory of its own per noise condition: a noisy run's
+result files are stamped with the condition (in both the filename and the
+recorded utterance set), so they never overwrite or silently blend with a
+clean run in the same directory, but `--export` still refuses to bundle a
+directory that mixes conditions. Export and report each condition the same
+way as a clean run, naming the file after both the machine and the
+condition:
+
+```
+python tools/bench_stt.py --export benchmarks/rtx-4070-ryzen-7700-babble10.json --out bench_results/babble10
+python tools/bench_report.py --write
+```
+
 ## Contributing your machine
 
 1. Install from source with the benchmark extras
