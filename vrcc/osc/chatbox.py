@@ -159,6 +159,9 @@ class ChatboxSender:
         self._overflow_logged = False
         self._queue_lock = threading.Lock()
         self._wake = threading.Event()
+        # Not _wake: that fires on every submit(), which would also collapse
+        # the pause between parts of the SAME message.
+        self._preempt = threading.Event()
 
         self._typing_lock = threading.Lock()
         self._last_typing: bool | None = None
@@ -188,8 +191,13 @@ class ChatboxSender:
             thread = self._thread
             self._thread = None
             if thread is not None:
+                # _stop_flag first: _pop_next and _wait_for_token both treat a
+                # set _stop_flag as proof that any wipe of _preempt is already
+                # accounted for, so a worker that observes _preempt set must
+                # also be able to observe stop pending.
                 self._stop_flag.set()
                 self._wake.set()
+                self._preempt.set()
                 thread.join(timeout=_JOIN_TIMEOUT_S)
         self.set_typing(False)
 
@@ -245,6 +253,8 @@ class ChatboxSender:
         ]
         with self._queue_lock:
             if self._cfg.coalesce_latest_wins:
+                if self._queue:  # empty: nothing queued to preempt
+                    self._preempt.set()
                 self._queue.clear()
             overflowing = len(self._queue) + len(items) > _QUEUE_MAX
             self._queue.extend(items)
@@ -300,9 +310,16 @@ class ChatboxSender:
 
     def _pop_next(self) -> tuple[str, int, bool, float] | None:
         with self._queue_lock:
-            if self._queue:
-                return self._queue.popleft()
-            return None
+            if not self._queue:
+                return None
+            # Cleared under the same lock as the pop, so a coalescing _enqueue
+            # either preempts this chunk's pause or lands after it. A stop()
+            # can still race this clear and have its _preempt set wiped; that
+            # is safe because _wait_for_token checks the level-triggered
+            # _stop_flag before every wait, so a wiped set can never delay it.
+            if not self._stop_flag.is_set():
+                self._preempt.clear()
+            return self._queue.popleft()
 
     def _run(self) -> None:
         while not self._stop_flag.is_set():
@@ -318,21 +335,23 @@ class ChatboxSender:
             # Wait after the send attempt regardless of whether it actually
             # succeeded (VRChat may be offline -- rare, and the pacing goal is
             # about readability, not about the ack we don't get over OSC
-            # anyway). `Event.wait` both provides the pause and makes stop()
-            # responsive: it returns True immediately if stop() sets the flag
-            # mid-wait, so we bail out of the loop instead of popping again.
-            if delay_after > 0 and self._stop_flag.wait(delay_after):
-                break
+            # anyway). stop() and a coalescing submit() both set `_preempt`,
+            # so either wakes this early instead of sleeping out the pause.
+            if delay_after > 0 and self._preempt.wait(delay_after):
+                if self._stop_flag.is_set():
+                    break
 
     def _wait_for_token(self) -> bool:
         """Block (via the injected `sleep`) until a token is available.
-        Returns False if `stop()` was requested before one became
-        available."""
+        Returns False if stop has been requested, even with a token already
+        sitting in the bucket: _stop_flag is checked before every acquire
+        attempt, not only after one fails.
+        """
         while True:
-            if self._bucket.try_acquire():
-                return True
             if self._stop_flag.is_set():
                 return False
+            if self._bucket.try_acquire():
+                return True
             remaining = self._bucket.seconds_until_token()
             slice_s = (
                 min(remaining, _MAX_POLL_SLICE_S) if remaining > 0 else _MAX_POLL_SLICE_S

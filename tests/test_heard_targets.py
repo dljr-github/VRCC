@@ -88,6 +88,84 @@ def test_other_peoples_speech_is_never_decoded_as_your_language():
     )
 
 
+def test_a_fabricated_english_tag_silently_drops_every_translation():
+    """This is what Parakeet's detect_language path used to report for
+    German speech: a made-up "en". With English the only language the user
+    reads, the target list empties and _translate returns [] on every
+    utterance while the transcript still publishes, which reads as
+    translation being slow rather than as a failure."""
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    cfg.stt.spoken_languages = ["English"]
+    cfg.translate.enabled = True
+    mt = _Mt()
+    stream, source, bus = _stream(
+        cfg=cfg, stt=_Stt(text="wie geht es dir", language="en"), mt=mt
+    )
+    try:
+        stream.start()
+        source.feed()
+        _wait(bus)
+    finally:
+        stream.stop()
+
+    phrases = _phrases(bus)
+    assert mt.calls == []
+    assert len(phrases) == 1
+    assert phrases[0].translations == []
+
+
+def test_an_honest_german_tag_translates_normally():
+    """The positive control: the identical utterance, correctly labelled,
+    must reach the translator. Nothing here changes when the source is
+    honest; the defect is entirely upstream, in what the engine reports."""
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    cfg.stt.spoken_languages = ["English"]
+    cfg.translate.enabled = True
+    mt = _Mt()
+    stream, source, bus = _stream(
+        cfg=cfg, stt=_Stt(text="wie geht es dir", language="de"), mt=mt
+    )
+    try:
+        stream.start()
+        source.feed()
+        _wait(bus)
+    finally:
+        stream.stop()
+
+    assert mt.calls == [("wie geht es dir", "German", ["English"])]
+
+
+def test_a_none_language_publishes_untranslated_without_crashing():
+    """What the fixed OnnxAsrEngine actually reports for detect_language=True:
+    no fabricated code at all. HeardPhrase and _translate must handle it as
+    cleanly as any other language they have no registry entry for -- the
+    transcript still reaches the feed, just without a translation."""
+    from vrcc.core.config import AppConfig
+
+    cfg = AppConfig()
+    cfg.stt.spoken_languages = ["English"]
+    cfg.translate.enabled = True
+    mt = _Mt()
+    stream, source, bus = _stream(
+        cfg=cfg, stt=_Stt(text="wie geht es dir", language=None), mt=mt
+    )
+    try:
+        stream.start()
+        source.feed()
+        _wait(bus)
+    finally:
+        stream.stop()
+
+    phrases = _phrases(bus)
+    assert mt.calls == []
+    assert len(phrases) == 1
+    assert phrases[0].translations == []
+
+
 def test_a_detected_language_code_still_resolves_a_translation_source():
     """Engines report what they detected as a code ("ja"); the language
     registry keys on display names ("Japanese"). Feeding one to the other

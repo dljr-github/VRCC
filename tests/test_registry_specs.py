@@ -123,7 +123,9 @@ def test_parakeet_spec_fields():
     assert spec.asr_type == "nemo-conformer-tdt"
     assert spec.english_only is False
     assert spec.auto_language is True  # detects the language within its set
-    assert spec.reports_language is False  # ...but tags every result "en"
+    # ...but only the source == "auto" path still tags "en"; detect_language
+    # (the heard stream) reports None, since it has no evidence either way.
+    assert spec.reports_language is False
     _assert_european_25(spec.languages)
 
 

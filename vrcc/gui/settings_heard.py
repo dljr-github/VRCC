@@ -25,6 +25,7 @@ from vrcc.core import recommend
 from vrcc.core.languages import LANGUAGES
 from vrcc.gui.widgets import fill_spoken_languages, no_wheel
 from vrcc.i18n import tr, tr_noop
+from vrcc.stt.registry import WHISPER_MODELS
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QFormLayout
@@ -44,6 +45,14 @@ _HEAR_TIP = tr_noop(
 _HEAR_CPU_WARNING = tr_noop(
     "Without a graphics card this shares the voice model with your own "
     "captions, so both will be slower."
+)
+# Shown while translation is on and the active voice model detects a
+# language but cannot say which one (WhisperSpec.reports_language False):
+# the heard stream can never resolve a source for it, so every speaker
+# caption stays untranslated with nothing on screen saying why.
+_HEAR_LANG_WARNING = tr_noop(
+    "This voice model cannot tell which language it heard, so speech "
+    "captured from the speakers is not translated."
 )
 _SPEAKER_LABEL = tr_noop("Listen to")
 _TARGET_LABEL = tr_noop("Show it in")
@@ -82,7 +91,7 @@ def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
     combo.currentIndexChanged.connect(on_device)
     target.currentIndexChanged.connect(on_target)
 
-    dlg._hear_note = QLabel(tr(_HEAR_CPU_WARNING))
+    dlg._hear_note = QLabel()
     dlg._hear_note.setWordWrap(True)
     dlg._hear_note.setStyleSheet(dlg._muted_style)
 
@@ -90,7 +99,33 @@ def build_heard_controls(dlg: "SettingsDialog", form: "QFormLayout") -> None:
     form.addRow(tr(_SPEAKER_LABEL), combo)
     form.addRow(tr(_TARGET_LABEL), target)
     form.addRow("", dlg._hear_note)
-    dlg._hear_note.setVisible(_on_cpu(dlg))
+    _set_hear_note(dlg)
+
+
+def _set_hear_note(dlg: "SettingsDialog") -> None:
+    """Fill and show/hide the muted note for every reason this feature might
+    silently underperform. Read once at build time, the same as the CPU
+    warning's own machine-tier read: a model or translation change made
+    elsewhere in this dialog shows on the next open, not live."""
+    lines = []
+    if _on_cpu(dlg):
+        lines.append(tr(_HEAR_CPU_WARNING))
+    if _cannot_report_heard_language(dlg):
+        lines.append(tr(_HEAR_LANG_WARNING))
+    dlg._hear_note.setText("\n".join(lines))
+    dlg._hear_note.setVisible(bool(lines))
+
+
+def _cannot_report_heard_language(dlg: "SettingsDialog") -> bool:
+    """Whether the active voice model detects a language but cannot say which
+    one, while translation is on: exactly the condition that leaves
+    HeardStream._translate with no source to resolve (see heard.py)."""
+    spec = WHISPER_MODELS.get(dlg._cfg.stt.model)
+    return (
+        spec is not None
+        and not spec.reports_language
+        and dlg._cfg.translate.enabled
+    )
 
 
 def _on_cpu(dlg: "SettingsDialog") -> bool:
