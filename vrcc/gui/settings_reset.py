@@ -63,7 +63,7 @@ _RESET_FIELDS = {
     "vad": (
         "threshold", "silence_threshold", "speculative_silence_ms",
         "finalize_silence_ms", "min_utterance_ms", "pre_roll_ms",
-        "max_utterance_s",
+        "max_utterance_s", "relative_silence_ratio",
     ),
     "audio": (
         "energy_gate_enabled", "energy_threshold",
@@ -71,6 +71,7 @@ _RESET_FIELDS = {
     ),
     "stt": (
         "beam_size", "temperature", "avg_logprob_gate", "no_speech_gate",
+        "parakeet_avg_logprob_gate", "sensevoice_avg_logprob_gate",
         "no_repeat_ngram_size", "compression_ratio_gate",
         "condition_on_previous_text",
     ),
