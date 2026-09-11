@@ -97,6 +97,17 @@ def _enqueue(p: "Pipeline", q: "queue.Queue", job) -> None:
             continue
 
 
+def _submit(p: "Pipeline", original: str, translations: list, utterance_id: int) -> None:
+    """safe_submit, then close the finalize-to-submission latency window
+    handle_final opened for this id (see LatencyTracker); every send path
+    below goes through here rather than calling safe_submit directly, so
+    none of them can forget to close it."""
+    safe_submit(p, original, translations, utterance_id)
+    elapsed = p._latency.pop_elapsed(utterance_id)
+    if elapsed is not None:
+        p._stats.record_latency(elapsed)
+
+
 # -- segmenter-event handlers (job creation) --------------------------------
 
 
@@ -135,6 +146,11 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
         p._resolve_typing(event.utterance_id)
         _mark_finalized(p, event.utterance_id)
         return
+    # Opens the finalize-to-chatbox-submission latency window (see
+    # LatencyTracker); only once a job is actually going to be enqueued, so
+    # a gate closed at this same check above never leaves a start unclosed
+    # for longer than this run.
+    p._latency.note_finalized(event.utterance_id)
     _enqueue(
         p,
         p._stt_queue,
@@ -153,29 +169,38 @@ def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
 def _call_engine(
     p: "Pipeline", samples: "np.ndarray", stop: "threading.Event", *, speculative: bool
 ) -> "SttResult | None | object":
-    """Transcribe via ``p._transcribe`` and record the call's wall-clock cost.
+    """Transcribe via the STT slot, timing the lock wait and the engine call
+    as two separate spans.
 
     Timing starts here, after the job was dequeued, so queue wait is never
-    counted. It does cover the STT slot's lock, which ``p._transcribe`` takes
-    and which a model swap or the 'heard' stream can hold for seconds: a run
-    that swapped models reports those seconds as engine time.
+    counted. borrow() holds the slot's lock for the whole block below, so a
+    concurrent model swap or the 'heard' stream stalls ``wait_s`` (timed
+    before ``engine`` is used) rather than the engine call itself
+    (``call_s``, timed only around ``engine.transcribe``).
 
     Nothing is recorded for ``_NO_ENGINE``, which means ``engine.transcribe``
     was never invoked (swapped out mid-flight), nor once ``stop`` is set: a
     call that outlasted stop()'s join returns into the next run, whose
     counters it must not touch."""
-    start = time.monotonic()
-    result = p._transcribe(samples)
-    wall_s = time.monotonic() - start
+    wait_start = time.monotonic()
+    with p.stt_slot.borrow() as engine:
+        wait_s = time.monotonic() - wait_start
+        if engine is None:
+            result, call_s = _NO_ENGINE, 0.0
+        else:
+            call_start = time.monotonic()
+            result = engine.transcribe(samples)
+            call_s = time.monotonic() - call_start
     if result is _NO_ENGINE or stop.is_set():
         return result
     audio_s = len(samples) / SAMPLE_RATE
-    p._stats.record_call(speculative, audio_s, wall_s)
+    p._stats.record_call(speculative, audio_s, wait_s, call_s)
     logger.debug(
-        "stt call (%s): %.2fs audio, %.3fs wall",
+        "stt call (%s): %.2fs audio, %.3fs wait + %.3fs call",
         "speculative" if speculative else "final",
         audio_s,
-        wall_s,
+        wait_s,
+        call_s,
     )
     return result
 
@@ -246,7 +271,7 @@ def _send_caption(
         _enqueue(p, p._mt_queue, _MtJob(send_id, text, src, manage_typing=True))
     else:
         # Translation disabled: original phrase goes straight to chatbox.
-        safe_submit(p, text, [], send_id)
+        _submit(p, text, [], send_id)
         p._resolve_typing(send_id)
 
 
@@ -260,7 +285,10 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
         return
 
     if result is None:
-        # Quality-gated: nothing downstream, just resolve typing.
+        # Quality-gated: nothing downstream, just resolve typing. Counted
+        # here since engine.transcribe() itself only returns None, with no
+        # further signal of why to a caller above it.
+        p._input.record_gate_suppressed()
         p._resolve_typing(utterance_id)
         _mark_finalized(p, utterance_id)
         return
@@ -302,7 +330,7 @@ def forward_final(p: "Pipeline", utterance_id: int, result: "SttResult | None") 
                 translations=(),
             )
         )
-        safe_submit(p, result.text, [], utterance_id)
+        _submit(p, result.text, [], utterance_id)
         p._resolve_typing(utterance_id)
         _mark_finalized(p, utterance_id)
         return
@@ -345,7 +373,7 @@ def send_untranslated(p: "Pipeline", job: _MtJob) -> None:
             translations=(),
         )
     )
-    safe_submit(p, job.text, [], job.utterance_id)
+    _submit(p, job.text, [], job.utterance_id)
     if job.manage_typing:
         p._resolve_typing(job.utterance_id)
 
@@ -424,6 +452,6 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
         for i, lang in enumerate(all_targets):
             if lang == job.src:
                 submitted.insert(i, (lang.display, job.text))
-    safe_submit(p, job.text, submitted, job.utterance_id)
+    _submit(p, job.text, submitted, job.utterance_id)
     if job.manage_typing:
         p._resolve_typing(job.utterance_id)

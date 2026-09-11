@@ -22,9 +22,11 @@ from vrcc.audio.segmenter import (
 from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source, pipeline_typed
 from vrcc.core.engine_slot import EngineSlot
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
-from vrcc.core.pipeline_jobs import _NO_ENGINE
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
-from vrcc.core.pipeline_stats import SessionStats, SttCallStats, begin_run, log_summary
+from vrcc.core.pipeline_stats import (
+    InputStats, LatencyTracker, SessionStats, SttCallStats, begin_run,
+    log_summary, note_dropped_frame,
+)
 
 if TYPE_CHECKING:
     from vrcc.audio.source import AudioSource
@@ -33,7 +35,7 @@ if TYPE_CHECKING:
     from vrcc.core.config import AppConfig
     from vrcc.osc.chatbox import ChatboxSender
     from vrcc.osc.mutesync import MuteSync
-    from vrcc.stt.engine import SttEngine, SttResult
+    from vrcc.stt.engine import SttEngine
     from vrcc.translate.engine import TranslateEngine
 
 logger = logging.getLogger("vrcc.core.pipeline")
@@ -66,6 +68,10 @@ class Pipeline:
     ) -> None:
         self._config = config
         self._bus = bus
+        # Reuses the RMS the meter already gets per frame (published as
+        # MicLevel from pipeline_frames's pre-gate and from SegLevel below)
+        # rather than computing it a second time for the input-level stat.
+        self._bus.subscribe(MicLevel, lambda e: self._input.record_level(e.rms))
         self._source = source
         self._segmenter = segmenter
         # Public: engine_stack shares these objects with HeardStream, so a
@@ -105,6 +111,10 @@ class Pipeline:
         self._skipped_speculatives = 0
         self._stale_speculatives = 0
         self._stats = SttCallStats()
+        # What the mic delivered (self._input) and the finalize-to-submit
+        # clock (self._latency) this run, folded into the same summary.
+        self._input = InputStats()
+        self._latency = LatencyTracker()
         # Cumulative across every start()/stop(restarting=True) cycle in
         # this Pipeline's life, so a mid-session device swap never fragments
         # or zeroes the picture the final summary shows (see pipeline_stats).
@@ -364,16 +374,7 @@ class Pipeline:
                 q.put_nowait(frame)
             except queue.Full:
                 pass
-            self._note_dropped_frame()
-
-    def _note_dropped_frame(self) -> None:
-        self._dropped_frames += 1
-        if self._dropped_frames == 1:
-            logger.warning(
-                "frame queue full (>%d); dropping oldest frames -- the "
-                "pipeline is falling behind real time (further drops counted)",
-                FRAME_QUEUE_MAX,
-            )
+            note_dropped_frame(self)
 
     # -- segmenter thread --------------------------------------------------
 
@@ -384,6 +385,7 @@ class Pipeline:
                 return
             if stop.is_set():
                 continue  # stopping/abandoned: drain to the sentinel
+            self._input.record_frame(frame)  # clip check; RMS via MicLevel
             pipeline_frames.process_frame(self, frame)
 
     def _on_seg_event(self, event: object) -> None:
@@ -430,15 +432,10 @@ class Pipeline:
                 logger.exception("STT job failed")
                 self._bus.publish(AppError("STT_JOB_FAILED", str(exc)))
 
-    def _transcribe(self, samples: np.ndarray) -> "SttResult | None | object":
-        """Transcribe with the slot's lock held so a concurrent detach_stt
-        waits before unloading (returns ``_NO_ENGINE`` when swapped out).
-        Only the slot's lock is held (never SpecCache/TypingTracker), so no
-        lock-order cycle."""
-        with self.stt_slot.borrow() as engine:
-            if engine is None:
-                return _NO_ENGINE
-            return engine.transcribe(samples)
+    # engine.transcribe() is called from pipeline_jobs._call_engine, which
+    # borrows stt_slot directly: no other caller needs a Pipeline-level
+    # wrapper, and timing the lock wait apart from the call requires two
+    # readings inside borrow()'s own with-block.
 
     # -- MT worker ---------------------------------------------------------
 
