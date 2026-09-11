@@ -1,9 +1,12 @@
 """Microphone capture producing exact 512-sample float32 mono frames at 16 kHz.
 
-Opens `sounddevice.InputStream` directly; on a PortAudioError (exclusive /
-native-rate devices) reopens at the device rate, downmixing + resampling (soxr)
-+ rechunking. Callback failures never propagate (they'd tear down the stream):
-each category logs once, counts repeats, summarized on stop(). Zero Qt.
+Opens `sounddevice.InputStream` directly at 16 kHz mono, asking a WASAPI host
+to convert the rate (WASAPI shared mode otherwise refuses 16 kHz outright, on
+every device measured on this machine); on a PortAudioError reopens at the
+device's native rate, downmixing + resampling (soxr) + rechunking -- the path
+every WASAPI shared-mode microphone takes, not an exotic exclusive-mode one.
+Callback failures never propagate (they'd tear down the stream): each
+category logs once, counts repeats, summarized on stop(). Zero Qt.
 """
 
 from __future__ import annotations
@@ -109,8 +112,31 @@ class MicSource:
         self._status_flags = 0
 
         stream = None
+        extra = None
         try:
-            stream = self._stream_factory(
+            # WASAPI shared mode rejects 16 kHz outright (measured with
+            # sd.check_input_settings on every WASAPI input on this
+            # machine: PaErrorCode -9997 "Invalid sample rate"); asking it
+            # to convert is what lets the direct 16 kHz/mono/512 open
+            # succeed instead of always falling back for these devices.
+            # MME raises -9984 "Incompatible host API specific stream
+            # info" if handed a WasapiSettings (measured on two MME
+            # indices), so this must only apply to a WASAPI device.
+            hostapi_index = sd.query_devices(self._device, "input")["hostapi"]
+            hostapi_name = sd.query_hostapis(hostapi_index)["name"]
+            wasapi_settings = getattr(sd, "WasapiSettings", None)
+            if wasapi_settings is not None and "WASAPI" in hostapi_name.upper():
+                extra = wasapi_settings(auto_convert=True)
+        except Exception:
+            # sd.query_devices raises PortAudioError for an invalid index,
+            # and CI has no capture hardware to query at all; the probe is
+            # informational only, so any failure here must degrade to the
+            # unconverted direct open (and from there to the existing
+            # fallback) rather than raising out of start().
+            extra = None
+
+        try:
+            open_kwargs = dict(
                 samplerate=SAMPLE_RATE,
                 channels=1,
                 dtype="float32",
@@ -118,6 +144,9 @@ class MicSource:
                 device=self._device,
                 callback=self._direct_callback,
             )
+            if extra is not None:
+                open_kwargs["extra_settings"] = extra
+            stream = self._stream_factory(**open_kwargs)
             stream.start()
         except sd.PortAudioError:
             logger.warning(

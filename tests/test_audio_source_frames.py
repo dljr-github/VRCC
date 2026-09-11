@@ -7,8 +7,10 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+import pytest
 import sounddevice as sd
 
+from vrcc.audio import source as source_module
 from vrcc.audio.source import MicSource, _Rechunker, _to_mono
 
 
@@ -150,7 +152,31 @@ class TestRechunker:
         assert len(frames) == 1
 
 
+class FakeWasapiSettings:
+    """Stand-in for `sd.WasapiSettings`: records its kwargs instead of
+    touching the real cffi struct, so a test can assert what was requested
+    without depending on PortAudio internals."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
 class TestMicSourceDirectOpen:
+    @pytest.fixture(autouse=True)
+    def _stub_device_probe(self, monkeypatch):
+        # start() probes sd.query_devices / sd.query_hostapis before the
+        # direct open, live against real PortAudio state otherwise; every
+        # test in this class needs that stubbed to run without hardware.
+        # Default to a non-WASAPI host so extra_settings stays absent and
+        # the twelve pre-existing assertions below are unaffected; the
+        # WASAPI-specific cases override this.
+        monkeypatch.setattr(
+            source_module.sd, "query_devices", lambda device, kind: {"hostapi": 0}
+        )
+        monkeypatch.setattr(
+            source_module.sd, "query_hostapis", lambda index: {"name": "MME"}
+        )
+
     def test_opens_16k_mono_512_stream_with_requested_device(self):
         factory = FakeFactory()
         source = MicSource(device=3, stream_factory=factory)
@@ -304,3 +330,69 @@ class TestMicSourceDirectOpen:
         factory.streams[1].deliver(np.full((300, 1), 1.0, dtype=np.float32))
 
         assert received == []  # 300 < 512 against an empty remainder
+
+    def test_wasapi_host_opens_with_auto_convert_extra_settings(self, monkeypatch):
+        monkeypatch.setattr(
+            source_module.sd, "query_devices", lambda device, kind: {"hostapi": 2}
+        )
+        monkeypatch.setattr(
+            source_module.sd,
+            "query_hostapis",
+            lambda index: {"name": "Windows WASAPI"},
+        )
+        monkeypatch.setattr(source_module.sd, "WasapiSettings", FakeWasapiSettings)
+        factory = FakeFactory()
+        source = MicSource(device=34, stream_factory=factory)
+
+        source.start(lambda frame: None)
+
+        assert len(factory.attempts) == 1  # direct open, no fallback
+        extra = factory.attempts[0]["extra_settings"]
+        assert isinstance(extra, FakeWasapiSettings)
+        assert extra.kwargs == {"auto_convert": True}
+        assert factory.streams[0].start_calls == 1
+
+    def test_mme_host_has_no_extra_settings(self):
+        # The autouse fixture stubs an MME host; extra_settings must be
+        # absent entirely, not merely None, so a real InputStream() call
+        # never receives an unexpected kwarg for a non-WASAPI device.
+        factory = FakeFactory()
+        source = MicSource(device=3, stream_factory=factory)
+
+        source.start(lambda frame: None)
+
+        assert "extra_settings" not in factory.attempts[0]
+
+    def test_wasapi_host_without_wasapisettings_attr_has_no_extra_settings(
+        self, monkeypatch
+    ):
+        # A non-Windows sounddevice build has no WasapiSettings at all;
+        # getattr(sd, "WasapiSettings", None) must degrade to no
+        # extra_settings rather than raising AttributeError.
+        monkeypatch.setattr(
+            source_module.sd, "query_devices", lambda device, kind: {"hostapi": 2}
+        )
+        monkeypatch.setattr(
+            source_module.sd,
+            "query_hostapis",
+            lambda index: {"name": "Windows WASAPI"},
+        )
+        monkeypatch.delattr(source_module.sd, "WasapiSettings", raising=False)
+        factory = FakeFactory()
+        source = MicSource(device=34, stream_factory=factory)
+
+        source.start(lambda frame: None)
+
+        assert "extra_settings" not in factory.attempts[0]
+
+    def test_probe_failure_leaves_extra_settings_absent(self, monkeypatch):
+        def raise_err(device, kind):
+            raise sd.PortAudioError("no such device")
+
+        monkeypatch.setattr(source_module.sd, "query_devices", raise_err)
+        factory = FakeFactory()
+        source = MicSource(device=99, stream_factory=factory)
+
+        source.start(lambda frame: None)  # must not raise
+
+        assert "extra_settings" not in factory.attempts[0]
