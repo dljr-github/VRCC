@@ -44,6 +44,28 @@ def test_mic_meter_active_toggle_does_not_crash(qapp):
     m.deleteLater()
 
 
+def test_mic_meter_set_level_maps_rms_to_filled_segments(qapp):
+    from vrcc.gui.widgets import MicMeter
+
+    m = MicMeter()
+
+    def filled(rms):
+        m.set_level(rms)
+        return round(m._level * m._BARS)
+
+    assert filled(0.0) == 0
+    # Energy-gate default (300/32768) and _MIC_ACTIVE_RMS (0.01) sit near the
+    # dBFS floor, at 1/8 and 2/8 (see the range comment in widgets.py).
+    assert filled(300 / 32768) == 1
+    assert filled(0.01) == 2
+    assert filled(0.05) == 4
+    assert filled(0.1) == 5
+    # Only a signal near -6 dBFS (this meter's ceiling) fills it.
+    assert filled(0.5) == 8
+    assert filled(1.0) == 8
+    m.deleteLater()
+
+
 def test_card_uses_provided_palette(qapp):
     from vrcc.gui.style import PALETTE
     from vrcc.gui.widgets import Card

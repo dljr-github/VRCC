@@ -11,7 +11,7 @@ import pytest
 import sounddevice as sd
 
 from vrcc.audio import source as source_module
-from vrcc.audio.source import MicSource, _Rechunker, _to_mono
+from vrcc.audio.source import MicSource, _Rechunker, _count_clipped, _to_mono
 
 
 class FakeStream:
@@ -87,6 +87,22 @@ class TestToMono:
         result = _to_mono(x).copy()
         x[:] = 999.0
         np.testing.assert_allclose(result, [1.0, 2.0])
+
+
+class TestCountClipped:
+    def test_1d_counts_samples_at_or_beyond_threshold(self):
+        x = np.array([0.5, 0.999, 1.0, -1.0, -0.998], dtype=np.float32)
+        assert _count_clipped(x) == 3
+
+    def test_2d_any_channel_over_threshold_counts_the_row(self):
+        # Row 0 clips on channel 1 only; a channel average (0.1+0.999)/2 =
+        # 0.55 would miss it, so any-channel max is what must be compared.
+        x = np.array([[0.1, 0.999], [0.5, 0.5], [1.0, 0.0]], dtype=np.float32)
+        assert _count_clipped(x) == 2
+
+    def test_below_threshold_is_not_counted(self):
+        x = np.full((10, 1), 0.998, dtype=np.float32)
+        assert _count_clipped(x) == 0
 
 
 class TestRechunker:
@@ -384,6 +400,66 @@ class TestMicSourceDirectOpen:
         source.start(lambda frame: None)
 
         assert "extra_settings" not in factory.attempts[0]
+
+    def test_successful_open_logs_device_hostapi_and_chain(self, caplog):
+        factory = FakeFactory()
+        source = MicSource(device=7, stream_factory=factory)
+
+        with caplog.at_level(logging.INFO, logger="vrcc.audio"):
+            source.start(lambda frame: None)
+
+        open_records = [
+            r for r in caplog.records if "microphone capture open" in r.getMessage()
+        ]
+        assert len(open_records) == 1
+        msg = open_records[0].getMessage()
+        assert "device=7" in msg
+        assert "host_api=MME" in msg  # from the autouse probe stub
+        assert "resample_fallback=False" in msg  # direct open won
+
+    def test_saturated_samples_are_counted_and_reported_on_stop(self, caplog):
+        factory = FakeFactory()
+        source = MicSource(stream_factory=factory)
+        source.start(lambda frame: None)
+
+        quiet = np.zeros((512, 1), dtype=np.float32)
+        loud = np.full((512, 1), 1.0, dtype=np.float32)
+        with caplog.at_level(logging.WARNING, logger="vrcc.audio"):
+            factory.streams[0].deliver(quiet)
+            factory.streams[0].deliver(loud)
+            source.stop()
+
+        # Still exactly one stop-summary record: a saturation-only session
+        # has no repeated errors, so "suppressed" would not appear in it
+        # (that word is reserved for the de-duplicated-error segment); the
+        # stable "audio capture stopped" prefix is what pins it to one line.
+        summaries = [
+            r for r in caplog.records if "audio capture stopped" in r.getMessage()
+        ]
+        assert len(summaries) == 1
+        msg = summaries[0].getMessage()
+        assert "512/1024" in msg
+        assert "50.00%" in msg
+
+    def test_clip_count_uses_raw_indata_not_denoised_output(self):
+        # denoise.py clamps its output unconditionally; counting downstream
+        # of it would report saturation the driver never produced.
+        class LoudDenoiser:
+            def process(self, x):
+                return np.full_like(x, 2.0)
+
+            def reset(self):
+                pass
+
+        factory = FakeFactory()
+        source = MicSource(stream_factory=factory, denoiser=LoudDenoiser())
+        source.start(lambda frame: None)
+
+        quiet = np.full((512, 1), 0.5, dtype=np.float32)
+        factory.streams[0].deliver(quiet)
+
+        assert source._clipped_samples == 0
+        assert source._total_samples == 512
 
     def test_probe_failure_leaves_extra_settings_absent(self, monkeypatch):
         def raise_err(device, kind):

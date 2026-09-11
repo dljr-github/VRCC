@@ -35,6 +35,24 @@ class AudioSource(Protocol):
         ...
 
 
+# float32 full scale is +-1.0; "at or beyond" catches a driver that never
+# lands on exactly 1.0.
+_CLIP_THRESHOLD = 0.999
+
+
+def _count_clipped(indata: np.ndarray) -> int:
+    """Count samples (rows) with any channel at or beyond `_CLIP_THRESHOLD`.
+
+    Any-channel semantics on raw `indata`, ahead of the mono downmix and (on
+    the fallback path) the resampler: averaging channels can mask a clipped
+    one, and a polyphase resample filter both softens a true flat top and
+    overshoots past 1.0 on a hot-but-unclipped signal, so neither downstream
+    signal reports what the driver actually delivered.
+    """
+    peak = np.abs(indata) if indata.ndim == 1 else np.abs(indata).max(axis=1)
+    return int(np.count_nonzero(peak >= _CLIP_THRESHOLD))
+
+
 def _to_mono(x: np.ndarray) -> np.ndarray:
     """Downmix `x` to a 1-D mono float32 signal.
 
@@ -96,6 +114,11 @@ class MicSource:
         self._on_frame_errors = 0
         self._callback_errors = 0
         self._status_flags = 0
+        # Saturation counters: raw-indata samples (any channel) at or beyond
+        # _CLIP_THRESHOLD, and the total seen, reset alongside the error
+        # counters below on every start().
+        self._clipped_samples = 0
+        self._total_samples = 0
 
     def start(self, on_frame: Callable[[np.ndarray], None]) -> None:
         if self._stream is not None:
@@ -110,9 +133,15 @@ class MicSource:
         self._on_frame_errors = 0
         self._callback_errors = 0
         self._status_flags = 0
+        self._clipped_samples = 0
+        self._total_samples = 0
+        # Cleared here (not just in __init__) so the open-summary log below
+        # reflects this session's chain, not a fallback from a prior one.
+        self._resample_in_rate = None
 
         stream = None
         extra = None
+        hostapi_name = "unknown"  # only the WASAPI probe below can name it
         try:
             # WASAPI shared mode rejects 16 kHz outright (measured with
             # sd.check_input_settings on every WASAPI input on this
@@ -169,6 +198,12 @@ class MicSource:
             stream = self._start_fallback()
 
         self._stream = stream
+        logger.info(
+            "microphone capture open: device=%r host_api=%s resample_fallback=%s",
+            self._device,
+            hostapi_name,
+            self._resample_in_rate is not None,
+        )
 
     def _start_fallback(self):
         info = sd.query_devices(self._device, "input")
@@ -213,15 +248,34 @@ class MicSource:
         self._log_suppressed_summary()
 
     def _log_suppressed_summary(self) -> None:
-        parts = []
+        # Saturation is a measurement, not a de-duplicated repeat, so it gets
+        # its own labeled segment rather than joining the "suppressed:" list
+        # -- folding it in there would read as if the loud samples themselves
+        # had been suppressed, which is false on a session with no other errors.
+        error_parts = []
         if self._on_frame_errors > 1:
-            parts.append(f"{self._on_frame_errors - 1} repeated on_frame errors")
+            error_parts.append(f"{self._on_frame_errors - 1} repeated on_frame errors")
         if self._callback_errors > 1:
-            parts.append(f"{self._callback_errors - 1} repeated callback errors")
+            error_parts.append(f"{self._callback_errors - 1} repeated callback errors")
         if self._status_flags > 1:
-            parts.append(f"{self._status_flags - 1} repeated stream status flags")
-        if parts:
-            logger.warning("audio capture stopped; suppressed: %s", "; ".join(parts))
+            error_parts.append(f"{self._status_flags - 1} repeated stream status flags")
+
+        saturation = None
+        if self._clipped_samples > 0:
+            fraction = self._clipped_samples / self._total_samples
+            saturation = (
+                f"saturation: {fraction:.2%} samples "
+                f"({self._clipped_samples}/{self._total_samples})"
+            )
+
+        if not error_parts and saturation is None:
+            return
+        segments = []
+        if error_parts:
+            segments.append("suppressed: " + "; ".join(error_parts))
+        if saturation is not None:
+            segments.append(saturation)
+        logger.warning("audio capture stopped; %s", "; ".join(segments))
 
     def _note_status(self, status) -> None:
         self._status_flags += 1
@@ -242,6 +296,8 @@ class MicSource:
         try:
             if status:
                 self._note_status(status)
+            self._total_samples += indata.shape[0]
+            self._clipped_samples += _count_clipped(indata)
             mono = _to_mono(indata)
             for frame in self._rechunker.push(mono):
                 self._emit(frame)
@@ -260,6 +316,8 @@ class MicSource:
         try:
             if status:
                 self._note_status(status)
+            self._total_samples += indata.shape[0]
+            self._clipped_samples += _count_clipped(indata)
             mono = _to_mono(indata)
             resampled = soxr.resample(mono, self._resample_in_rate, SAMPLE_RATE)
             resampled = np.asarray(resampled, dtype=np.float32)
