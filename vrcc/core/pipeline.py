@@ -20,6 +20,7 @@ from vrcc.audio.segmenter import (
     SegDiscard, SegFinal, SegLevel, SegSpeculative, SegSpeechStart,
 )
 from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source, pipeline_typed
+from vrcc.core.engine_slot import EngineSlot
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_jobs import _NO_ENGINE
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
@@ -67,8 +68,11 @@ class Pipeline:
         self._bus = bus
         self._source = source
         self._segmenter = segmenter
-        self._stt = stt
-        self._mt = mt
+        # Public: engine_stack shares these objects with HeardStream, so a
+        # swap through this pipeline is visible there too without a second
+        # notification path. See EngineSlot for the lock each one owns.
+        self.stt_slot: EngineSlot = EngineSlot(stt)
+        self.mt_slot: EngineSlot = EngineSlot(mt)
         self._chatbox = chatbox
         self._mute = mute
 
@@ -81,12 +85,8 @@ class Pipeline:
         # that thread.
         self._frame_gated = False
 
-        # _stt_lock/_mt_lock guard engine calls AND swaps, so an engine is
-        # never unloaded mid-call; _swapping pauses new-caption creation during
-        # a swap. Lock order: never held under the SpecCache/TypingTracker
-        # locks (no cycle).
-        self._stt_lock = threading.Lock()
-        self._mt_lock = threading.Lock()
+        # Pauses new-caption creation during a model swap. Lock order: never
+        # held under the SpecCache/TypingTracker locks (no cycle).
         self._swapping = False
 
         # Queues + threads (created fresh in start()).
@@ -158,10 +158,14 @@ class Pipeline:
             self._stt_thread = self._spawn(
                 self._stt_loop, "PipelineSTT", self._stt_queue, stop
             )
-            if self._mt is not None:
-                self._mt_thread = self._spawn(
-                    self._mt_loop, "PipelineMT", self._mt_queue, stop
-                )
+            # Unconditional: mt=None at start still needs a consumer so a
+            # later set_mt() (translation switched on mid-session) has a
+            # worker draining _mt_queue already, rather than jobs piling up
+            # with nothing to read them and backpressure locking the STT
+            # worker behind a full queue.
+            self._mt_thread = self._spawn(
+                self._mt_loop, "PipelineMT", self._mt_queue, stop
+            )
 
             # Source last (consumers ready before frames arrive). On a mic-open
             # failure, unwind the just-spawned workers so _started stays False
@@ -225,7 +229,7 @@ class Pipeline:
         never loaded or was swapped out mid-session; a caller that needs to
         know whether a row will actually reach a translated state must check
         both."""
-        return self._mt is not None
+        return self.mt_slot.current is not None
 
     @property
     def segmenter(self) -> "Segmenter":
@@ -245,28 +249,22 @@ class Pipeline:
         self._swapping = bool(value)
 
     def detach_stt(self) -> "SttEngine | None":
-        """Remove and return the current STT engine. Taking ``_stt_lock`` waits
-        for any in-flight ``transcribe`` first, so it's never unloaded mid-call."""
-        with self._stt_lock:
-            old, self._stt = self._stt, None
-            return old
+        """Remove and return the current STT engine. Waits for any in-flight
+        ``transcribe`` first (see EngineSlot), so it's never unloaded mid-call."""
+        return self.stt_slot.swap(None)
 
     def set_stt(self, engine: "SttEngine | None") -> None:
         """Install a new STT engine (picked up by the next STT job)."""
-        with self._stt_lock:
-            self._stt = engine
+        self.stt_slot.swap(engine)
 
     def detach_mt(self) -> "TranslateEngine | None":
-        """Remove and return the current MT engine. Taking ``_mt_lock`` waits
-        for any in-flight ``translate`` first, so it's never unloaded mid-call."""
-        with self._mt_lock:
-            old, self._mt = self._mt, None
-            return old
+        """Remove and return the current MT engine. Waits for any in-flight
+        ``translate`` first (see EngineSlot), so it's never unloaded mid-call."""
+        return self.mt_slot.swap(None)
 
     def set_mt(self, engine: "TranslateEngine | None") -> None:
         """Install a new MT engine (``None`` disables translation)."""
-        with self._mt_lock:
-            self._mt = engine
+        self.mt_slot.swap(engine)
 
     def set_mute(self, mute: "MuteSync | None") -> None:
         """Install a mute-sync coordinator (``None`` removes it). The
@@ -433,11 +431,11 @@ class Pipeline:
                 self._bus.publish(AppError("STT_JOB_FAILED", str(exc)))
 
     def _transcribe(self, samples: np.ndarray) -> "SttResult | None | object":
-        """Transcribe under _stt_lock so a concurrent detach_stt waits before
-        unloading (returns ``_NO_ENGINE`` when swapped out). Only _stt_lock is
-        held (never SpecCache/TypingTracker), so no lock-order cycle."""
-        with self._stt_lock:
-            engine = self._stt
+        """Transcribe with the slot's lock held so a concurrent detach_stt
+        waits before unloading (returns ``_NO_ENGINE`` when swapped out).
+        Only the slot's lock is held (never SpecCache/TypingTracker), so no
+        lock-order cycle."""
+        with self.stt_slot.borrow() as engine:
             if engine is None:
                 return _NO_ENGINE
             return engine.transcribe(samples)

@@ -50,7 +50,7 @@ class EngineStack:
     chatbox: ChatboxSender
     mute: MuteSync | None
     # Present only when the user opted in to captioning what they hear. Its own
-    # capture and segmenter, the pipeline's engines and locks.
+    # capture and segmenter, the pipeline's engine slots.
     heard: "HeardStream | None" = None
 
 
@@ -119,7 +119,7 @@ def build_engine_stack(
         cfg, bus, source, segmenter, stt_engine, mt_engine, chatbox, mute
     )
 
-    heard = _build_heard(cfg, bus, pipeline, stt_engine, mt_engine)
+    heard = _build_heard(cfg, bus, pipeline)
     if heard is not None:
         # The mic's own VAD decides when the user is speaking; the heard stream
         # only needs to be told, so it can drop its own echo.
@@ -138,7 +138,7 @@ def build_engine_stack(
     )
 
 
-def _build_heard(cfg, bus, pipeline, stt_engine, mt_engine):
+def _build_heard(cfg, bus, pipeline):
     """The speaker-capture stream, built whether or not it is switched on.
 
     Built unconditionally because the user can turn it on mid-session and a
@@ -146,9 +146,10 @@ def _build_heard(cfg, bus, pipeline, stt_engine, mt_engine):
     is opened and soundcard is not even imported until start().
 
     Its own Segmenter, because VAD state is per stream and one shared instance
-    would let either voice end the other's utterance. The ENGINES are the
-    pipeline's, under the pipeline's locks: a second copy of the voice model
-    costs the VRAM the card was sized for once.
+    would let either voice end the other's utterance. The ENGINE SLOTS are the
+    pipeline's own objects, not copies: a second copy of the voice model costs
+    the VRAM the card was sized for once, and sharing the slot itself (rather
+    than the engine plus a lock) means a pipeline swap is a swap here too.
     """
     from vrcc.audio.loopback import LoopbackSource
     from vrcc.core.heard import HeardStream
@@ -159,10 +160,8 @@ def _build_heard(cfg, bus, pipeline, stt_engine, mt_engine):
         bus,
         LoopbackSource(cfg.audio.hear_others_device or None),
         Segmenter(cfg.vad, heard_vad.prob),
-        stt_engine,
-        mt_engine,
-        pipeline._stt_lock,
-        pipeline._mt_lock,
+        pipeline.stt_slot,
+        pipeline.mt_slot,
     )
 
 
@@ -218,45 +217,3 @@ def start_hear_others_guarded(stack: EngineStack, cfg, bus: EventBus) -> None:
         # down. Switch the setting off here too, since nothing else will.
         cfg.audio.hear_others_enabled = False
         bus.publish(AppError("HEARD_DEVICE_FAILED", f"start failed: {exc}"))
-
-
-class EngineOwners:
-    """Route an engine hot-swap into every consumer of the shared engines.
-
-    :class:`~vrcc.core.reloading._Reloader` installs into one object, and for
-    most of this app's life that object was the pipeline. The heard stream is
-    a second holder of the same STT and MT engines, so a swap that reached only
-    the pipeline left it calling an engine the reloader had already unloaded:
-    every decode raised, the handler swallowed it, and captioning what you hear
-    went silent for the rest of the session with its toggle still lit.
-
-    Exposes exactly the four methods the reloader uses, so it drops in where
-    the pipeline did.
-    """
-
-    def __init__(self, pipeline, heard) -> None:
-        self._pipeline = pipeline
-        self._heard = heard
-
-    def detach_stt(self):
-        # The consumer first. It reads its engine under the same lock
-        # detach_stt takes, so clearing it here makes the wait inside
-        # detach_stt the last decode that engine can ever see.
-        if self._heard is not None:
-            self._heard.set_stt(None)
-        return self._pipeline.detach_stt()
-
-    def set_stt(self, engine) -> None:
-        self._pipeline.set_stt(engine)
-        if self._heard is not None:
-            self._heard.set_stt(engine)
-
-    def detach_mt(self):
-        if self._heard is not None:
-            self._heard.set_mt(None)
-        return self._pipeline.detach_mt()
-
-    def set_mt(self, engine) -> None:
-        self._pipeline.set_mt(engine)
-        if self._heard is not None:
-            self._heard.set_mt(engine)

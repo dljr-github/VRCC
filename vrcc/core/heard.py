@@ -12,10 +12,10 @@ any kind, so "other people's words are never broadcast under your name" is a
 property of the construction rather than a branch someone could invert later.
 
 It never runs two decodes at once. The STT and MT engines are SHARED with the
-main pipeline rather than duplicated, under locks the caller passes in, because
-a second copy of large-v3-turbo costs another 2.5 GB of VRAM and a 12 GB card
-has no room for it. The cost is latency instead of memory: when both streams
-speak together, one waits.
+main pipeline rather than duplicated, through the same EngineSlot objects the
+pipeline swaps, because a second copy of large-v3-turbo costs another 2.5 GB
+of VRAM and a 12 GB card has no room for it. The cost is latency instead of
+memory: when both streams speak together, one waits.
 
 Source language is always detected. You cannot know in advance what someone
 else will speak, which is the whole reason for the feature.
@@ -79,21 +79,18 @@ class HeardStream:
         bus,
         source,
         segmenter,
-        stt,
-        mt,
-        stt_lock: threading.Lock,
-        mt_lock: threading.Lock,
+        stt_slot,
+        mt_slot,
     ) -> None:
         self._config = config
         self._bus = bus
         self._source = source
         self._segmenter = segmenter
-        self._stt = stt
-        self._mt = mt
-        # The MAIN pipeline's locks, not fresh ones: sharing an engine is only
-        # safe if both callers serialise on the same object.
-        self._stt_lock = stt_lock
-        self._mt_lock = mt_lock
+        # The MAIN pipeline's EngineSlot objects, not copies: a swap the
+        # pipeline makes is a swap on the object this stream reads too, so
+        # there is no second place that needs to be told about it.
+        self._stt_slot = stt_slot
+        self._mt_slot = mt_slot
 
         # Monotonic timestamp of the last frame the MICROPHONE judged to be
         # speech, written by the bus thread and read by the worker. A float
@@ -128,25 +125,6 @@ class HeardStream:
     @property
     def bus(self):
         return self._bus
-
-    def set_stt(self, engine) -> None:
-        """Point the stream at the voice engine the pipeline now holds.
-
-        The engines are shared, and only the pipeline is told when one is
-        swapped. Without this the stream keeps the object the reloader already
-        unloaded, every decode raises into :meth:`_work`'s handler, and the
-        feature goes silent for the rest of the session with its toggle still
-        lit. Taken under the shared lock, so the swap cannot land while a
-        decode is running on the engine about to be unloaded.
-        """
-        with self._stt_lock:
-            self._stt = engine
-
-    def set_mt(self, engine) -> None:
-        """Point the stream at the translator the pipeline now holds. Also the
-        path by which translation switched on after launch reaches it."""
-        with self._mt_lock:
-            self._mt = engine
 
     def reconfigure_vad(self, cfg) -> None:
         """Adopt new VAD timings, as the main pipeline's segmenter does.
@@ -276,15 +254,11 @@ class HeardStream:
             self._suppressed += 1
             logger.debug("dropped a heard utterance that overlapped your speech")
             return
-        with self._stt_lock:
+        with self._stt_slot.borrow() as engine:
             # This stream must never inherit the user's configured spoken
             # language: an English speaker's setting would decode every
             # Japanese speaker in the room as English, which produces
             # confident nonsense rather than an error.
-            #
-            # Read inside the lock: a hot swap sets it to None here first, so
-            # an engine that is about to be unloaded is never entered.
-            engine = self._stt
             if engine is None:
                 return
             result = engine.transcribe(samples, detect_language=True)
@@ -306,7 +280,7 @@ class HeardStream:
         """Translate into the user's own languages, which is the direction that
         helps: they need what was said rendered into something they read."""
         cfg = self._config.translate
-        if self._mt is None or not cfg.enabled:
+        if self._mt_slot.current is None or not cfg.enabled:
             return []
         # from_whisper, not get: engines report the language they detected as
         # a code, and get() keys on display names, so every utterance raised
@@ -329,8 +303,7 @@ class HeardStream:
             ]
             if not targets:
                 return []
-            with self._mt_lock:
-                engine = self._mt
+            with self._mt_slot.borrow() as engine:
                 if engine is None:
                     return []
                 return engine.translate(result.text, source, targets)

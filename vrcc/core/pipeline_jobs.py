@@ -156,8 +156,8 @@ def _call_engine(
     """Transcribe via ``p._transcribe`` and record the call's wall-clock cost.
 
     Timing starts here, after the job was dequeued, so queue wait is never
-    counted. It does cover ``_stt_lock``, which ``p._transcribe`` takes and
-    which a model swap or the 'heard' stream can hold for seconds: a run
+    counted. It does cover the STT slot's lock, which ``p._transcribe`` takes
+    and which a model swap or the 'heard' stream can hold for seconds: a run
     that swapped models reports those seconds as engine time.
 
     Nothing is recorded for ``_NO_ENGINE``, which means ``engine.transcribe``
@@ -205,7 +205,7 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
 
     # Reuse the speculative's cached result on identical samples, else
     # transcribe fresh. The spec lock is released before _transcribe (never
-    # nested inside _stt_lock), preserving lock ordering.
+    # nested inside the STT slot's lock), preserving lock ordering.
     result = p._spec.pop_result(key)
     if result is _MISSING:
         result = _call_engine(p, job.samples, stop, speculative=False)
@@ -238,7 +238,7 @@ def _send_caption(
             no_speech_prob=no_speech_prob,
         )
     )
-    if p._mt is not None and p._config.translate.enabled:
+    if p.mt_slot.current is not None and p._config.translate.enabled:
         # Register MT ownership of typing-off BEFORE enqueueing, so the MT
         # worker can't resolve it before the exemption (_mark_finalized)
         # is visible.
@@ -351,20 +351,32 @@ def send_untranslated(p: "Pipeline", job: _MtJob) -> None:
 
 
 def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
+    if p._mt_queue.full():
+        # Shed at the consumer, oldest job first: a queue still full after a
+        # dequeue means the engine is falling behind real time. Sending this
+        # job untranslated keeps the STT worker's _enqueue from blocking on
+        # this queue; shedding at the producer instead would let a late
+        # translation preempt an already-sent original (osc/chatbox.py's
+        # coalesce-latest-wins clears the pending queue on every submit).
+        if stop.is_set():
+            return  # abandoned mid-call: discard, publish nothing
+        send_untranslated(p, job)
+        return
     try:
-        # Call the engine under _mt_lock so a concurrent detach_mt waits
-        # before unloading; a None engine (disabled/swapped-out) -> send
-        # original. Only _mt_lock held here (no lock-order cycle).
-        with p._mt_lock:
-            engine = p._mt
-            # A target matching the source would only echo the transcription,
-            # so the engine is never asked for it. Reachable when
-            # source_language is "auto" (the GUI excludes an explicit source
-            # from the target combos); "auto" resolves whisper "zh" to Chinese
-            # Simplified, so a Chinese Traditional target keeps translating
-            # (script conversion).
-            all_targets = [languages.get(name) for name in p._config.translate.targets]
-            targets = [lang for lang in all_targets if lang != job.src]
+        # A target matching the source would only echo the transcription, so
+        # the engine is never asked for it. Reachable when source_language is
+        # "auto" (the GUI excludes an explicit source from the target
+        # combos); "auto" resolves whisper "zh" to Chinese Simplified, so a
+        # Chinese Traditional target keeps translating (script conversion).
+        # Built inside the try: languages.get raises on a name the registry
+        # doesn't know, and that must still fall through to send_untranslated
+        # rather than reach _mt_loop's handler, which never submits.
+        all_targets = [languages.get(name) for name in p._config.translate.targets]
+        targets = [lang for lang in all_targets if lang != job.src]
+        # Call the engine with the slot's lock held so a concurrent detach_mt
+        # waits before unloading; a None engine (disabled/swapped-out) ->
+        # send original. Only that lock held here (no lock-order cycle).
+        with p.mt_slot.borrow() as engine:
             if engine is None:
                 translations = None
             elif not targets:

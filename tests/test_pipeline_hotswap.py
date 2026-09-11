@@ -15,6 +15,7 @@ from .conftest import (
     FakeChatbox,
     FakeMt,
     FakeMute,
+    FakeSegmenter,
     FakeStt,
     collect,
     make_pipeline,
@@ -288,3 +289,93 @@ def test_process_stt_job_speculative_dropped_when_engine_detached():
     )
     assert stt.calls == 0  # the detached engine is never invoked
     assert env.pipeline._spec.pop_result(key) is _MISSING  # nothing cached
+
+
+# -- the MT-worker deadlock (translation switched on after start) -----------
+
+
+class _PerFrameSegmenter(FakeSegmenter):
+    """Emits one SegFinal per fed frame, so each frame becomes its own
+    STT/MT job pair -- the shape that fills both queues past JOB_QUEUE_MAX."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._next_id = 0
+
+    def process(self, frame):
+        super().process(frame)
+        self._next_id += 1
+        return [SegFinal(utterance_id=self._next_id, samples=frame)]
+
+
+def test_set_mt_after_start_does_not_deadlock_the_stt_worker():
+    # Regression: starting with mt=None spawned no MT worker, so set_mt()
+    # installed an engine with nothing ever consuming _mt_queue. Job 5
+    # blocked the STT worker's _enqueue behind a full MT queue, and the
+    # segmenter thread (the sole consumer of the frame queue) stalled with
+    # it. 12 frames, JOB_QUEUE_MAX == 4, reproduces it.
+    env = make_pipeline(mt=None, segmenter=_PerFrameSegmenter())
+    env.config.audio.energy_gate_enabled = False
+    with running(env.pipeline):
+        env.pipeline.set_mt(FakeMt())
+        for _ in range(12):
+            env.source.on_frame(sample())
+        assert wait_until(lambda: env.stt.calls >= 12, timeout=3.0), env.stt.calls
+        assert wait_until(
+            lambda: len(env.chatbox.submits) >= 12, timeout=3.0
+        ), env.chatbox.submits
+        assert env.pipeline._stt_queue.qsize() == 0
+        assert env.pipeline._mt_queue.qsize() == 0
+
+
+def test_mt_worker_thread_exists_after_start_even_when_mt_is_none():
+    # The MT worker must run whether or not an engine was installed at start,
+    # so a later set_mt() always has a consumer waiting for it.
+    env = make_pipeline(mt=None)
+    with running(env.pipeline):
+        assert env.pipeline._mt_thread is not None
+        assert env.pipeline._mt_thread.is_alive()
+
+
+class _BlockingMt:
+    """Never returns until released -- proves a shed job never reaches the
+    engine (the test releases it only after asserting that)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.gate = threading.Event()
+
+    def translate(self, text, src, targets):
+        self.calls += 1
+        self.gate.wait(2.0)
+        return [(t.display, f"{t.display}:{text}") for t in targets]
+
+
+def test_full_mt_queue_sheds_the_oldest_job_untranslated_in_order():
+    # Shed at the consumer. process_mt_job checks the queue it was just
+    # dequeued from (not the engine) before doing any translation work, so a
+    # backlog drains as untranslated sends instead of blocking the STT worker
+    # behind a slow engine. Never shed at the producer: a late translation
+    # landing after an already-sent original would preempt it
+    # (osc/chatbox.py's coalesce-latest-wins clears the pending queue on
+    # every submit).
+    from vrcc.core import languages, pipeline_jobs
+    from vrcc.core.pipeline_jobs import _MtJob
+
+    mt = _BlockingMt()
+    env = make_pipeline(mt=mt)
+    src = languages.get("English")
+    for i in range(4):
+        env.pipeline._mt_queue.put_nowait(
+            _MtJob(i, f"backlog {i}", src, manage_typing=False)
+        )
+    assert env.pipeline._mt_queue.full()
+
+    for i in range(4, 7):
+        job = _MtJob(i, f"oldest {i}", src, manage_typing=True)
+        pipeline_jobs.process_mt_job(env.pipeline, job, threading.Event())
+
+    assert mt.calls == 0  # the engine was never entered by a shed job
+    assert env.chatbox.submits == [
+        ("oldest 4", 4), ("oldest 5", 5), ("oldest 6", 6)
+    ]  # FIFO: oldest shed first, in the order they were dequeued
