@@ -274,11 +274,12 @@ def bench_model(
     caller applied it (via ``bench_noise.apply_noise``); ``noise_type`` and
     ``noise_snr_db`` are recorded here, not applied.
 
-    The quality gates are opened for the run (``avg_logprob``/``no_speech``)
-    so WER measures what the model recognized, not what the gates suppressed:
-    a gated utterance returns no text, and scoring that as a full sentence of
-    deletions would blame the model for a policy decision. Utterances the
-    app's default gates *would* have dropped are counted in ``gated`` instead.
+    All five quality gates are opened (whisper's avg_logprob, no_speech and
+    compression_ratio; parakeet_avg_logprob and sensevoice_avg_logprob for
+    those onnx-asr backends) so WER measures what the model recognized, not
+    what a gate would suppress. Utterances the default gates *would* drop
+    are counted in ``gated`` instead, against whichever threshold fits,
+    except compression_ratio (no SttResult field): that drop is scored text only.
     """
     import jiwer
     from whisper_normalizer.english import EnglishTextNormalizer
@@ -296,6 +297,9 @@ def bench_model(
         beam_size=beam,
         avg_logprob_gate=-1e9,
         no_speech_gate=1.0,
+        compression_ratio_gate=1e9,
+        parakeet_avg_logprob_gate=-1e9,
+        sensevoice_avg_logprob_gate=-1e9,
     )
     engine = create_stt_engine(cfg, models_dir / "whisper" / model_id, bus)
 
@@ -307,6 +311,14 @@ def bench_model(
     warmup_s = time.perf_counter() - t0
     for _ in range(_UNTIMED_WARM_RUNS):
         engine.transcribe(utts[0][1])
+
+    # onnx_asr/sensevoice report confidence on their own tighter scales;
+    # whisper's -0.8 would misclassify almost every one of their utterances.
+    backend = WHISPER_MODELS[model_id].backend
+    logprob_gate = {
+        "onnx_asr": defaults.parakeet_avg_logprob_gate,
+        "sensevoice": defaults.sensevoice_avg_logprob_gate,
+    }.get(backend, defaults.avg_logprob_gate)
 
     hyps: list[str] = []
     latencies: list[float] = []
@@ -320,7 +332,7 @@ def bench_model(
             empty += 1  # no text at all: the gates are open, so this is real
         else:
             if (
-                result.avg_logprob < defaults.avg_logprob_gate
+                result.avg_logprob < logprob_gate
                 or result.no_speech_prob > defaults.no_speech_gate
             ):
                 gated += 1
@@ -365,8 +377,9 @@ def bench_model(
             sorted(latencies)[min(int(len(latencies) * 0.9), len(latencies) - 1)], 3
         ),
         "wer": round(jiwer.wer(refs_norm, hyps_norm), 4),
-        # Utterances the app's default quality gates would have suppressed
-        # (no caption shown). Scored text either way: see the docstring.
+        # Utterances the app's default gates would suppress (no caption
+        # shown), avg_logprob/no_speech only: compression_ratio isn't on
+        # SttResult, so a dropped repetition loop lands in neither counter.
         "gated": gated,
         "empty": empty,
         "engine_events": [e for e in events if e[0] != "loading"],
