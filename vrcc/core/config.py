@@ -89,6 +89,19 @@ class SttConfig(BaseModel):
     without_timestamps: bool = True
     avg_logprob_gate: float = -0.8
     no_speech_gate: float = 0.6
+    # Parakeet and SenseVoice each report a mean per-token logprob on their
+    # own scale, an order of magnitude tighter than whisper's length-weighted
+    # avg_logprob_gate above, so that gate does not apply to them. Measured
+    # through create_stt_engine on real weights: 50 LibriSpeech test-clean
+    # utterances (tools/bench_stt.load_utterances), babble = 6 other
+    # utterances summed and mixed in at 0 dB (tools/denoise_realnoise_gate.
+    # mix_at_snr). Worst clean utterance was -0.204 (parakeet) / -0.173
+    # (sensevoice); both gates sit about 2x past that, biased toward letting
+    # marginal audio through rather than the clean/babble20 boundary. At 0 dB
+    # babble, suppressed count on the same 50 utterances went 8->46
+    # (parakeet) and 0->36 (sensevoice).
+    parakeet_avg_logprob_gate: float = -0.4
+    sensevoice_avg_logprob_gate: float = -0.35
     initial_prompt: str = ""
     no_repeat_ngram_size: int = 3
     # Drop a transcription whose worst segment compresses past this. A runaway

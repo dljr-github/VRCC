@@ -14,10 +14,19 @@ Device ``auto`` runs on CPU even when CUDA is available, for the same reason
 session takes VRAM from VRChat. An explicit ``cuda`` config still builds CUDA
 sessions.
 
-The decoder is greedy CTC, so there is no beam to widen and no per-segment
-confidence to gate on -- results carry neutral gate values (0.0) and the VAD is
-the effective quality gate. What the model does report, and Parakeet does not,
-is the language it heard: the decode is prefixed with tags like
+The decoder is greedy CTC, so there is no beam to widen, but the logits it
+runs are still a real distribution: softmax gives each frame's chosen-token
+logprob, and the mean over non-blank frames (this model is CTC, so most
+frames are blank even on clean speech) is checked against
+``cfg.sensevoice_avg_logprob_gate`` -- see
+:attr:`vrcc.core.config.SttConfig.sensevoice_avg_logprob_gate` for the
+measurement backing that threshold. The blank-frame ratio was also
+measured as a no-speech signal and rejected: on LibriSpeech test-clean with
+6-speaker babble (50 utterances/condition, this machine, 2026-09-12) it was
+0.72 at clean and only 0.77 at 0 dB babble, too close to gate on without also
+catching clean speech, so ``no_speech_prob`` stays a neutral 0.0. What the
+model does report, and Parakeet does not, is the language it heard: the
+decode is prefixed with tags like
 ``<|ja|><|NEUTRAL|><|Speech|><|withitn|>``, so ``SttResult.language`` carries a
 real detected language and a translating "auto" source stays correct. Zero Qt.
 """
@@ -196,10 +205,14 @@ class SenseVoiceEngine:
     ) -> SttResult | None:
         """Transcribe ``samples`` (mono float32, 16 kHz) into an :class:`SttResult`.
 
-        Returns ``None`` for audio too short to make one filterbank frame and
-        for empty text. ``language`` is the language the model reports, falling
-        back to the configured source when the decode carries no usable tag.
-        Raises ``RuntimeError`` if called before :meth:`load`.
+        Returns ``None`` for audio too short to make one filterbank frame, for
+        empty text, or when the mean non-blank-frame logprob falls below
+        ``cfg.sensevoice_avg_logprob_gate`` (see
+        :attr:`vrcc.core.config.SttConfig.sensevoice_avg_logprob_gate` for the
+        measurement backing that threshold). ``language`` is the language the
+        model reports, falling back to the configured source when the decode
+        carries no usable tag. Raises ``RuntimeError`` if called before
+        :meth:`load`.
 
         ``detect_language`` feeds the model its own ``lang_auto`` slot instead
         of the configured spoken language, for speech captured from the
@@ -229,14 +242,28 @@ class SenseVoiceEngine:
             },
         )[0]
 
-        raw = self._decode(np.asarray(logits[0]).argmax(axis=-1))
+        logits0 = np.asarray(logits[0])
+        ids = logits0.argmax(axis=-1)
+        raw = self._decode(ids)
         text, language = self._split_tags(raw)
         if not text:
             return None
-        # No confidence/no-speech signals from a greedy CTC decode: neutral
-        # values that always pass SttConfig's gates (VAD is the effective gate).
+
+        avg_logprob = _mean_nonblank_logprob(logits0, ids)
+        if avg_logprob is not None and avg_logprob < self._cfg.sensevoice_avg_logprob_gate:
+            logger.debug(
+                "%s gated by avg_logprob: %.3f < %.3f",
+                self._spec.id, avg_logprob, self._cfg.sensevoice_avg_logprob_gate,
+            )
+            return None
+
+        # Non-empty text (checked above) decoded at least one non-blank
+        # token, so _mean_nonblank_logprob never returns None here.
+        assert avg_logprob is not None
+        # No no-speech signal (blank ratio was measured and rejected, see
+        # module docstring): neutral value, always passes no_speech_gate.
         return SttResult(
-            text=text, language=language, avg_logprob=0.0, no_speech_prob=0.0
+            text=text, language=language, avg_logprob=avg_logprob, no_speech_prob=0.0,
         )
 
     # -- internals -------------------------------------------------------------
@@ -410,6 +437,21 @@ class SenseVoiceEngine:
             options.intra_op_num_threads = self._cfg.cpu_threads
         factory = self._session_factory or onnxruntime.InferenceSession
         return factory(str(model_path), sess_options=options, providers=list(providers))
+
+
+def _mean_nonblank_logprob(logits: np.ndarray, ids: np.ndarray) -> float | None:
+    """Mean softmax logprob of each frame's chosen token, over frames whose
+    argmax is not the CTC blank. Averaging over every frame instead would be
+    dominated by blank frames (measured at 72-77% of frames regardless of
+    noise, see module docstring), which barely moves between clean and
+    degraded audio. ``None`` when every frame decoded blank."""
+    max_logit = logits.max(axis=-1)
+    logsumexp = np.log(np.exp(logits - max_logit[:, None]).sum(axis=-1)) + max_logit
+    token_logprob = max_logit - logsumexp
+    non_blank = ids != _BLANK_ID
+    if not non_blank.any():
+        return None
+    return float(token_logprob[non_blank].mean())
 
 
 def _read_vocab(path: Path) -> list[str]:

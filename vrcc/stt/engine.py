@@ -290,10 +290,23 @@ class SttEngine:
 
         avg_logprob = weighted_sum / total_weight if total_weight > 0 else None
         if avg_logprob is None or avg_logprob < self._cfg.avg_logprob_gate:
+            logger.debug(
+                "gated by avg_logprob: %s < %.3f",
+                "None" if avg_logprob is None else f"{avg_logprob:.3f}",
+                self._cfg.avg_logprob_gate,
+            )
             return None
         if max_no_speech_prob > self._cfg.no_speech_gate:
+            logger.debug(
+                "gated by no_speech_prob: %.3f > %.3f",
+                max_no_speech_prob, self._cfg.no_speech_gate,
+            )
             return None
         if max_compression_ratio > self._cfg.compression_ratio_gate:
+            logger.debug(
+                "gated by compression_ratio: %.3f > %.3f",
+                max_compression_ratio, self._cfg.compression_ratio_gate,
+            )
             return None
 
         return SttResult(

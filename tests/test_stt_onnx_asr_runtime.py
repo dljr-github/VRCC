@@ -72,7 +72,11 @@ def test_parakeet_full_stack_transcribes_on_cpu(models_dir):
     assert result is not None
     assert result.text == "hello world"  # the TDT decode loop ran for real
     assert result.language == "en"
-    assert (result.avg_logprob, result.no_speech_prob) == (0.0, 0.0)
+    # avg_logprob carries real per-token logprobs from the decode loop, so it
+    # is strictly negative; no_speech_prob stays neutral because this decoder
+    # exposes no such signal.
+    assert result.avg_logprob < 0.0
+    assert result.no_speech_prob == 0.0
     engine.unload()
 
 
