@@ -350,6 +350,7 @@
   "queued": "排队中",
   "sent": "已发送",
   "sent<br/>shortened to fit": "已发送<br/>已自动缩短",
+  "sound is arriving, no speech heard yet": "有声音传入，但还没有检测到语音",
   "then in your VRChat chatbox": "随后出现在你的 VRChat 聊天框中",
   "translating…": "翻译中…",
   "translation model": "翻译模型",

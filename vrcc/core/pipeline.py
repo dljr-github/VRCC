@@ -68,10 +68,6 @@ class Pipeline:
     ) -> None:
         self._config = config
         self._bus = bus
-        # Reuses the RMS the meter already gets per frame (published as
-        # MicLevel from pipeline_frames's pre-gate and from SegLevel below)
-        # rather than computing it a second time for the input-level stat.
-        self._bus.subscribe(MicLevel, lambda e: self._input.record_level(e.rms))
         self._source = source
         self._segmenter = segmenter
         # Public: engine_stack shares these objects with HeardStream, so a
@@ -392,6 +388,10 @@ class Pipeline:
         """Dispatch one segmenter event. **Documented test seam** -- tests
         call this directly with synthetic ``Seg*`` events."""
         if isinstance(event, SegLevel):
+            # Recorded here rather than via a MicLevel subscription: the RMS is
+            # already in hand, so subscribing would only add a lock, a list
+            # copy and a dispatch per frame to fetch a value we already have.
+            self._input.record_level(event.rms)
             self._bus.publish(MicLevel(rms=event.rms, vad_prob=event.vad_prob))
         elif isinstance(event, SegSpeechStart):
             self._bus.publish(SpeechStarted(utterance_id=event.utterance_id))

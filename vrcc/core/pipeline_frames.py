@@ -48,6 +48,7 @@ def process_frame(p: "Pipeline", frame: "np.ndarray") -> None:
                 p._on_seg_event(event)
     if gated:
         level = energy_gate.rms(np.asarray(frame, dtype=np.float32))
+        p._input.record_level(level)
         p._bus.publish(MicLevel(rms=level, vad_prob=0.0))
         return
     if energy_gated(p, frame):
@@ -69,5 +70,6 @@ def energy_gated(p: "Pipeline", frame: "np.ndarray") -> bool:
     level = energy_gate.gated_level(frame, p._config.audio, p._segmenter.active)
     if level is None:
         return False
+    p._input.record_level(level)
     p._bus.publish(MicLevel(rms=level, vad_prob=0.0))
     return True
