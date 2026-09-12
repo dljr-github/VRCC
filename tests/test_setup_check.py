@@ -1,6 +1,10 @@
-"""The setup check controller: does it track only real bus evidence, marshal
-worker-thread events onto the GUI thread, persist completion exactly once,
-and survive a window rebuild the same run() gives it.
+"""The setup check controller: does the panel auto-open on the right
+condition, and does each row tick only on the real evidence setup_steps.py
+requires (not a typed Send, not any engine's ready, not a live send toggle
+gone stale). Lifecycle concerns (the poll timer, threading, teardown, the
+window-rebuild path) are in test_setup_check_lifecycle.py, split out to stay
+under the repo's 500-line-per-file cap; both share the fixtures and fakes
+defined here.
 """
 
 from __future__ import annotations
@@ -9,12 +13,9 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import threading
-import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from vrcc.core.bus import EventBus
@@ -22,7 +23,6 @@ from vrcc.core.config import ConfigStore, default_paths
 from vrcc.core.events import (
     ChatboxSent,
     EngineStateChanged,
-    HeardLevel,
     MicLevel,
     PhraseRecognized,
     VrchatDetected,
@@ -31,7 +31,6 @@ from vrcc.gui import model_prompts
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.main_window import MainWindow
 from vrcc.gui.setup_check import start
-from vrcc.gui.window_swap import _swap_main_window
 
 
 @pytest.fixture(scope="module")
@@ -98,19 +97,6 @@ def _window(bridge: BusBridge, store: ConfigStore, pipeline) -> MainWindow:
     # first (setup_panel.py's own docstring), matching app.py's real order.
     window.show()
     return window
-
-
-def _pump(app, done, timeout: float = 1.0) -> bool:
-    """Process events until `done()` holds or `timeout` passes. A bare
-    processEvents loop can outrun a queued cross-thread emit before Qt has
-    posted it, so this needs real wall-clock time between polls."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if done():
-            return True
-        app.processEvents()
-        time.sleep(0.001)
-    return bool(done())
 
 
 def _phrase(utterance_id: int, text: str = "hello"):
@@ -286,9 +272,10 @@ def test_captioning_is_read_from_the_live_pipeline(qapp, tmp_path):
         bridge.detach()
 
 
-def test_chatbox_row_drops_out_of_required_when_sending_is_off(qapp, tmp_path):
+def test_chatbox_row_drops_out_of_required_when_sending_is_off(qapp, tmp_path, monkeypatch):
     store = _store(tmp_path)
     store.config.osc.send_to_vrchat = False
+    monkeypatch.setattr(store, "save_soon", lambda: None)
     bus = EventBus()
     pipeline = _FakePipeline()
     bridge = BusBridge(bus)
@@ -309,153 +296,4 @@ def test_chatbox_row_drops_out_of_required_when_sending_is_off(qapp, tmp_path):
         check.stop()
         window.close()
         window.deleteLater()
-        bridge.detach()
-
-
-# -- completion persists exactly once -------------------------------------
-
-
-def test_completion_sets_and_persists_the_flag_exactly_once(qapp, tmp_path, monkeypatch):
-    store = _store(tmp_path)
-    bus = EventBus()
-    pipeline = _FakePipeline()
-    bridge = BusBridge(bus)
-    window = _window(bridge, store, pipeline)
-    check = start(bus, store, window, _FakeDetector())
-    calls = []
-    monkeypatch.setattr(store, "save_soon", lambda: calls.append(1))
-    try:
-        assert store.config.gui.setup_check_done is False
-
-        pipeline.set_captioning(True)
-        bus.publish(EngineStateChanged("stt", "ready"))
-        bus.publish(_phrase(1))
-        bus.publish(VrchatDetected(True))
-        bus.publish(ChatboxSent(text="hi", utterance_id=1))
-        qapp.processEvents()
-        check._recompute()
-
-        assert store.config.gui.setup_check_done is True
-        assert calls == [1]
-
-        # A later event must not persist a second time.
-        bus.publish(EngineStateChanged("stt", "ready"))
-        qapp.processEvents()
-        check._recompute()
-        assert calls == [1]
-    finally:
-        check.stop()
-        window.close()
-        window.deleteLater()
-        bridge.detach()
-
-
-# -- threading: never touch a widget from a bus callback -------------------
-
-
-def test_worker_thread_publishes_are_marshalled_to_the_gui_thread(qapp, tmp_path, monkeypatch):
-    import vrcc.gui.setup_check as setup_check_mod
-
-    store = _store(tmp_path)
-    bus = EventBus()
-    pipeline = _FakePipeline()
-    bridge = BusBridge(bus)
-    window = _window(bridge, store, pipeline)
-    check = start(bus, store, window, _FakeDetector())
-
-    seen_threads = []
-    original_evaluate = setup_check_mod.evaluate
-
-    def spy_evaluate(facts):
-        seen_threads.append(QThread.currentThread())
-        return original_evaluate(facts)
-
-    monkeypatch.setattr(setup_check_mod, "evaluate", spy_evaluate)
-    try:
-        t = threading.Thread(target=lambda: bus.publish(MicLevel(rms=0.5, vad_prob=0.9)))
-        t.start()
-        t.join()
-        assert _pump(qapp, lambda: len(seen_threads) > 0)
-        assert seen_threads[0] is qapp.thread()
-    finally:
-        check.stop()
-        window.close()
-        window.deleteLater()
-        bridge.detach()
-
-
-# -- teardown --------------------------------------------------------------
-
-
-def test_stop_unsubscribes_and_is_idempotent(qapp, tmp_path):
-    store = _store(tmp_path)
-    bus = EventBus()
-    pipeline = _FakePipeline()
-    bridge = BusBridge(bus)
-    window = _window(bridge, store, pipeline)
-    check = start(bus, store, window, _FakeDetector())
-    try:
-        check.stop()
-        check.stop()  # must not raise
-
-        bus.publish(MicLevel(rms=0.4, vad_prob=0.9))
-        bus.publish(VrchatDetected(True))
-        bus.publish(EngineStateChanged("stt", "ready"))
-        qapp.processEvents()
-
-        assert check._facts.mic_seen is False
-        assert check._facts.vrchat_found is False
-        assert check._facts.engine_states == {}
-    finally:
-        window.close()
-        window.deleteLater()
-        bridge.detach()
-
-
-# -- survives the window-rebuild path used on a UI-language change ---------
-
-
-def test_controller_survives_app_swap_main_window(qapp, tmp_path):
-    store = _store(tmp_path)
-    bus = EventBus()
-    pipeline = _FakePipeline()
-    bridge = BusBridge(bus)
-    old = _window(bridge, store, pipeline)
-    check = start(bus, store, old, _FakeDetector())
-
-    fresh = None
-    try:
-        bus.publish(MicLevel(rms=0.3, vad_prob=0.9))
-        qapp.processEvents()
-        assert check._facts.mic_seen is True
-
-        def make_window():
-            # Same bridge and pipeline as `old`: app.py's own make_window()
-            # closes over one BusBridge and one Pipeline for the whole run,
-            # only the window is rebuilt.
-            return _window(bridge, store, pipeline)
-
-        fresh = _swap_main_window(old, make_window, _FakeDetector(), None)
-        qapp.processEvents()
-
-        # A fact recorded before the rebuild must not have been reset: a
-        # controller owned by the window would have lost it here.
-        assert check._facts.mic_seen is True
-
-        # Bus events published AFTER the rebuild must still reach the
-        # controller: it was never torn down by the swap.
-        bus.publish(VrchatDetected(True))
-        qapp.processEvents()
-        assert check._facts.vrchat_found is True
-
-        # Captioning is read off the shared pipeline, not off either
-        # window's button, so it survives the rebuild too.
-        pipeline.set_captioning(True)
-        check._recompute()
-        assert check._facts.captioning is True
-    finally:
-        check.stop()
-        if fresh is not None:
-            fresh.close()
-            fresh.deleteLater()
         bridge.detach()

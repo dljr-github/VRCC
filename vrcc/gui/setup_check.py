@@ -48,7 +48,6 @@ class SetupCheck(QObject):
 
     def __init__(self, bus: EventBus, store: ConfigStore, window, detector) -> None:
         super().__init__()
-        self._bus = bus
         self._store = store
         # Outlives every window rebuild: make_window() closes over the same
         # Pipeline for the life of the process, only the window is replaced.
@@ -109,6 +108,10 @@ class SetupCheck(QObject):
     # -- GUI thread -----------------------------------------------------------
 
     def _on_event(self, event) -> None:
+        if self._panel is None:
+            # stop() already ran; a cross-thread emit queued before it can
+            # still arrive here on a later event-loop turn.
+            return
         if isinstance(event, MicLevel):
             self._facts.mic_seen = True
         elif isinstance(event, HeardLevel):
@@ -129,6 +132,8 @@ class SetupCheck(QObject):
         self._recompute()
 
     def _recompute(self) -> None:
+        if self._panel is None:
+            return
         # Read fresh every time rather than caching a value from
         # construction: neither field has a bus event to invalidate a cache.
         self._facts.captioning = self._pipeline.captioning_enabled
@@ -147,13 +152,18 @@ class SetupCheck(QObject):
         self._was_required_passed = now_passed
 
     def stop(self) -> None:
-        """Unsubscribe from the bus, stop polling, hide the panel. Idempotent."""
+        """Unsubscribe from the bus, stop polling, hide the panel. Idempotent
+        even across an event-loop turn: the second call sees `_panel` already
+        None and returns before touching the by-then-deleted widget."""
+        if self._panel is None:
+            return
         for unsub in self._unsubs:
             unsub()
         self._unsubs = []
         self._timer.stop()
         self._panel.close_panel()
         self._panel.deleteLater()
+        self._panel = None
 
 
 def start(bus: EventBus, store: ConfigStore, window, detector) -> SetupCheck:
