@@ -120,7 +120,7 @@ def _swap_main_window(old, make_window, detector, mute):
     return fresh
 
 
-def run(portable: bool = False, verbose: bool = False) -> int:
+def run(portable: bool = False, verbose: bool = False, guard=None) -> int:
     """Launch the GUI app. Returns the process exit code."""
     paths = default_paths(portable)
     setup_logging(paths.logs_dir, verbose)
@@ -149,6 +149,11 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
     app = QApplication.instance() or QApplication([])
+
+    from vrcc.gui.raise_window import install_raise_watch
+
+    if guard is not None:
+        install_raise_watch(app, guard)
     # The UI language must apply before any GUI module builds a widget
     # (translated strings are read at construction).
     from vrcc.i18n.qt import apply_ui_language, system_locale_preference

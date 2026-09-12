@@ -391,6 +391,10 @@ downloads; check that a model's license fits your use:
 - **Reporting a bug**: attach the newest file from the logs folder above.
   Each run writes one file at full debug detail and the five newest are
   kept, so the file with the latest timestamp is the run that went wrong.
+- **Starting VRCC again does nothing**: only one copy runs at a time, and
+  launching it again asks the running copy to show itself. If it doesn't
+  come forward, Windows may be holding focus for whatever you clicked
+  last, so the taskbar button is where to look.
 
 ## Developing
 
