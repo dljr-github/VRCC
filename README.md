@@ -396,8 +396,14 @@ downloads; check that a model's license fits your use:
 - **Mute sync does nothing**: it requires VRChat on the *same machine*
   (localhost mDNS/OSCQuery discovery), OSC enabled in-game, and an avatar
   that reports `MuteSelf`.
-- **First transcription is slow**: model load and warm-up happen once at
-  startup; captions flow at full speed afterwards.
+- **A small screen appears when VRCC starts**: it names what VRCC is
+  loading and closes once the main window opens. The first launch after
+  an update or a reboot is slower, because Windows reads the whole
+  program folder from disk. If a launch dies, the newest log file's last
+  line names the step it stopped on.
+- **First transcription is slow**: model load and warm-up continue
+  inside the window after the startup screen closes; captions flow at
+  full speed afterwards.
 - **Reporting a bug**: attach the newest file from the logs folder above.
   Each run writes one file at full debug detail and the five newest are
   kept, so the file with the latest timestamp is the run that went wrong.
