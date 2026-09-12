@@ -133,7 +133,11 @@ class OnnxAsrEngine:
                 )
             )
         except Exception as exc:
+            # Both references, as unload() drops both: _model_ts holds the
+            # same sessions, so clearing only _model would keep a failed
+            # engine's CUDA allocation alive for the rest of the process.
             self._model = None
+            self._model_ts = None
             self._bus.publish(EngineStateChanged("stt", "failed", str(exc)))
             raise
 

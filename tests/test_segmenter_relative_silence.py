@@ -149,3 +149,22 @@ class TestRoomFloorGate:
         seg = Segmenter(cfg, ScriptedVad(probs))
         events = _run(seg, len(probs))
         assert not _by_type(events, SegFinal)
+
+    def test_abort_keeps_the_room_floor_but_reset_drops_it(self):
+        # abort() runs on every VRChat mute and every captioning toggle, with
+        # the same microphone in the same room; only reset() (a device swap or
+        # a restart) is evidence that the old reading no longer applies. A
+        # warm noisy room must survive a mute/unmute cycle, or the utterances
+        # after each unmute lose the gate this default exists to open.
+        probs = _room_preamble([])
+        cfg = VadConfig(relative_silence_ratio=0.7)
+        seg = Segmenter(cfg, ScriptedVad(probs))
+        _run(seg, len(probs))
+        warm_floor, warm_n = seg._room_vad_floor, seg._room_floor_n
+        assert warm_n == _FLOOR_WARM_FRAMES and warm_floor > 0.0
+
+        seg.abort()
+        assert (seg._room_vad_floor, seg._room_floor_n) == (warm_floor, warm_n)
+
+        seg.reset()
+        assert (seg._room_vad_floor, seg._room_floor_n) == (0.0, 0)

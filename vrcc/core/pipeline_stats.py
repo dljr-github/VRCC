@@ -161,7 +161,12 @@ class InputStats:
             self._rms_samples.append(rms)
 
     def record_frame(self, frame: "np.ndarray") -> None:
-        clipped = bool(np.any(np.abs(frame) >= _FULL_SCALE))
+        # Compared elementwise, not via max()/min(): a reduction propagates a
+        # NaN sample over the whole frame and NaN fails every comparison, so
+        # one bad sample would hide a real clip beside it. Two bool arrays
+        # still cost a quarter of an np.abs() float copy per frame, and both
+        # short-circuit on an empty frame without a size test.
+        clipped = bool(np.any(frame >= _FULL_SCALE) or np.any(frame <= -_FULL_SCALE))
         with self._lock:
             self.frame_count += 1
             if clipped:
@@ -351,17 +356,11 @@ def log_summary(p: "Pipeline", *, restarting: bool = False) -> None:
         logger.debug("STT run summary failed", exc_info=True)
 
 
-def _percentile(sorted_values: list, pct: float) -> float:
-    """Linear-interpolated percentile (0-100) of an already-sorted,
-    non-empty list; callers only call this after checking for at least one
-    sample."""
-    n = len(sorted_values)
-    if n == 1:
-        return sorted_values[0]
-    rank = (pct / 100.0) * (n - 1)
-    lo = int(rank)
-    hi = min(lo + 1, n - 1)
-    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (rank - lo)
+def _percentiles(values: list, pcts: list[float]) -> list[float]:
+    """Linear-interpolated percentiles (0-100) of a non-empty list. Callers
+    check for at least one sample first; np.percentile sorts internally, so
+    the list is passed unsorted."""
+    return [float(v) for v in np.percentile(values, pcts)]
 
 
 def _emit(s: SessionStats) -> None:
@@ -377,10 +376,9 @@ def _emit(s: SessionStats) -> None:
     )
 
     if s.rms_samples:
-        levels = sorted(s.rms_samples)
+        p10, p50, p90 = _percentiles(s.rms_samples, [10, 50, 90])
         rms_text = (
-            f"p10 {_percentile(levels, 10):.3f}, median {_percentile(levels, 50):.3f}, "
-            f"p90 {_percentile(levels, 90):.3f} of 1.0 full scale"
+            f"p10 {p10:.3f}, median {p50:.3f}, p90 {p90:.3f} of 1.0 full scale"
         )
     else:
         rms_text = "n/a"
@@ -388,10 +386,8 @@ def _emit(s: SessionStats) -> None:
         f"{100 * s.clipped_frames / s.frame_count:.2f}%" if s.frame_count else "n/a"
     )
     if s.latency_samples:
-        lat = sorted(s.latency_samples)
-        latency_text = (
-            f"median {_percentile(lat, 50):.2f}s, p90 {_percentile(lat, 90):.2f}s"
-        )
+        lat50, lat90 = _percentiles(s.latency_samples, [50, 90])
+        latency_text = f"median {lat50:.2f}s, p90 {lat90:.2f}s"
     else:
         latency_text = "n/a"
 

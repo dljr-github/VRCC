@@ -183,10 +183,13 @@ class Segmenter:
         Also drops the room-floor estimate: a device swap changes the
         microphone and its coupling to the room, so the old reading is not
         evidence about the new one -- back to cold start, same as launch."""
-        self._reset_to_idle()
-        self._preroll.clear()
+        self._drop_buffers()
         self._room_vad_floor = 0.0
         self._room_floor_n = 0
+
+    def _drop_buffers(self) -> None:
+        self._reset_to_idle()
+        self._preroll.clear()
 
     def abort(self) -> list[object]:
         """Discard the in-flight utterance and the pre-roll immediately,
@@ -194,11 +197,15 @@ class Segmenter:
         speculative invariant when the pipeline stops listening mid-utterance
         (VRChat mute via mute sync, or the captioning toggle). Same threading
         contract as :meth:`reset`: call only from the thread that feeds
-        :meth:`process`."""
+        :meth:`process`.
+
+        Keeps the room-floor estimate, unlike :meth:`reset`: a mute is not a
+        device change, and a room that warms slowly (see _FLOOR_WARM_FRAMES)
+        would be back to cold start after every mute/unmute cycle."""
         events: list[object] = []
         if self._pending_spec_samples is not None:
             events.append(SegDiscard(utterance_id=self._utterance_id))
-        self.reset()
+        self._drop_buffers()
         return events
 
     @property

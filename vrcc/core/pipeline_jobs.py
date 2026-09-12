@@ -229,7 +229,7 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
         return
 
     # Reuse the speculative's cached result on identical samples, else
-    # transcribe fresh. The spec lock is released before _transcribe (never
+    # transcribe fresh. The spec lock is released before _call_engine (never
     # nested inside the STT slot's lock), preserving lock ordering.
     result = p._spec.pop_result(key)
     if result is _MISSING:

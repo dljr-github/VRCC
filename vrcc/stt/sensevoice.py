@@ -249,17 +249,20 @@ class SenseVoiceEngine:
         if not text:
             return None
 
+        # Non-empty text (checked above) decoded at least one non-blank token,
+        # so None is unreachable; handled as a drop rather than an assert,
+        # which -O strips and which would otherwise leave avg_logprob=None on
+        # an SttResult field typed float.
         avg_logprob = _mean_nonblank_logprob(logits0, ids)
-        if avg_logprob is not None and avg_logprob < self._cfg.sensevoice_avg_logprob_gate:
+        if avg_logprob is None or avg_logprob < self._cfg.sensevoice_avg_logprob_gate:
             logger.debug(
-                "%s gated by avg_logprob: %.3f < %.3f",
-                self._spec.id, avg_logprob, self._cfg.sensevoice_avg_logprob_gate,
+                "%s gated by avg_logprob: %s < %.3f",
+                self._spec.id,
+                "None" if avg_logprob is None else f"{avg_logprob:.3f}",
+                self._cfg.sensevoice_avg_logprob_gate,
             )
             return None
 
-        # Non-empty text (checked above) decoded at least one non-blank
-        # token, so _mean_nonblank_logprob never returns None here.
-        assert avg_logprob is not None
         # No no-speech signal (blank ratio was measured and rejected, see
         # module docstring): neutral value, always passes no_speech_gate.
         return SttResult(

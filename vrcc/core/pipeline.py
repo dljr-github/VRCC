@@ -432,11 +432,6 @@ class Pipeline:
                 logger.exception("STT job failed")
                 self._bus.publish(AppError("STT_JOB_FAILED", str(exc)))
 
-    # engine.transcribe() is called from pipeline_jobs._call_engine, which
-    # borrows stt_slot directly: no other caller needs a Pipeline-level
-    # wrapper, and timing the lock wait apart from the call requires two
-    # readings inside borrow()'s own with-block.
-
     # -- MT worker ---------------------------------------------------------
 
     def _mt_loop(self, q: queue.Queue, stop: threading.Event) -> None:

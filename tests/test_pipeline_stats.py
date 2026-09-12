@@ -488,7 +488,7 @@ def test_summary_line_reports_input_level_clipping_gating_and_latency(
     line = [r.message for r in caplog.records if r.name == _LOGGER_NAME][0]
     # sorted levels [0.0, 0.2, 0.4, 0.5, 0.5, 0.5, 0.5, 0.6, 0.8, 1.0]: p10
     # interpolates between index 0 and 1, median sits on the repeated 0.5s,
-    # p90 interpolates between index 8 and 9 (see _percentile).
+    # p90 interpolates between index 8 and 9 (see _percentiles).
     assert (
         "Input level (frame RMS): p10 0.180, median 0.500, p90 0.820 of 1.0 "
         "full scale." in line

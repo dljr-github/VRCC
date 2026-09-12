@@ -105,7 +105,7 @@ class MainWindow(QMainWindow):
         self._engine_failures_reported: set[str] = set()
         # Per-utterance caption rows with delivery status (pure model, re-rendered).
         self._caption_model = CaptionModel()
-        self._listening, self._meter_moved, self._speech_starts = False, False, 0
+        self._listening, self._meter_moved, self._speech_seen = False, False, False
 
         self.setWindowTitle("VRCC")
         self._build_ui()
@@ -230,12 +230,11 @@ class MainWindow(QMainWindow):
 
     def _on_mic_level(self, rms: float, vad_prob: float) -> None:
         self._mic_meter.set_level(rms)
-        if self._listening and rms > 0 and not self._meter_moved:
-            self._meter_moved = True  # transition only: mic_level keeps firing while listening
-            self._render_log()
+        if self._listening and rms > 0:
+            status_render.note_meter_moved(self)
 
     def _on_speech_started(self, event) -> None:
-        self._speech_starts += 1
+        status_render.note_speech_started(self)
 
     def _translate_active(self) -> bool:
         # Live config AND a live engine: an MT engine can hot-swap in
@@ -375,7 +374,7 @@ class MainWindow(QMainWindow):
                 [(row.key, render_row_html(row, self._p, self._scale)) for row in rows]
             )
             return
-        no_speech = self._listening and self._meter_moved and self._speech_starts == 0
+        no_speech = status_render.listening_no_speech(self)
         msg, sub = empty_state_text(self._engine_states.get("stt"), listening_no_speech=no_speech)
         self._log_follow.set_html(empty_state_html(msg, sub, self._p, self._scale))
 
@@ -403,7 +402,7 @@ class MainWindow(QMainWindow):
     def _render_capture_status(self) -> None:
         listening = status_render.render_capture_status(self)
         if listening != self._listening:
-            self._meter_moved, self._speech_starts, self._listening = False, 0, listening
+            self._meter_moved, self._speech_seen, self._listening = False, False, listening
             self._render_log()
 
     def reload_from_config(self) -> None:

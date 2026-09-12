@@ -272,7 +272,7 @@ def test_process_mt_job_engine_detached_mid_flight_sends_original():
 
 
 def test_process_stt_job_speculative_dropped_when_engine_detached():
-    # Speculative job racing detach_stt(): _transcribe returns the _NO_ENGINE
+    # Speculative job racing detach_stt(): _call_engine returns the _NO_ENGINE
     # sentinel and the job is dropped whole -- no cache write, no crash.
     from vrcc.core import pipeline_jobs
     from vrcc.core.pipeline_jobs import _SttJob

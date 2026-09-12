@@ -161,8 +161,10 @@ class MicSource:
             # and CI has no capture hardware to query at all; the probe is
             # informational only, so any failure here must degrade to the
             # unconverted direct open (and from there to the existing
-            # fallback) rather than raising out of start().
-            extra = None
+            # fallback) rather than raising out of start(). Logged because an
+            # unanticipated failure here is otherwise indistinguishable from
+            # a device that simply is not WASAPI.
+            logger.debug("host API probe failed; opening without conversion", exc_info=True)
 
         try:
             open_kwargs = dict(

@@ -18,7 +18,7 @@ def test_no_speech_subline_hidden_while_not_listening(qapp, tmp_path):
     try:
         w._engine_states["stt"] = "ready"
         w._meter_moved = True
-        w._speech_starts = 0
+        w._speech_seen = False
         w._render_log()
         assert "arriving" not in w._log.toPlainText()
     finally:
@@ -59,9 +59,10 @@ def test_no_speech_subline_is_stale_safe_once_speech_starts(qapp, tmp_path):
         w.set_capture_status(True)
         w._on_mic_level(0.05, 0.0)
         assert "arriving" in w._log.toPlainText()
+        # No manual repaint here: an utterance the STT quality gate suppresses
+        # publishes no caption event, so the speech-start edge is the only
+        # thing left that can clear the sub-line it contradicts.
         w._on_speech_started(None)
-        w._render_log()  # any later render (a recognized phrase, an engine
-        # state change) recomputes from current counts, so this never lingers.
         assert "arriving" not in w._log.toPlainText()
     finally:
         w.close(); w.deleteLater(); bridge.detach()
@@ -92,15 +93,15 @@ def test_listening_edge_resets_no_speech_state_both_ways(qapp, tmp_path):
         w._captioning_btn.setChecked(True)
         w.set_capture_status(True)
         w._on_speech_started(None)
-        assert w._speech_starts == 1
+        assert w._speech_seen is True
 
         w.set_capture_status(False)  # falling edge: also a fresh judgement
-        assert w._speech_starts == 0
+        assert w._speech_seen is False
         assert w._meter_moved is False
 
         w._on_speech_started(None)
         w.set_capture_status(True)  # rising edge: fresh judgement again
-        assert w._speech_starts == 0
+        assert w._speech_seen is False
         assert w._meter_moved is False
     finally:
         w.close(); w.deleteLater(); bridge.detach()
@@ -113,7 +114,7 @@ def test_speech_started_reaches_the_window_through_the_bridge(qapp, tmp_path):
     try:
         bridge._bus.publish(SpeechStarted(utterance_id=1))
         qapp.processEvents()
-        assert w._speech_starts == 1
+        assert w._speech_seen is True
     finally:
         w.close(); w.deleteLater(); bridge.detach()
 
@@ -126,6 +127,6 @@ def test_disconnect_bridge_stops_speech_started_too(qapp, tmp_path):
         w.disconnect_bridge()
         bridge._bus.publish(SpeechStarted(utterance_id=9))
         qapp.processEvents()
-        assert w._speech_starts == 0
+        assert w._speech_seen is False
     finally:
         w.close(); w.deleteLater(); bridge.detach()
