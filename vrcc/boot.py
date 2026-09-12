@@ -89,11 +89,17 @@ def _close_native_splash() -> None:
     """Dismiss the bootloader's splash once Qt has something on screen.
 
     ``pyi_splash`` is injected by PyInstaller and exists only inside a frozen
-    build, so a source run finds nothing to close and must stay quiet about it.
+    build, so a source run finds nothing to close and must stay quiet about
+    it. Nothing this function does may propagate: boot() has no recovery for
+    a failure here beyond falling back to a bare log reporter and abandoning
+    the panel it already built, which is worse than a splash left on screen.
     """
     try:
         import pyi_splash
     except ImportError:
+        return
+    except Exception:  # noqa: BLE001 -- an import failure must not sink the boot either
+        logger.debug("could not import the bootloader splash module", exc_info=True)
         return
     try:
         pyi_splash.close()

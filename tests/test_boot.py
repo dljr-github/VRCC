@@ -265,3 +265,21 @@ def test_close_native_splash_calls_close_when_present(monkeypatch):
     monkeypatch.setitem(sys.modules, "pyi_splash", fake)
     boot_mod._close_native_splash()
     assert closed == [True]
+
+
+def test_close_native_splash_survives_close_raising(monkeypatch, caplog):
+    """A splash stuck on top of the app for the whole session is a real
+    symptom someone might report, so a raising close() must be logged at
+    DEBUG rather than left invisible, and must never reach boot()."""
+    import sys
+    import types
+
+    def _boom():
+        raise RuntimeError("stuck")
+
+    fake = types.ModuleType("pyi_splash")
+    fake.close = _boom
+    monkeypatch.setitem(sys.modules, "pyi_splash", fake)
+    with caplog.at_level(logging.DEBUG, logger="vrcc.boot"):
+        boot_mod._close_native_splash()
+    assert any(r.levelno == logging.DEBUG for r in caplog.records)

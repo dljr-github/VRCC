@@ -152,12 +152,11 @@ started:
 ```
 
 The splash has to stay within PyInstaller's default splash size. Pillow is
-not a dependency of this project, and only Pillow lets the bootloader
-resize an oversized splash at build time, so anything larger fails the
-release build outright rather than just looking wrong. The tool checks the
-limit when it renders, and `tests/test_packaging_spec.py` checks the
-committed PNG against the same limit, so the exact figure lives in code
-instead of going stale in this file.
+not a dependency of this project, and only Pillow lets PyInstaller resize
+an oversized splash at build time, so anything larger fails the release
+build outright rather than just looking wrong. The tool checks the limit
+when it renders, and `tests/test_packaging_spec.py` checks the committed
+PNG against the same limit.
 
 ## Contributing a UI translation
 
