@@ -32,7 +32,7 @@ _DEFAULT_NAME = "VRCC.SingleInstance.1"
 # Keeping the plain import at module scope means _create_mutex and _create_event
 # resolve ctypes.get_last_error on any platform, even though acquire() returns
 # before calling them off Windows.
-if sys.platform == "win32":  # pragma: no branch - the app is Windows only
+if sys.platform == "win32":
     from ctypes import wintypes
 
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -69,6 +69,9 @@ def allow_multiple() -> bool:
 def _create_mutex(name: str):
     """Returns (handle, last_error). Split out so a test can force the
     fail-open branch without a second process."""
+    # A stale error left over from an earlier call must never be mistaken for
+    # this call finding the mutex already existed.
+    ctypes.set_last_error(0)
     handle = _kernel32.CreateMutexW(None, False, name)
     return handle, ctypes.get_last_error()
 
@@ -106,14 +109,16 @@ class InstanceGuard:
             return True
         # Doorbell first, so a process that loses the mutex race still has
         # somewhere to ring.
-        self._event, _ = _create_event(self.event_name)
+        self._event, event_err = _create_event(self.event_name)
+        if not self._event:
+            logger.warning("single-instance doorbell unavailable (error %s)", event_err)
         handle, err = _create_mutex(self.mutex_name)
-        if err == ERROR_ALREADY_EXISTS:
-            _close_handle(handle)
-            return False
         if not handle:
             logger.warning("single-instance guard unavailable (error %s)", err)
             return True
+        if err == ERROR_ALREADY_EXISTS:
+            _close_handle(handle)
+            return False
         self._mutex = handle
         return True
 

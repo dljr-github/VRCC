@@ -7,7 +7,6 @@ uuid-suffixed name so a crashed run cannot poison the next one.
 
 from __future__ import annotations
 
-import os
 import sys
 import uuid
 
@@ -84,12 +83,15 @@ def test_ring_is_seen_once_then_consumed():
 
 def test_ring_before_acquire_is_still_seen():
     """The doorbell is created before the mutex is claimed, so a process that
-    loses a dead heat always has something to ring."""
+    loses a dead heat always has something to ring, even one that never gets
+    as far as calling acquire() on its own guard."""
+    import vrcc.core.instance as instance
+
     name = _name()
     winner, loser = InstanceGuard(name), InstanceGuard(name)
     try:
         assert winner.acquire() is True
-        loser.acquire()
+        loser._event, _ = instance._create_event(loser.event_name)
         assert loser.ring() is True
         assert winner.doorbell_rang() is True
     finally:
@@ -119,6 +121,18 @@ def test_allow_multiple_reads_the_env_var(monkeypatch):
     assert allow_multiple() is False
 
 
+def test_allow_multiple_lets_a_second_guard_acquire(monkeypatch):
+    monkeypatch.setenv("VRCC_ALLOW_MULTIPLE", "1")
+    name = _name()
+    first, second = InstanceGuard(name), InstanceGuard(name)
+    try:
+        assert first.acquire() is True
+        assert second.acquire() is True
+    finally:
+        second.release()
+        first.release()
+
+
 def test_acquire_fails_open_when_the_kernel_call_fails(monkeypatch):
     """A guard that cannot be read must never stop the app from starting.
     Only ERROR_ALREADY_EXISTS refuses; everything else runs."""
@@ -136,11 +150,17 @@ def test_acquire_refuses_only_on_already_exists(monkeypatch):
     import vrcc.core.instance as instance
 
     guard = InstanceGuard(_name())
+    closed = []
     monkeypatch.setattr(
         instance, "_create_mutex", lambda name: (1234, instance.ERROR_ALREADY_EXISTS)
     )
-    monkeypatch.setattr(instance, "_close_handle", lambda handle: None)
+    monkeypatch.setattr(instance, "_close_handle", lambda handle: closed.append(handle))
     assert guard.acquire() is False
+    assert 1234 in closed
+    # Undo before release so the real doorbell handle this guard opened gets
+    # a real CloseHandle instead of another append to the fake.
+    monkeypatch.undo()
+    guard.release()
 
 
 def test_names_are_session_local():
