@@ -65,18 +65,16 @@ def _walk_imports(progress) -> None:
     """Name each phase before paying for it, then import it inside a try
     that logs and moves on to the next phase rather than re-raising.
 
-    The loop always reaches ``interface``, the last phase, so the log's
-    last "boot step:" line never names whichever group actually failed --
-    that shows up one line earlier, as the "group failed to import" warning
-    this except block writes. Continuing here does not save the launch
-    either: vrcc.app re-imports every one of these modules at its own
-    module scope (lines 14, 15, 18 and 34), so ``from vrcc.app import run``
-    in :func:`_run_app` hits the same failure again and the process still
-    exits. What the catch buys is where the traceback goes: logged here, it
-    reaches the run log; left to propagate, it would only reach stderr,
-    which ``cli._ensure_std_streams`` points at the null device in a
-    windowed build. Catching here is how a broken group gets recorded at
-    all.
+    A failing group's "group failed to import" warning is written to the
+    log at the moment it fails. The launch does not survive the failure
+    regardless: vrcc.app imports these same modules again, most of them at
+    its own module scope and the window's GUI modules inside run()'s body,
+    so the process still exits either while :func:`_run_app` imports
+    vrcc.app or once run() begins. What the catch here buys is where the
+    traceback goes: logged here, it reaches the run log; left to propagate,
+    it would only reach stderr, which ``cli._ensure_std_streams`` points at
+    the null device in a windowed build. Catching here is how a broken
+    group gets recorded at all.
     """
     for key, module_names in _IMPORT_GROUPS:
         try:

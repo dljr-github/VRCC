@@ -139,9 +139,9 @@ def test_walk_reports_every_phase_in_order(qapp):
 def test_walk_reaches_every_phase_and_logs_a_failing_group(qapp, monkeypatch, caplog):
     """A failing group must not stop the walk from naming the remaining
     phases -- it is the walk that needs to survive here, not the launch:
-    vrcc.app re-imports these same modules at its own module scope, so a
-    truly broken import still kills the process once _run_app hands off to
-    run(). Pinned to the full phase list, not just a nonempty one, so a
+    vrcc.app imports these same modules again regardless, so a truly broken
+    import still kills the process once _run_app hands off to it. Pinned
+    to the full phase list, not just a nonempty one, so a
     regression that widens the try to wrap the whole loop (aborting the
     remaining groups after the first failure) would be caught rather than
     pass by accident. The caplog check ties this to what the catch is
@@ -180,11 +180,12 @@ def test_boot_hands_run_a_panel_backed_reporter(qapp, monkeypatch, tmp_path):
 
 
 def test_walk_pumps_events_through_the_panel_reporter(qapp, monkeypatch):
-    """boot.py's processEvents() call is the entire reason _Both exists
-    instead of just handing the panel to _walk_imports directly: without it
-    the import walk runs synchronously with nothing pumping the event loop,
-    and the panel never paints a single step. See the report for the probe
-    that confirms deleting that call makes this test fail."""
+    """Pumping the event loop is one of two things _Both does that handing
+    the panel straight to _walk_imports would not (the other is writing
+    each phase to the log reporter too): without the pump the import walk
+    runs synchronously and the panel never paints a single step. Asserts
+    processEvents ran at least once per phase, so a regression that drops
+    the pump fails here instead of only in the running app."""
     from vrcc.core.progress import PHASES, LogProgress
     from vrcc.gui.boot_panel import BootPanel
 

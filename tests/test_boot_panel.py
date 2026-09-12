@@ -94,13 +94,20 @@ def test_no_banned_dash_in_any_visible_string(qapp):
 def test_panel_is_centred_on_its_screen(qapp):
     """A bare QWidget carrying Qt.WindowType.SplashScreen does not centre
     itself the way QSplashScreen does; offscreen still resolves a screen
-    with a real geometry, so this catches a panel left unpositioned."""
+    with a real geometry, so this catches a panel left unpositioned.
+    Checked against the computed centre point, not containment: offscreen's
+    geometry is large enough that an uncentred panel would still land
+    somewhere inside it. A one-pixel tolerance absorbs integer rounding on
+    an odd-sized available geometry or panel."""
     panel = BootPanel()
     try:
         panel.show()
         screen = panel.screen()
         assert screen is not None
-        assert screen.availableGeometry().contains(panel.frameGeometry().center())
+        expected = screen.availableGeometry().center()
+        actual = panel.frameGeometry().center()
+        assert abs(actual.x() - expected.x()) <= 1
+        assert abs(actual.y() - expected.y()) <= 1
     finally:
         panel.close_panel()
         panel.deleteLater()
