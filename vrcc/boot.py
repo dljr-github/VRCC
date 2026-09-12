@@ -178,10 +178,13 @@ def boot(portable: bool = False, verbose: bool = False, guard=None) -> int:
         panel = BootPanel(store.config.gui.theme)
         panel.show()
         app.processEvents()
-        _close_native_splash()
         progress = _Both(panel, LogProgress(), app)
     except Exception:  # noqa: BLE001 -- see the comment above: the walk must still run
         logger.warning("boot: could not build the progress panel", exc_info=True)
+    # Outside the try/except so both paths reach it: the native splash has no
+    # taskbar entry and no close affordance, so a panel that fails to build
+    # must not leave it on screen, undismissable, for the rest of the session.
+    _close_native_splash()
 
     _walk_imports(progress)
 

@@ -196,9 +196,13 @@ def test_splash_png_matches_a_fresh_render_of_the_svg():
     committed PNG that has drifted from its SVG would otherwise pass every
     other check in this file."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtGui import QGuiApplication
+    # QApplication, not QGuiApplication: this suite shares one process-wide Qt
+    # singleton across modules, and once a bare QGuiApplication claims it, it
+    # can never be upgraded to the widget-capable QApplication other test
+    # modules need.
+    from PySide6.QtWidgets import QApplication
 
-    QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
+    QApplication.instance() or QApplication(sys.argv[:1])
     make_splash = _load_make_splash()
     blob, _, _ = make_splash.render_png(make_splash.SVG)
     assert blob == _SPLASH_PNG.read_bytes()
