@@ -161,6 +161,7 @@ def run(
     from vrcc.gui.main_window import MainWindow
     from vrcc.gui.models_dialog import ModelsDialog
     from vrcc.gui.settings import SettingsDialog
+    from vrcc.gui.setup_check import start as start_setup_check
     from vrcc.gui.style import apply_font_scale, apply_theme_guarded
 
     apply_theme_guarded(app, store.config.gui.theme, store.config.gui.font_scale)
@@ -460,6 +461,7 @@ def run(
     # Passively watch for VRChat's OSCQuery service so the UI can tell the user
     # whether the chatbox is actually reachable (OSC has no delivery ack).
     detector = VrchatDetector(bus)
+    setup_check = start_setup_check(bus, store, window, detector)
     detector.start()
 
     if store.config.gui.update_check_enabled:
@@ -470,6 +472,7 @@ def run(
         exit_code = app.exec()
     finally:
         detector.stop()
+        setup_check.stop()
         stack.pipeline.stop()
         if stack.heard is not None:
             stack.heard.stop()

@@ -449,7 +449,10 @@ _NOT_TUNING = {
         "inter_threads", "intra_threads", "max_queued_batches", "targets",
         "extra_translate_kwargs",
     },
-    "gui": {"theme", "font_scale", "ui_language", "window_geometry", "update_check_enabled"},
+    "gui": {
+        "theme", "font_scale", "ui_language", "window_geometry",
+        "update_check_enabled", "setup_check_done",
+    },
 }
 
 

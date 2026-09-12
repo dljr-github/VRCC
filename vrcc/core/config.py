@@ -134,6 +134,10 @@ class GuiConfig(BaseModel):
     window_geometry: str = ""
     # Check GitHub releases on launch and offer a notice. Opt out here.
     update_check_enabled: bool = True
+    # Set once every required Setup check row has real evidence. A runtime
+    # preference like update_check_enabled above, not tuning, so "Reset
+    # tuning to defaults" must never clear it back to False.
+    setup_check_done: bool = False
 
 
 # Bumped when a stored config needs rewriting rather than just loading.
