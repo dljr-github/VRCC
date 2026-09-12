@@ -89,8 +89,10 @@ def test_model_failed_is_attention():
 def test_voice_row_is_not_satisfied_by_typed_text():
     """Typed text publishes PhraseRecognized with a negative utterance_id,
     bypassing captioning and mute gating. Without the filter a user passes this
-    row by typing into the compose box without ever speaking."""
-    facts = SetupFacts(mic_seen=True, spoken_utterance=False)
+    row by typing into the compose box without ever speaking. captioning=True
+    puts the ladder past its first branch so this actually reaches the
+    mic_seen check the test is named for, rather than returning early."""
+    facts = SetupFacts(captioning=True, mic_seen=True, spoken_utterance=False)
     assert evaluate(facts)["voice"] != "pass"
 
 

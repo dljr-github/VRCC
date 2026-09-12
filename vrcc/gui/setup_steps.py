@@ -184,19 +184,27 @@ _DETAILS: dict[str, dict[str, str]] = {
         "pass": tr_noop("Your voice model finished loading and is ready."),
     },
     "voice": {
+        # True whether or not the mic has already picked up sound: this text
+        # covers both "captioning is off" and "captioning is on, sound seen,
+        # no phrase yet", and must not go stale in either case.
         "pending": tr_noop(
-            "Turn on captioning and say something out loud. "
+            "With captioning on, say something out loud. "
             "This ticks once we hear a full sentence."
         ),
         "attention": tr_noop(
             "Captioning is on, but nothing is coming through your microphone. "
             "Check your input device."
         ),
-        "pass": tr_noop("We heard you speak clearly."),
+        # No confidence or audio-quality field feeds this row, so the copy
+        # claims only that a phrase was recognized, not how well.
+        "pass": tr_noop("We heard you speak."),
     },
     "vrchat": {
         "pending": tr_noop("Not found yet. It may still be loading, so keep this window open."),
-        "pass": tr_noop("Found on the network. Its OSC service is nearby."),
+        # An mDNS advert is what was actually seen, not a live link to VRChat
+        # (vrchat_detect.py's own docstring calls it a proxy); "advertised"
+        # names that evidence instead of overstating it.
+        "pass": tr_noop("Found on the network. Its OSC service is advertised here."),
     },
     "chatbox": {
         "pending": tr_noop("Nothing sent yet. Speak a full sentence and we will try sending it."),
