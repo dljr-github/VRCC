@@ -2,9 +2,9 @@
 
 A named mutex is the authority and its existence is the whole signal; the
 process never takes ownership, so there is nothing to release but a handle.
-Windows destroys the object with its last handle, so a crash or the os._exit
-path at vrcc/app.py:481-488 cannot leave the guard stuck. That is why this is a
-kernel object and not a lock file.
+Windows destroys the object with its last handle, so a crash or the hard
+exit at the end of run()'s teardown cannot leave the guard stuck. That is
+why this is a kernel object and not a lock file.
 
 A separate auto-reset event is the doorbell. A refused launch signals it and
 exits; the running copy polls it and raises its window. Auto-reset means a

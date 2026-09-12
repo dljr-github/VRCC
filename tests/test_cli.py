@@ -44,7 +44,7 @@ def test_ensure_std_streams_leaves_real_streams_untouched():
 
 def test_second_launch_returns_zero_without_importing_the_app(monkeypatch):
     """The whole point of the guard's position: a refused launch must die
-    before paying the 0.65s vrcc.app import.
+    before paying for the expensive vrcc.app import.
 
     Proven by absence, not by poisoning sys.modules. A poisoned entry would sit
     unused in the refused branch and the test would pass even if the ordering
@@ -153,3 +153,14 @@ def test_release_runs_even_when_the_app_raises(monkeypatch):
     with pytest.raises(RuntimeError):
         cli.main()
     assert released == [True]
+
+
+def test_run_signature_accepts_guard():
+    """Every other test in this module installs a fake vrcc.app, so none of
+    them would notice guard= being dropped from the real run(). This is the
+    one check that looks at the actual function."""
+    import inspect
+
+    import vrcc.app
+
+    assert "guard" in inspect.signature(vrcc.app.run).parameters

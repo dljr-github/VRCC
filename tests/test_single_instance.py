@@ -1,8 +1,12 @@
 """Tests for the single-instance guard.
 
-Real kernel objects, not mocks: CreateMutexW twice in one process with the same
-name is exactly the two-copy case, and CI is windows-latest. Every test uses a
-uuid-suffixed name so a crashed run cannot poison the next one.
+The happy paths use real kernel objects, not mocks: CreateMutexW twice in one
+process with the same name is exactly the two-copy case, and CI is
+windows-latest. Only the two branches that cannot be provoked for real -- a
+failed CreateMutexW and the already-exists race, where the fake handle
+_close_handle receives is never a real one -- patch _create_mutex and
+_close_handle. Every test uses a uuid-suffixed name so a crashed run cannot
+poison the next one.
 """
 
 from __future__ import annotations

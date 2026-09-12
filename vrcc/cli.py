@@ -35,7 +35,8 @@ def main() -> int:
     guard = InstanceGuard()
     if not guard.acquire():
         # Silent by design: any message here would be raised before a UI
-        # language is loaded. The running copy coming forward is the feedback.
+        # language is loaded. The feedback is the running copy showing
+        # itself, or its taskbar button flashing.
         guard.ring()
         return 0
 
