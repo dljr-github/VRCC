@@ -175,13 +175,12 @@ def run(
     updater = UpdateChecker(bus, __version__)
     dm = DownloadManager(paths.models_dir, bus)
 
-    if progress is not None:
-        # Before the gate, not after: the first-run wizard is app-modal, and
-        # a boot panel still open behind it would never get a repaint.
-        progress.close()
-
     if not _models_ready(store.config, dm):
         wizard = FirstRunWizard(store, dm, bridge)
+        if progress is not None:
+            # The wizard is app-modal; a boot panel still open behind it
+            # would sit there uselessly until the wizard closes.
+            progress.close()
         if wizard.exec() != QDialog.DialogCode.Accepted:
             logger.info("first-run wizard cancelled; exiting")
             bridge.detach()
@@ -436,9 +435,10 @@ def run(
     window = make_window()
     window.show()
     if progress is not None:
-        # Covers the path with no wizard, where the gate above already ran
-        # but nothing has closed the panel yet. close() is idempotent, so
-        # this is a no-op on the wizard path.
+        # The only close on the path where no wizard ran, so the panel stays
+        # up through build_engine_stack and the loader start below rather
+        # than vanishing early. close() is idempotent, so this is a no-op on
+        # the wizard path, which already closed it above.
         progress.close()
 
     def rebuild_main_window() -> None:

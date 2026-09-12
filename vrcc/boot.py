@@ -55,11 +55,11 @@ def _walk_imports(progress) -> None:
     must not stop the app from starting: run() reports engine failures
     through its own UI, which never gets the chance if boot dies first."""
     for key, module_names in _IMPORT_GROUPS:
-        progress.start(key)
         try:
+            progress.start(key)
             for name in module_names:
                 _import_module(name)
-        except Exception:  # noqa: BLE001 -- one group's import failure must not sink the launch
+        except Exception:  # noqa: BLE001 -- a reporter or an import failing must not sink the launch
             logger.warning("boot: %s group failed to import", key, exc_info=True)
 
 
