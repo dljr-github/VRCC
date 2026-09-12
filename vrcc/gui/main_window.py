@@ -18,12 +18,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QVBoxLayout, QWidget
 from vrcc.core.config import ConfigStore, apply_profile
 from vrcc.gui import main_heard, main_targets, model_prompts, status_render
 from vrcc.gui.bridge import BusBridge
-from vrcc.gui.caption_log import (
-    CaptionModel,
-    empty_state_html,
-    empty_state_text,
-    render_row_html,
-)
+from vrcc.gui.caption_log import CaptionModel, render_row_html
 from vrcc.gui.icons import FRIENDLY_ERRORS as _FRIENDLY_ERRORS
 from vrcc.gui.icons import dots_svg as _dots_svg  # re-exported: tests import it from here
 from vrcc.gui.log_follow import LogFollower
@@ -374,9 +369,7 @@ class MainWindow(QMainWindow):
                 [(row.key, render_row_html(row, self._p, self._scale)) for row in rows]
             )
             return
-        no_speech = status_render.listening_no_speech(self)
-        msg, sub = empty_state_text(self._engine_states.get("stt"), listening_no_speech=no_speech)
-        self._log_follow.set_html(empty_state_html(msg, sub, self._p, self._scale))
+        self._log_follow.set_html(status_render.empty_state_for(self))
 
     # -- mute chip / status rendering --------------------------------------
 
@@ -454,6 +447,9 @@ class MainWindow(QMainWindow):
         if not self._loading:
             self._pipeline.set_captioning(checked)
         self._render_capture_status()
+        # That repaints the log only on a listening flip, which a toggle
+        # can't produce while _capture_ok is still None or False.
+        self._render_log()
 
     def _on_send_clicked(self) -> None:
         text = self._text_input.text()

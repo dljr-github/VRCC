@@ -10,6 +10,7 @@ its widgets directly and runs on the GUI thread.
 
 from __future__ import annotations
 
+from vrcc.gui.caption_log import empty_state_html, empty_state_text
 from vrcc.i18n import tr
 
 
@@ -94,6 +95,22 @@ def listening_no_speech(w) -> bool:
     began listening: the condition behind the alternate empty-state sub-line
     in :func:`vrcc.gui.caption_log.empty_state_text`."""
     return w._listening and w._meter_moved and not w._speech_seen
+
+
+def empty_state_for(w) -> str:
+    """HTML for the caption log's empty state.
+
+    Reads the captioning toggle directly (the same widget
+    :func:`render_capture_status` reads) rather than through ``w._listening``,
+    because a paused toggle must say so on its own even while capture health
+    is still unknown.
+    """
+    msg, sub = empty_state_text(
+        w._engine_states.get("stt"),
+        listening_no_speech(w),
+        captioning_off=not w._captioning_btn.isChecked(),
+    )
+    return empty_state_html(msg, sub, w._p, w._scale)
 
 
 def note_meter_moved(w) -> None:
