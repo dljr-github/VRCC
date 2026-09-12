@@ -14,6 +14,7 @@ late subscriber.
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtWidgets import QApplication
 
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore
@@ -70,6 +71,17 @@ class SetupCheck(QObject):
         # ever sees the reopened panel. Only a fresh transition into "passed"
         # writes the flag.
         self._was_required_passed = required_passed(self._facts)
+        # Bootstrapped True regardless of the stored value, not read from it:
+        # a fresh unmet launch (the ordinary case, flag False) must then read
+        # as a True -> False transition on the very first tick below, so the
+        # initial show and every later Settings-triggered re-show run through
+        # the same edge-triggered path rather than a separate one-time call.
+        self._was_done = True
+        # Set on a detected transition, acted on (and cleared) once no modal
+        # is active: Settings clears the flag while it is still the modal
+        # dialog on screen, so the edge can arrive well before it is safe to
+        # act on.
+        self._reshow_pending = False
 
         # Qt's queued auto-connection hops a worker-thread emit onto this
         # object's own (GUI) thread, the same mechanism BusBridge relies on.
@@ -87,8 +99,6 @@ class SetupCheck(QObject):
         self._timer.timeout.connect(self._recompute)
         self._timer.start(_POLL_MS)
 
-        # The first tick shows the panel when it's due (below), so this
-        # needs no show/place_beside of its own.
         self._recompute()
 
     # -- worker-thread handlers: latch once, forward once -------------------
@@ -137,12 +147,22 @@ class SetupCheck(QObject):
     def _recompute(self) -> None:
         if self._panel is None:
             return
-        # Cheap attribute read guards a Qt call: this runs four times a
-        # second, and Settings can clear the flag to bring the panel back
-        # (settings_simple.py), so a closed or never-shown panel must
-        # reappear on its own rather than needing this controller poked.
-        if not self._store.config.gui.setup_check_done and not self._panel.isVisible():
+        # Edge-triggered on the flag itself, not level-triggered on
+        # "unmet and hidden": the latter re-fires every tick for the rest of
+        # an unmet session, forcing the panel back within one poll of a user
+        # closing it. Only a True -> False transition (completion, then a
+        # later Settings-triggered clear) may show it; closing the panel
+        # produces no transition, so it stays closed.
+        done = self._store.config.gui.setup_check_done
+        if self._was_done and not done:
+            self._reshow_pending = True
+        self._was_done = done
+        # A modeless panel must not appear under a modal dialog (Settings is
+        # application-modal): act on a pending transition only once none is
+        # active, rather than dropping it if the poll lands mid-dialog.
+        if self._reshow_pending and QApplication.activeModalWidget() is None:
             self._show_panel()
+            self._reshow_pending = False
 
         # Read fresh every time rather than caching a value from
         # construction: neither field has a bus event to invalidate a cache.
@@ -162,13 +182,13 @@ class SetupCheck(QObject):
         self._was_required_passed = now_passed
 
     def _show_panel(self) -> None:
+        import shiboken6
+
         # Both must already be shown before place_beside: it reads
         # frameGeometry(), which under-reports on an unshown window (no
         # title bar yet). Shown unconditionally either way: a stale window
         # reference must not leave the panel undisplayed, only unpositioned.
         self._panel.show()
-        import shiboken6
-
         if shiboken6.isValid(self._window):
             self._panel.place_beside(self._window)
 

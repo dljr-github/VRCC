@@ -429,3 +429,70 @@ def test_recompute_shows_the_panel_with_no_valid_window(qapp, tmp_path):
     finally:
         check.stop()
         bridge.detach()
+
+
+def test_closing_the_panel_stays_closed_across_later_polls(qapp, tmp_path):
+    """The regression a level-triggered re-show ("unmet and hidden, so show")
+    produced: the timer forces the panel back within one poll of the user
+    closing it, and there is no dismiss control to fall back on
+    (setup_panel.py has none). Edge-triggering on the flag fixes this for
+    free, since closing the panel never touches gui.setup_check_done and so
+    produces no further transition."""
+    store = _store(tmp_path)
+    bus = EventBus()
+    pipeline = _FakePipeline()
+    bridge = BusBridge(bus)
+    window = _window(bridge, store, pipeline)
+    check = start(bus, store, window, _FakeDetector())
+    try:
+        assert check._panel.isVisible()
+
+        check._panel.close_panel()
+        assert not check._panel.isVisible()
+
+        check._recompute()
+        check._recompute()
+        assert not check._panel.isVisible()
+    finally:
+        check.stop()
+        window.close()
+        window.deleteLater()
+        bridge.detach()
+
+
+def test_reshow_waits_for_a_modal_dialog_to_close(qapp, tmp_path):
+    # Settings is application-modal (SettingsDialog.exec()); a modeless
+    # panel appearing on top of it, or behind it unnoticed, would make
+    # settings_simple.py's tooltip ("come back once you close Settings")
+    # false. The pending transition is remembered rather than dropped, so
+    # it still takes effect once the modal is gone.
+    from PySide6.QtWidgets import QDialog
+
+    store = _store(tmp_path)
+    store.config.gui.setup_check_done = True
+    bus = EventBus()
+    pipeline = _FakePipeline()
+    bridge = BusBridge(bus)
+    window = _window(bridge, store, pipeline)
+    check = start(bus, store, window, _FakeDetector())
+    dlg = QDialog()
+    dlg.setModal(True)
+    dlg.show()
+    qapp.processEvents()
+    try:
+        assert not check._panel.isVisible()
+
+        store.config.gui.setup_check_done = False
+        check._recompute()
+        assert not check._panel.isVisible(), "must not appear while a modal is active"
+
+        dlg.close()
+        qapp.processEvents()
+        check._recompute()
+        assert check._panel.isVisible()
+    finally:
+        check.stop()
+        dlg.deleteLater()
+        window.close()
+        window.deleteLater()
+        bridge.detach()
