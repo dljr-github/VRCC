@@ -20,6 +20,7 @@ the reverse at runtime).
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -130,6 +131,9 @@ class InputStats:
     stopped working" report has something to check besides the transcript:
     an RMS distribution, the clipped-frame fraction, and how many finals the
     STT engine's quality gate suppressed before anything downstream saw them.
+    A NaN or infinite level reading is a driver or processing fault, not
+    silence: it is counted in ``nonfinite_levels``, kept out of the RMS
+    distribution rather than poisoning it.
 
     ``record_level`` is fed by the same MicLevel readings the meter already
     gets (one per frame in production, published from pipeline_frames's
@@ -155,10 +159,17 @@ class InputStats:
         self.frame_count = 0
         self.clipped_frames = 0
         self.gated_utterances = 0
+        self.nonfinite_levels = 0
 
     def record_level(self, rms: float) -> None:
+        # NaN/inf here (segmenter.py, energy_gate.py both take an unguarded
+        # sqrt(mean(frame**2))) would poison every _percentiles output below,
+        # not just this one reading, so it is counted apart from the samples.
         with self._lock:
-            self._rms_samples.append(rms)
+            if math.isfinite(rms):
+                self._rms_samples.append(rms)
+            else:
+                self.nonfinite_levels += 1
 
     def record_frame(self, frame: "np.ndarray") -> None:
         # Compared elementwise, not via max()/min(): a reduction propagates a
@@ -166,6 +177,11 @@ class InputStats:
         # one bad sample would hide a real clip beside it. Two bool arrays
         # still cost a quarter of an np.abs() float copy per frame, and both
         # short-circuit on an empty frame without a size test.
+        #
+        # NaN compares False on both bounds, so a NaN frame reports "not
+        # clipped" -- true, and unlike _rms_samples this ratio cannot be
+        # poisoned by one bad frame the way a percentile can; the fault still
+        # surfaces through record_level's nonfinite_levels.
         clipped = bool(np.any(frame >= _FULL_SCALE) or np.any(frame <= -_FULL_SCALE))
         with self._lock:
             self.frame_count += 1
@@ -186,6 +202,7 @@ class InputStats:
                 "frame_count": self.frame_count,
                 "clipped_frames": self.clipped_frames,
                 "gated_utterances": self.gated_utterances,
+                "nonfinite_levels": self.nonfinite_levels,
             }
 
 
@@ -265,6 +282,7 @@ class SessionStats:
         self.frame_count = 0
         self.clipped_frames = 0
         self.gated_utterances = 0
+        self.nonfinite_levels = 0
 
     def fold_in(
         self,
@@ -293,6 +311,7 @@ class SessionStats:
         self.frame_count += input_snap["frame_count"]
         self.clipped_frames += input_snap["clipped_frames"]
         self.gated_utterances += input_snap["gated_utterances"]
+        self.nonfinite_levels += input_snap["nonfinite_levels"]
 
 
 def begin_run(p: "Pipeline") -> None:
@@ -335,7 +354,8 @@ def log_summary(p: "Pipeline", *, restarting: bool = False) -> None:
     speculative instead of an engine call; dropped frames; speculatives shed
     under real backpressure (a full queue) versus ones dropped for the
     ordinary, costless reason that the speaker kept talking past them; the
-    input level distribution and clipped-frame fraction; how many finals the
+    input level distribution and clipped-frame fraction, with a count of any
+    non-finite readings excluded from that distribution; how many finals the
     quality gate suppressed; and the finalize-to-chatbox-submission latency.
 
     Errors here are logged and swallowed, never raised: a stats failure
@@ -382,6 +402,10 @@ def _emit(s: SessionStats) -> None:
         )
     else:
         rms_text = "n/a"
+    if s.nonfinite_levels:
+        # Named apart, not folded in: one such reading would have made
+        # every percentile above print nan instead of just its own.
+        rms_text += f" (non-finite readings excluded: {s.nonfinite_levels})"
     clip_text = (
         f"{100 * s.clipped_frames / s.frame_count:.2f}%" if s.frame_count else "n/a"
     )

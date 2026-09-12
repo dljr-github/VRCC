@@ -379,6 +379,7 @@ def test_input_stats_reset_clears_every_counter():
         "frame_count": 0,
         "clipped_frames": 0,
         "gated_utterances": 0,
+        "nonfinite_levels": 0,
     }
 
 
