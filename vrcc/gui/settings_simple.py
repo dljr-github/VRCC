@@ -208,3 +208,18 @@ def _build_app(dlg: "SettingsDialog", form: QFormLayout) -> None:
     reset_defaults.setToolTip(settings_reset.reset_defaults_button_tooltip())
     reset_defaults.clicked.connect(lambda: settings_reset.confirm_and_reset_defaults(dlg))
     form.addRow("", reset_defaults)
+
+    # Clearing the flag is the whole job: the setup check controller (which
+    # outlives this dialog) polls it and shows the panel itself. app.py has no
+    # spare lines for a callback wired through from here to that controller.
+    dlg._show_setup_btn = QPushButton(tr("Bring back the setup steps"))
+    dlg._show_setup_btn.setToolTip(
+        tr("The setup steps come back beside the main window once you close Settings.")
+    )
+
+    def on_show_setup():
+        dlg._cfg.gui.setup_check_done = False
+        dlg._changed()
+
+    dlg._show_setup_btn.clicked.connect(on_show_setup)
+    form.addRow("", dlg._show_setup_btn)
