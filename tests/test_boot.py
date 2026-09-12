@@ -225,6 +225,46 @@ def test_boot_falls_back_to_log_progress_when_the_panel_fails_to_build(qapp, mon
     assert progress.steps == [key for key, _ in PHASES]
 
 
+def test_boot_closes_the_native_splash_on_the_happy_path(qapp, monkeypatch, tmp_path):
+    """boot() is the only caller of _close_native_splash; the three tests
+    above exercise the helper in isolation, but none of them prove boot()
+    still calls it, so a deleted call site would leave the whole suite
+    green while the shipped splash never closes."""
+    _use_tmp_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(boot_mod, "_walk_imports", lambda progress: None)
+    seen = {}
+    monkeypatch.setattr(boot_mod, "_run_app", lambda **k: seen.update(k) or 0)
+    calls = []
+    monkeypatch.setattr(boot_mod, "_close_native_splash", lambda: calls.append(1))
+    boot_mod.boot()
+    progress = seen["progress"]
+    try:
+        assert calls == [1]
+    finally:
+        progress.close()
+        progress._panel.deleteLater()
+
+
+def test_boot_closes_the_native_splash_when_the_panel_fails_to_build(qapp, monkeypatch, tmp_path):
+    """A panel that fails to build is the one path where the native splash has
+    no replacement window behind it: the app keeps running headless-looking
+    while the splash sits on top, always-on-top and undismissable, for the
+    rest of the session unless this path closes it too."""
+    _use_tmp_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(boot_mod, "_import_module", lambda name: None)
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise RuntimeError("no panel for you")
+
+    monkeypatch.setattr("vrcc.gui.boot_panel.BootPanel", _Boom)
+    monkeypatch.setattr(boot_mod, "_run_app", lambda **k: 0)
+    calls = []
+    monkeypatch.setattr(boot_mod, "_close_native_splash", lambda: calls.append(1))
+    boot_mod.boot()
+    assert calls == [1]
+
+
 def test_both_close_is_idempotent(qapp, caplog):
     """run() calls progress.close() once if the first-run wizard opens and
     again once the main window is ready (app.py:183 and :442); a log someone
@@ -243,3 +283,43 @@ def test_both_close_is_idempotent(qapp, caplog):
         panel.deleteLater()
     completions = [r for r in caplog.records if "boot steps complete" in r.getMessage()]
     assert len(completions) == 1
+
+
+def test_close_native_splash_is_silent_without_the_module(caplog):
+    """pyi_splash exists only in a frozen build. A source run must not warn
+    about its absence: there is no splash to close."""
+    with caplog.at_level(logging.DEBUG, logger="vrcc.boot"):
+        boot_mod._close_native_splash()
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_close_native_splash_calls_close_when_present(monkeypatch):
+    """When the module is there, it must actually be closed, or the splash
+    sits on top of the app for the whole session."""
+    import sys
+    import types
+
+    closed = []
+    fake = types.ModuleType("pyi_splash")
+    fake.close = lambda: closed.append(True)
+    monkeypatch.setitem(sys.modules, "pyi_splash", fake)
+    boot_mod._close_native_splash()
+    assert closed == [True]
+
+
+def test_close_native_splash_survives_close_raising(monkeypatch, caplog):
+    """A splash stuck on top of the app for the whole session is a real
+    symptom someone might report, so a raising close() must be logged at
+    DEBUG rather than left invisible, and must never reach boot()."""
+    import sys
+    import types
+
+    def _boom():
+        raise RuntimeError("stuck")
+
+    fake = types.ModuleType("pyi_splash")
+    fake.close = _boom
+    monkeypatch.setitem(sys.modules, "pyi_splash", fake)
+    with caplog.at_level(logging.DEBUG, logger="vrcc.boot"):
+        boot_mod._close_native_splash()
+    assert any(r.levelno == logging.DEBUG for r in caplog.records)

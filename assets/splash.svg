@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" width="480" height="300">
+  <!-- Dark ground, the app's only theme. Fills the whole splash window. -->
+  <rect width="480" height="300" fill="#14161d"/>
+  <!-- Same speech-bubble mark as assets/icon/vrcc-icon.svg, scaled and centered. -->
+  <g transform="translate(170 28) scale(0.546875)">
+    <path fill="#3ea6ff" d="M60 20 H196 A44 44 0 0 1 240 64 V148 A44 44 0 0 1 196 192 H128 L66 228 Q52 238 56 222 L72 192 H60 A44 44 0 0 1 16 148 V64 A44 44 0 0 1 60 20 Z"/>
+    <rect x="52" y="62" width="152" height="32" rx="16" fill="#14161d"/>
+    <rect x="52" y="116" width="96" height="32" rx="16" fill="#14161d"/>
+  </g>
+  <!-- VRCC drawn as strokes, not <text>: no font on the render machine is
+       involved, so the PNG depends only on this file. Round caps and joins
+       echo the icon's rounded caption bars. -->
+  <g fill="none" stroke="#e8eaf0" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="translate(79 190)">
+      <path d="M7,7 L35,83 L63,7"/>
+    </g>
+    <g transform="translate(163 190)">
+      <path d="M7,7 L7,83"/>
+      <path d="M7,7 H40 A18,18 0 0 1 40,43 L7,43"/>
+      <path d="M25,43 L63,83"/>
+    </g>
+    <g transform="translate(247 190)">
+      <path d="M60,20 A33,33 0 1 0 60,70"/>
+    </g>
+    <g transform="translate(331 190)">
+      <path d="M60,20 A33,33 0 1 0 60,70"/>
+    </g>
+  </g>
+</svg>

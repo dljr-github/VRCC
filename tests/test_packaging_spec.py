@@ -10,7 +10,10 @@ The branding wiring (exe icon, inline version resource) is guarded the same
 way, by spec text, so these checks run without PyInstaller installed.
 """
 
+import importlib.util
+import os
 import re
+import sys
 from pathlib import Path
 
 from vrcc import __version__
@@ -116,3 +119,133 @@ def test_spec_ships_soundcard():
         "vrcc.spec must bundle soundcard's package data; it reads a cffi cdef "
         "header (mediafoundation.py.h) from beside its own source at import"
     )
+
+
+_SPLASH_PNG = Path(__file__).resolve().parent.parent / "assets" / "splash.png"
+_SPLASH_SVG = Path(__file__).resolve().parent.parent / "assets" / "splash.svg"
+_MAKE_SPLASH_SOURCE = Path(__file__).resolve().parent.parent / "tools" / "make_splash.py"
+
+# PyInstaller resizes an oversized splash only when Pillow is installed, and
+# Pillow is not a dependency of this project. PyInstaller/building/splash.py
+# defaults max_img_size to this, and raises on a larger image without Pillow.
+_MAX_SPLASH = (760, 480)
+
+
+def _load_make_splash():
+    """tools/ carries no __init__.py, so make_splash.py is loaded from its
+    file path rather than imported by module name."""
+    spec = importlib.util.spec_from_file_location("make_splash", _MAKE_SPLASH_SOURCE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _png_size(blob: bytes) -> tuple[int, int]:
+    """Width and height straight out of the IHDR chunk, so this check needs no
+    image library of its own."""
+    assert blob[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    assert blob[12:16] == b"IHDR", "first chunk is not IHDR"
+    return int.from_bytes(blob[16:20], "big"), int.from_bytes(blob[20:24], "big")
+
+
+def test_splash_sources_exist():
+    assert _SPLASH_SVG.exists(), "assets/splash.svg is the drawn source of record"
+    assert _SPLASH_PNG.exists(), "assets/splash.png is what PyInstaller reads"
+
+
+def test_splash_png_is_a_png():
+    _png_size(_SPLASH_PNG.read_bytes())
+
+
+def test_splash_png_fits_without_pillow():
+    """An image over max_img_size makes PyInstaller demand Pillow, which this
+    project does not depend on, so the release build would fail."""
+    width, height = _png_size(_SPLASH_PNG.read_bytes())
+    assert width <= _MAX_SPLASH[0], width
+    assert height <= _MAX_SPLASH[1], height
+
+
+def test_splash_png_avoids_the_windows_transparency_key():
+    """The bootloader treats pure magenta as transparent on Windows, so the art
+    must not contain it or holes appear in the image. PNG pixel data is
+    zlib-compressed, so the check has to decode actual pixels; a raw byte scan
+    over the compressed file proves nothing about what the image shows."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QImage
+
+    image = QImage(str(_SPLASH_PNG))
+    assert not image.isNull(), "could not decode splash.png"
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            assert (color.red(), color.green(), color.blue()) != (255, 0, 255), (
+                x,
+                y,
+            )
+
+
+def test_splash_svg_source_is_xml_text():
+    """This does not prove the PNG was generated from this SVG; that guarantee
+    comes from the render round trip below. This only rules out an empty or
+    non-XML file being checked in as the source of record."""
+    assert _SPLASH_SVG.read_text(encoding="utf-8").lstrip().startswith("<")
+
+
+def test_splash_png_matches_a_fresh_render_of_the_svg():
+    """Nothing else regenerates splash.png from splash.svg on every run, so a
+    committed PNG that has drifted from its SVG would otherwise pass every
+    other check in this file."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # QApplication, not QGuiApplication: this suite shares one process-wide Qt
+    # singleton across modules, and once a bare QGuiApplication claims it, it
+    # can never be upgraded to the widget-capable QApplication other test
+    # modules need.
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication(sys.argv[:1])
+    make_splash = _load_make_splash()
+    blob, _, _ = make_splash.render_png(make_splash.SVG)
+    assert blob == _SPLASH_PNG.read_bytes()
+
+
+def test_spec_defines_the_splash_target():
+    text = _SPEC.read_text(encoding="utf-8")
+    assert "splash = Splash(" in text, (
+        "vrcc.spec must define a Splash target so the bootloader paints "
+        "before the interpreter starts"
+    )
+    assert 'os.path.join(REPO_ROOT, "assets", "splash.png")' in text
+
+
+def test_spec_passes_the_splash_to_the_exe():
+    """PyInstaller validates EXE's positional arguments against (PYZ, Splash)
+    at PyInstaller/building/api.py:543-544, so the object goes in positionally
+    rather than as a keyword."""
+    text = _SPEC.read_text(encoding="utf-8")
+    # Split on the closing paren at the start of a line, not the first one:
+    # the EXE call contains os.path.join(...) and a naive split stops inside it.
+    exe_call = text.split("exe = EXE(", 1)[1].split("\n)", 1)[0]
+    assert "splash," in exe_call, (
+        "the Splash object is passed positionally to EXE; without it the "
+        "bootloader has nothing to show"
+    )
+
+
+def test_spec_collects_the_splash_binaries():
+    text = _SPEC.read_text(encoding="utf-8")
+    coll_call = text.split("coll = COLLECT(", 1)[1].split("\n)", 1)[0]
+    assert "splash.binaries," in coll_call, (
+        "a one-folder build needs the splash's own binaries in COLLECT"
+    )
+
+
+def test_spec_gives_the_splash_no_text():
+    """The bootloader's text channel mangles a message by slicing between the
+    first open paren and the last close paren, and CJK over it is unverified.
+    This app ships in 17 languages, so the splash carries a logo and nothing
+    else."""
+    text = _SPEC.read_text(encoding="utf-8")
+    splash_call = text.split("splash = Splash(", 1)[1].split("\n)", 1)[0]
+    assert "text_pos" not in splash_call
+    assert "text_size" not in splash_call
+    assert "text_color" not in splash_call
