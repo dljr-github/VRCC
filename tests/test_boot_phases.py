@@ -24,13 +24,16 @@ def test_every_phase_has_a_plain_label():
 
 def test_phase_labels_are_translated_at_call_time(monkeypatch):
     """tr_noop only marks; the label must go through tr() when read, so a panel
-    built after apply_ui_language shows the user's language. A version that
-    cached the result at import time would return the same tuple forever, so
-    the check has to change tr() after import and see the change land."""
+    built after apply_ui_language shows the user's language. This is the only
+    test in the suite that calls phase_labels(), so a cache that fills on first
+    use would fill right here, inside the patched window, and pass regardless.
+    The warm call before the patch is applied denies it that first use."""
+    before = phase_labels()
     monkeypatch.setattr("vrcc.core.progress.tr", lambda text: "XX" + text)
-    labels = phase_labels()
-    assert len(labels) == len(PHASES)
-    assert all(text.startswith("XX") for text in labels)
+    after = phase_labels()
+    assert len(after) == len(PHASES)
+    assert after != before
+    assert all(text.startswith("XX") for text in after)
 
 
 def test_phase_label_returns_a_known_labels_translation():
@@ -40,8 +43,15 @@ def test_phase_label_returns_a_known_labels_translation():
 
 
 def test_phase_label_reads_tr_at_call_time(monkeypatch):
+    """Same reasoning as test_phase_labels_are_translated_at_call_time: a
+    cache filled on first use would fill during the patch unless a warm,
+    unpatched call happens first."""
+    key = PHASES[0][0]
+    before = phase_label(key)
     monkeypatch.setattr("vrcc.core.progress.tr", lambda text: "XX" + text)
-    assert phase_label(PHASES[0][0]).startswith("XX")
+    after = phase_label(key)
+    assert after != before
+    assert after.startswith("XX")
 
 
 def test_phase_label_falls_back_for_an_unknown_key():
