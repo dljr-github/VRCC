@@ -1,7 +1,8 @@
 """Qt-side i18n glue: load Qt's own translations for the chosen UI language.
 
-Separate from ``vrcc.i18n`` so the catalog machinery stays Qt-free; only
-:func:`vrcc.app.run` imports this, after the QApplication exists.
+Separate from ``vrcc.i18n`` so the catalog machinery stays Qt-free. Both
+:func:`vrcc.boot.boot` and :func:`vrcc.app.run` import this module and call
+:func:`apply_ui_language`, each after its own QApplication already exists.
 """
 
 from __future__ import annotations
@@ -38,9 +39,10 @@ def system_locale_preference() -> list[str]:
 def apply_ui_language(app, configured: str) -> str:
     """Resolve ``configured`` (``"auto"`` follows the OS locale) into a
     supported UI language, activate it for :func:`vrcc.i18n.tr`, and install
-    Qt's own translations. Returns the resolved code. Called once by
-    :func:`vrcc.app.run`, before any widget is built (the language is
-    restart-applied, like the theme)."""
+    Qt's own translations. Returns the resolved code. Called by
+    :func:`vrcc.boot.boot` and by :func:`vrcc.app.run`, in each case before
+    any widget of that generation is built (a later language change from
+    Settings calls this again and rebuilds the window)."""
     from vrcc.i18n import resolve_ui_language, set_language
 
     code = resolve_ui_language(configured, system_locale_preference())

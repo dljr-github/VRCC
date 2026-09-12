@@ -1,10 +1,10 @@
-"""The boot phase table: ordering, translation and the two reporters."""
+"""The boot phase table: ordering, translation and the reporter that logs them."""
 
 from __future__ import annotations
 
 import logging
 
-from vrcc.core.progress import PHASES, LogProgress, NoProgress, phase_label, phase_labels
+from vrcc.core.progress import PHASES, LogProgress, phase_label, phase_labels
 
 _BANNED = ("—", "–", "―")
 
@@ -81,13 +81,6 @@ def test_log_progress_ignores_an_unknown_key():
 
 def test_log_progress_close_is_idempotent():
     progress = LogProgress()
-    progress.start("audio")
-    progress.close()
-    progress.close()
-
-
-def test_no_progress_accepts_the_same_calls():
-    progress = NoProgress()
     progress.start("audio")
     progress.close()
     progress.close()

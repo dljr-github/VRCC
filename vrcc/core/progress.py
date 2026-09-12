@@ -1,4 +1,4 @@
-"""The ordered phases a launch reports, and the two ways of reporting them.
+"""The ordered phases a launch reports, and the reporter that logs them.
 
 Qt-free so :mod:`vrcc.boot` can report a phase before any widget exists, and so
 the table can be tested with no display.
@@ -64,14 +64,3 @@ class LogProgress:
 
     def close(self) -> None:
         logger.info("boot steps complete: %s", len(self.steps))
-
-
-class NoProgress:
-    """Accepts the same calls and does nothing, so a caller never needs to test
-    whether it has a reporter."""
-
-    def start(self, key: str) -> None:
-        pass
-
-    def close(self) -> None:
-        pass

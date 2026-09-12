@@ -80,6 +80,27 @@ class BootPanel(QWidget):
         )
         body.addWidget(self._bar)
 
+        self._centre_on_screen()
+
+    def _centre_on_screen(self) -> None:
+        """Move the panel to the middle of its screen's usable area.
+
+        QSplashScreen centres itself inside its own constructor; a bare
+        QWidget carrying Qt.WindowType.SplashScreen does not, so this does
+        it by hand. availableGeometry() excludes the taskbar, so the panel
+        does not land partly behind it the way the full screen geometry
+        would allow. A widget whose screen cannot be resolved is left
+        wherever the platform put it rather than moved: a boot panel that
+        cannot work out where it is must still appear.
+        """
+        screen = self.screen()
+        if screen is None:
+            return
+        self.adjustSize()
+        geo = self.frameGeometry()
+        geo.moveCenter(screen.availableGeometry().center())
+        self.move(geo.topLeft())
+
     def start(self, key: str) -> None:
         """Name the phase starting now and step the bar toward it.
 
@@ -97,6 +118,6 @@ class BootPanel(QWidget):
 
     def close(self) -> None:
         # QWidget.close() already has its own meaning; this only exists so a
-        # caller holding either a BootPanel or a LogProgress/NoProgress
-        # reporter can call close() without knowing which one it has.
+        # caller holding either a BootPanel or a LogProgress reporter can
+        # call close() without knowing which one it has.
         self.close_panel()

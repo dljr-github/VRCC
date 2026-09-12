@@ -1,14 +1,22 @@
-"""Bring Qt up first, show what is loading, then hand off to the app.
+"""Read config, bring Qt up, show what is loading, then hand off to the app.
 
 Distinct from :mod:`vrcc.core.startup`, which holds model-readiness helpers that
 run()'s body calls. This module is what runs BEFORE run() exists.
 
-Every heavy import in :mod:`vrcc.app`'s module scope happens after QApplication
-here, so the window that reports progress exists before the slow part rather than
-after it. The paths, the logging, the config store and the QApplication are built
-once here and passed into run(), which skips building its own: setup_logging adds
-a fresh file handler on every call, and two ConfigStore objects would leave run()
-closing over a different one than the panel was themed from.
+Config is read before QApplication exists, not after: the panel needs the
+user's language and theme to build itself already right, and only
+ConfigStore.load() can supply those. Reading it first is deliberate, not an
+oversight -- ``python -X importtime`` puts the cumulative cost of ``from
+vrcc.core.config import ConfigStore, default_paths`` at roughly 176,000 to
+184,000 microseconds over three runs on this machine, the largest single
+cost paid before the panel can appear. Every other heavy import in
+:mod:`vrcc.app`'s module scope happens after QApplication and behind the
+panel built here, so the window that reports progress exists before the slow
+part rather than after it. The paths, the logging, the config store and the
+QApplication are built once here and passed into run(), which skips building
+its own: setup_logging adds a fresh file handler on every call, and two
+ConfigStore objects would leave run() closing over a different one than the
+panel was themed from.
 """
 
 from __future__ import annotations
@@ -24,10 +32,14 @@ from vrcc.core.progress import LogProgress
 
 logger = logging.getLogger("vrcc.boot")
 
-# vrcc.app's own module-scope import order. The speech group reaches
-# onnxruntime through vrcc/audio/vad.py, and app.py carries a measured claim
-# that setup_cuda_dlls is cheap only because onnxruntime is already loaded by
-# then -- reordering this table would reorder that cost too.
+# Mirrors vrcc.app's own module-scope import order (audio at its line 14,
+# hardware at 15, speech's engine_stack at 18, downloads at 34), so whichever
+# phase here is charged for a shared import is the one a reader scanning
+# that file would expect. That is all this order buys: vrcc.app imports the
+# same names at its own module scope regardless of what order this tuple
+# lists them in, and Python runs module-scope imports before any function
+# body, so onnxruntime is loaded before run() reaches setup_cuda_dlls()
+# no matter how this table is ordered.
 _IMPORT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("audio", ("vrcc.audio.source",)),
     ("hardware", ("vrcc.core.hardware",)),
@@ -50,16 +62,28 @@ def _import_module(name: str):
 
 
 def _walk_imports(progress) -> None:
-    """Name each phase before paying for it, so a launch that dies inside an
-    import leaves the failing step as the log's last line. One broken group
-    must not stop the app from starting: run() reports engine failures
-    through its own UI, which never gets the chance if boot dies first."""
+    """Name each phase before paying for it, then import it inside a try
+    that logs and moves on to the next phase rather than re-raising.
+
+    The loop always reaches ``interface``, the last phase, so the log's
+    last "boot step:" line never names whichever group actually failed --
+    that shows up one line earlier, as the "group failed to import" warning
+    this except block writes. Continuing here does not save the launch
+    either: vrcc.app re-imports every one of these modules at its own
+    module scope (lines 14, 15, 18 and 34), so ``from vrcc.app import run``
+    in :func:`_run_app` hits the same failure again and the process still
+    exits. What the catch buys is where the traceback goes: logged here, it
+    reaches the run log; left to propagate, it would only reach stderr,
+    which ``cli._ensure_std_streams`` points at the null device in a
+    windowed build. Catching here is how a broken group gets recorded at
+    all.
+    """
     for key, module_names in _IMPORT_GROUPS:
         try:
             progress.start(key)
             for name in module_names:
                 _import_module(name)
-        except Exception:  # noqa: BLE001 -- a reporter or an import failing must not sink the launch
+        except Exception:  # noqa: BLE001 -- a reporter or an import failing must not sink the walk
             logger.warning("boot: %s group failed to import", key, exc_info=True)
 
 
@@ -76,12 +100,19 @@ class _Both:
     the event loop so the panel actually paints it. The import walk runs
     synchronously on the GUI thread, and nothing under vrcc/ pumps events
     anywhere else -- without this call the user watches a blank rectangle for
-    the whole walk, which is worse than no panel at all."""
+    the whole walk, which is worse than no panel at all.
+
+    ``close()`` is idempotent: run() calls it once if the first-run wizard
+    opens and again once the main window is ready, and the second call must
+    not write a second "boot steps complete" line to a log someone is
+    reading to troubleshoot.
+    """
 
     def __init__(self, panel, log: LogProgress, app: QApplication) -> None:
         self._panel = panel
         self._log = log
         self._app = app
+        self._closed = False
 
     def start(self, key: str) -> None:
         self._panel.start(key)
@@ -89,6 +120,9 @@ class _Both:
         self._app.processEvents()
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self._panel.close()
         self._log.close()
 
