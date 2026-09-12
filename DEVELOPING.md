@@ -111,6 +111,11 @@ The same path runs as an integration test:
 `set VRCC_E2E_WAV=path\to\speech.wav` then
 `.venv\Scripts\python -m pytest tests/ -v -m integration`.
 
+Set `VRCC_ALLOW_MULTIPLE=1` to run two copies side by side while
+developing; it skips the single-instance guard. This stays out of the
+README, since a user has no reason to want two copies fighting over one
+chatbox.
+
 ## Building a standalone exe
 
 A PyInstaller one-folder spec lives in `packaging/vrcc.spec`:
