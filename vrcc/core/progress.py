@@ -38,6 +38,18 @@ def phase_labels() -> tuple[str, ...]:
     return tuple(tr(label) for _, label in PHASES)
 
 
+def phase_label(key: str) -> str:
+    """Translated label for one phase key, read at call time like phase_labels().
+
+    A key outside the table falls back to itself instead of raising: a launch
+    must never die because a caller named a phase that does not exist, and the
+    raw key still reads as something rather than nothing in a log or a panel.
+    tr() then passes an unrecognised key through unchanged, same as it does for
+    any string that is not a catalog entry.
+    """
+    return tr(_LABELS.get(key, key))
+
+
 class LogProgress:
     """Writes each phase to the run log. The only reporter in a packaged launch
     that leaves evidence behind, so per-phase timings can be read back out of a

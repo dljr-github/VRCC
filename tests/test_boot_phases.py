@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from vrcc.core.progress import PHASES, LogProgress, NoProgress, phase_labels
+from vrcc.core.progress import PHASES, LogProgress, NoProgress, phase_label, phase_labels
 
 _BANNED = ("—", "–", "―")
 
@@ -22,12 +22,33 @@ def test_every_phase_has_a_plain_label():
         assert label[0].isupper(), key
 
 
-def test_phase_labels_are_translated_at_call_time():
+def test_phase_labels_are_translated_at_call_time(monkeypatch):
     """tr_noop only marks; the label must go through tr() when read, so a panel
-    built after apply_ui_language shows the user's language."""
+    built after apply_ui_language shows the user's language. A version that
+    cached the result at import time would return the same tuple forever, so
+    the check has to change tr() after import and see the change land."""
+    monkeypatch.setattr("vrcc.core.progress.tr", lambda text: "XX" + text)
     labels = phase_labels()
     assert len(labels) == len(PHASES)
-    assert all(isinstance(text, str) and text for text in labels)
+    assert all(text.startswith("XX") for text in labels)
+
+
+def test_phase_label_returns_a_known_labels_translation():
+    key = PHASES[0][0]
+    label = phase_label(key)
+    assert isinstance(label, str) and label
+
+
+def test_phase_label_reads_tr_at_call_time(monkeypatch):
+    monkeypatch.setattr("vrcc.core.progress.tr", lambda text: "XX" + text)
+    assert phase_label(PHASES[0][0]).startswith("XX")
+
+
+def test_phase_label_falls_back_for_an_unknown_key():
+    """A caller naming a phase that is not in the table must not crash a
+    panel any more than it crashes LogProgress."""
+    label = phase_label("nonsense")
+    assert isinstance(label, str) and label
 
 
 def test_log_progress_records_each_step(caplog):
