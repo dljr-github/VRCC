@@ -105,31 +105,32 @@ def test_apply_treats_a_missing_row_as_pending(panel):
 
 def test_every_row_gets_a_real_icon_pixmap(panel):
     """pass/attention/pending must each render something (a blank icon slot
-    would silently drop the only non-text signal a row carries)."""
-    states = {row_id: "pass" for row_id in ROWS}
-    panel.apply(states)
-    for row_id in ROWS:
-        pm = panel._icon_labels[row_id].pixmap()
-        assert pm is not None and not pm.isNull()
+    would silently drop the only non-text signal a row carries), and the
+    three must actually differ: a fixed icon regardless of state would pass
+    a mere non-null check while telling the user nothing."""
+    images = {}
+    for state in ("pass", "attention", "pending"):
+        panel.apply({row_id: state for row_id in ROWS})
+        images[state] = {}
+        for row_id in ROWS:
+            pm = panel._icon_labels[row_id].pixmap()
+            assert pm is not None and not pm.isNull()
+            images[state][row_id] = pm.toImage()
 
-    states = {row_id: "attention" for row_id in ROWS}
-    panel.apply(states)
     for row_id in ROWS:
-        pm = panel._icon_labels[row_id].pixmap()
-        assert pm is not None and not pm.isNull()
-
-    states = {row_id: "pending" for row_id in ROWS}
-    panel.apply(states)
-    for row_id in ROWS:
-        pm = panel._icon_labels[row_id].pixmap()
-        assert pm is not None and not pm.isNull()
+        assert images["pass"][row_id] != images["attention"][row_id]
+        assert images["pass"][row_id] != images["pending"][row_id]
+        assert images["attention"][row_id] != images["pending"][row_id]
 
 
 # -- window identity ------------------------------------------------------
 
 
 def test_panel_never_steals_focus(panel):
-    assert panel.windowFlags() & Qt.WindowType.Tool
+    # windowType(), not a bitwise AND on windowFlags(): Qt.WindowType.Tool's
+    # value is a superset bitmask of Window and Dialog, so an AND check is
+    # truthy for a plain window too and would not catch the flag being lost.
+    assert panel.windowType() == Qt.WindowType.Tool
     assert panel.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
 
@@ -151,11 +152,14 @@ def test_close_panel_hides_and_is_safe_to_call_twice(panel):
     assert not panel.isVisible()
 
 
-def test_close_delegates_to_close_panel(panel):
-    panel.show()
-    assert panel.isVisible()
+def test_close_delegates_to_close_panel(panel, monkeypatch):
+    # A plain QWidget.close() also hides, so proving the same isVisible()
+    # result would pass even if close() stopped forwarding to close_panel()
+    # and hid itself some other way. This proves the forward actually happens.
+    calls = []
+    monkeypatch.setattr(panel, "close_panel", lambda: calls.append(1))
     panel.close()
-    assert not panel.isVisible()
+    assert calls == [1]
 
 
 # -- place_beside ----------------------------------------------------------
@@ -242,13 +246,27 @@ def test_place_beside_returns_early_without_a_screen(panel, monkeypatch):
 # -- never a modal, matches the offscreen-suite hazard other GUI tests guard --
 
 
-def test_building_and_applying_never_shows_a_message_box(panel, monkeypatch):
+def test_building_and_applying_never_shows_a_message_box(qapp, monkeypatch):
+    # Patches .warning, not .exec: .warning is the static entry point a
+    # caller would actually use, and it never reaches .exec at the Python
+    # layer, so a guard on .exec alone would never fire (see
+    # tests/test_engine_failure_ui.py's silent_modal fixture for the same
+    # pattern against the same hazard). Builds its own panel after the
+    # patch is in place, not the shared `panel` fixture: that fixture
+    # constructs SetupPanel (and runs its constructor's own apply() call)
+    # before this function's monkeypatch.setattr runs, so a modal raised
+    # during construction would be real and unguarded, not merely uncaught.
     from PySide6.QtWidgets import QMessageBox
 
     calls = []
     monkeypatch.setattr(
-        QMessageBox, "exec", lambda *a, **k: calls.append(1) or 0
+        QMessageBox, "warning", lambda *a, **k: calls.append(1) or 0
     )
-    for facts in (SetupFacts(), SetupFacts(engine_states={"stt": "failed"})):
-        panel.apply(evaluate(facts))
+    p = SetupPanel()
+    try:
+        for facts in (SetupFacts(), SetupFacts(engine_states={"stt": "failed"})):
+            p.apply(evaluate(facts))
+    finally:
+        p.close_panel()
+        p.deleteLater()
     assert not calls

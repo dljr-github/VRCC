@@ -18,7 +18,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from vrcc.gui.icons import circle_svg, tick_svg, x_svg
+from vrcc.gui.icons import alert_svg, circle_svg, tick_svg
 from vrcc.gui.setup_steps import ROWS, row_text
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.gui.widgets import Card, svg_pixmap
@@ -116,14 +116,26 @@ class SetupPanel(QWidget):
         if state == "pass":
             return tick_svg(p["good"])
         if state == "attention":
-            return x_svg(p["warn"])
+            # Not x_svg: "attention" covers "you haven't turned this on
+            # yet" as much as a real failure (setup_steps.py's own
+            # docstring says so), and captioning is off on every fresh
+            # launch by design. A cross there would read as broken on
+            # the very first row a new user sees, so this draws a notice
+            # mark instead of a mark of failure.
+            return alert_svg(p["warn"])
         return circle_svg(p["muted"])
 
     def place_beside(self, window) -> None:
         """Anchor to the right of `window`'s frame, falling back to the left
         if there is no room, then clamp inside the screen's usable area.
         Only ever reads `window`'s geometry; this panel never moves the
-        window it sits beside."""
+        window it sits beside.
+
+        Both `window` and this panel must already be shown before this is
+        called. `frameGeometry()` on a widget that has never been shown
+        reports no title bar on Windows, so calling this first and showing
+        second computes a position that is short by the title bar's height
+        and ends up overlapping the window instead of sitting beside it."""
         # window's own screen, not this panel's: before the first move a
         # top-level's screen() is always the primary one, so on a second
         # monitor self.screen() alone would clamp against the wrong bounds.
