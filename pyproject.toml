@@ -30,8 +30,9 @@ dependencies = [
     "pydantic>=2.5",
     "platformdirs>=4.0",
     "PySide6>=6.6",
-    # Tiny pure-python NVML bindings: first-run hardware tiering, the sm120
-    # compute-type rule and the driver-floor check all need it. Degrades
+    # Tiny pure-python NVML bindings: recommend._has_tensor_cores (tier
+    # detection), hardware.total_vram_bytes (VRAM budget) and
+    # hardware.driver_version (the driver-floor check) all need it. Degrades
     # gracefully at runtime (vrcc.core.hardware) if NVML itself is absent.
     "nvidia-ml-py>=12.0",
 ]

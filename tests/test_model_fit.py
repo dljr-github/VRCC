@@ -68,7 +68,7 @@ def test_warning_agrees_with_the_recommender_budget(monkeypatch):
         monkeypatch.setattr(
             hardware, "total_vram_bytes", lambda index=0, gb=gb: gb * 1024**3
         )
-        budget = recommend.vram_budget_mb(gb * 1024)
+        budget = recommend.vram_budget_mb(gb * 1024, "int8_float16")
         for model_id, peak in STT_VRAM_MB.items():
             warned = model_fit.vram_warning(
                 WHISPER_MODELS[model_id].size_mb, "cuda", model_id,
@@ -78,11 +78,11 @@ def test_warning_agrees_with_the_recommender_budget(monkeypatch):
 
 
 def test_a_card_without_int8_kernels_is_sized_at_what_it_will_actually_run(monkeypatch):
-    """Compute capability 12 and above has no fast int8 kernels, so
-    best_compute_type drops every int8 type and the model runs at float16,
-    where it costs 1.13x to 1.67x more. Sized off the int8 table, large-v3 on a
-    12 GB Blackwell card read 2741 MB against a 4093 MB budget and said nothing,
-    while the measured peak is 4379 MB."""
+    """A card whose supported compute types omit every int8* entry runs the
+    model at float16, where it costs 1.13x to 1.67x more, and sizing must
+    follow the compute type actually in use rather than assume int8. Sized off
+    the int8 table, large-v3 on a 12 GB card read 2741 MB against a 4093 MB
+    budget and said nothing, while the measured float16 peak is 4379 MB."""
     from vrcc.core.bench_tables import STT_VRAM_FP16_MB, STT_VRAM_MB
     from vrcc.stt.registry import WHISPER_MODELS
 
@@ -100,13 +100,46 @@ def test_a_card_without_int8_kernels_is_sized_at_what_it_will_actually_run(monke
     ) is not None
 
 
+def test_sizing_follows_the_resolved_compute_type_on_auto(monkeypatch):
+    """The two cases above pass compute_type in literally and never reach
+    resolution. On "auto", vram_warning must size against whatever
+    resolved_compute_type actually returns for the card's supported set, not
+    assume int8: a 12 GB card whose supported types omit int8 pays the
+    float16 peak and is flagged; one that supports int8_float16 is not."""
+    import ctranslate2
+
+    from vrcc.core import recommend
+    from vrcc.stt.registry import WHISPER_MODELS
+
+    monkeypatch.setattr(recommend, "can_run_cuda", lambda: True)
+    monkeypatch.setattr(hardware, "total_vram_bytes", lambda index=0: 12 * 1024**3)
+    size_mb = WHISPER_MODELS["large-v3"].size_mb
+
+    monkeypatch.setattr(
+        ctranslate2, "get_supported_compute_types",
+        lambda device, index: {"float16", "float32"},
+    )
+    assert model_fit.vram_warning(
+        size_mb, "cuda", "large-v3", compute_type="auto"
+    ) is not None
+
+    monkeypatch.setattr(
+        ctranslate2, "get_supported_compute_types",
+        lambda device, index: {"int8_float16", "float16", "float32"},
+    )
+    assert model_fit.vram_warning(
+        size_mb, "cuda", "large-v3", compute_type="auto"
+    ) is None
+
+
 def test_an_int8_card_keeps_every_model_it_can_genuinely_run(monkeypatch):
     """The reason the float16 table is not simply applied everywhere: it
-    invents warnings on 6 to 11 GB cards for models that fit."""
+    invents warnings on cards for models that genuinely fit once VRChat's
+    reservation and the translation model's marginal cost are held back."""
     from vrcc.core.bench_tables import STT_VRAM_MB
     from vrcc.stt.registry import WHISPER_MODELS
 
-    for gb, model_id in ((6, "medium"), (6, "large-v3-turbo"), (10, "large-v3")):
+    for gb, model_id in ((11, "medium"), (11, "large-v3-turbo"), (13, "large-v3")):
         monkeypatch.setattr(
             hardware, "total_vram_bytes", lambda index=0, gb=gb: gb * 1024**3
         )
@@ -120,7 +153,7 @@ def test_an_int8_card_keeps_every_model_it_can_genuinely_run(monkeypatch):
 def recommend_budget(gb: int) -> int:
     from vrcc.core import recommend
 
-    return recommend.vram_budget_mb(gb * 1024)
+    return recommend.vram_budget_mb(gb * 1024, "int8_float16")
 
 
 def test_warning_falls_back_to_the_size_heuristic_without_a_measurement(monkeypatch):
@@ -244,7 +277,7 @@ def test_the_ranking_reads_the_same_budget_function_settings_does(monkeypatch):
     from vrcc.core import recommend
 
     before = recommend._rank_whisper("gpu_low", vram_mb=8 * 1024)
-    monkeypatch.setattr(recommend, "vram_budget_mb", lambda total_mb: 0)
+    monkeypatch.setattr(recommend, "vram_budget_mb", lambda total_mb, compute: 0)
     after = recommend._rank_whisper("gpu_low", vram_mb=8 * 1024)
 
     assert before != after, "the ranking did not consult the shared budget"

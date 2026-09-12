@@ -24,9 +24,8 @@ from vrcc.translate.registry import MT_MODELS
 
 # VRChat's own recommended spec is 16 GB of VRAM, so a card below it is already
 # rationing for the game before VRCC asks for any. Only at or above that bar is
-# there headroom to hand the larger models. Same floor the wizard uses to
-# default to GPU at all (_GPU_DEFAULT_VRAM_BYTES): a card clears both or
-# neither.
+# there headroom to hand the larger models. The wizard's GPU default
+# (_GPU_DEFAULT_VRAM_BYTES) is a separate, lower bar; see that constant.
 #
 # The bar sits under the nominal figure because NVML reports what the driver
 # leaves addressable, never the number on the box: 16 GB cards read 16303 to
@@ -36,11 +35,12 @@ _VRAM_NOMINAL_SLACK = 1024 ** 3 // 2
 _VRAM_HIGH_BYTES = 16 * 1024 ** 3 - _VRAM_NOMINAL_SLACK
 
 # Capacity is not speed, and a 16 GB card can be a decade old: a Tesla P100 or
-# P40 clears the VRAM bar. The floor is compute capability 7.0
-# (Volta), the first architecture with tensor cores, because best_compute_type
-# hands every card below Blackwell "int8_float16" and there is no fast hardware
-# for that path before then. This is a statement about what the engines ask the
-# card to do, not an estimate of how quickly it would do it.
+# P40 clears the VRAM bar. The floor is compute capability 7.0 (Volta), the
+# first architecture with tensor cores: best_compute_type hands out
+# "int8_float16" whenever CTranslate2 reports it supported, without checking
+# for tensor cores, and there is no fast hardware for that path before Volta.
+# This is a statement about what the engines ask the card to do, not an
+# estimate of how quickly it would do it.
 _TENSOR_CORE_CC = (7, 0)
 
 # Quality is worth suggesting only when it buys a visible accuracy gain for a
@@ -59,24 +59,38 @@ _QUALITY_MAX_LATENCY_INCREASE_S = 0.05
 # budgets is what makes a caption feel detached from the sentence.
 _LATENCY_GATE_S = {"cpu": 1.0, "gpu": 0.6}
 
-# A gpu_low card holds three things at once: the voice model, the translation
-# model and VRChat, so a third each is the split. The voice model is sized
-# against STT_VRAM_MB, whose note explains why a checkpoint size cannot stand
-# in for a measured peak; MT_VRAM_MB is what the second third covers.
-# The fallback is a third of 8 GB, for when VRAM cannot be read (no pynvml, or
-# the import-time ranking, which must not touch NVML).
-_GPU_LOW_VRAM_SHARE = 3
-_GPU_LOW_FALLBACK_BUDGET_MB = 8 * 1024 // _GPU_LOW_VRAM_SHARE
+# VRChat's typical use exceeds 6 GB; the owner wants it kept at 8 GB (user
+# decision 2026-09-12), and the voice model gets whatever a card has left
+# after that reservation and the translation model's marginal cost. An 8 GB
+# card cannot honour it and still caption: a knowing compromise, not a
+# measurement, landing on the floor model with VRChat holding 6494 MB.
+_VRCHAT_RESERVE_MB = 8 * 1024
+
+# The translation model's marginal cost on top of a resident STT model,
+# measured on the reference machine (RTX 5090, sm120) at int8_float16, fresh
+# process per figure: large-v3-turbo alone peaked at 1314 MB, large-v3-turbo
+# plus nllb-600M-int8 resident together at 2339 MB. Not nllb's own peak
+# (MT_VRAM_INT8_MB already counts a context of its own); the shared ~435 MB
+# CUDA context is created once, so a second full row would pay it twice.
+_MT_MARGINAL_MB = 1025
+
+# The smallest voice model this app still recommends: the floor the budget
+# below cannot fall under, the same id PRESETS["cpu"] leads with (_validate ties them).
+_FLOOR_WHISPER_ID = "small"
 
 
-def vram_budget_mb(total_mb: int) -> int:
-    """What a card of ``total_mb`` leaves the voice model.
+def vram_budget_mb(total_mb: int, compute: str) -> int:
+    """What a card of ``total_mb`` leaves the voice model: total minus
+    ``_VRCHAT_RESERVE_MB`` minus ``_MT_MARGINAL_MB``, floored at
+    ``_FLOOR_WHISPER_ID``'s peak (read via :func:`stt_vram_table` for
+    ``compute``) so a negative result still names a real model.
 
     Exported so the Settings fit warning applies the same rule this ranking
     does. The two disagreeing is worse than either being wrong: it would offer
     a model without comment that the recommender had just ruled out.
     """
-    return total_mb // _GPU_LOW_VRAM_SHARE
+    floor = stt_vram_table(compute)[_FLOOR_WHISPER_ID]
+    return max(total_mb - _VRCHAT_RESERVE_MB - _MT_MARGINAL_MB, floor)
 
 
 def resolved_compute_type(compute_type: str = "auto", device_index: int = 0) -> str:
@@ -85,10 +99,10 @@ def resolved_compute_type(compute_type: str = "auto", device_index: int = 0) -> 
     wins, otherwise the best type the card supports.
 
     Here rather than beside the fit warning that first needed it, because the
-    ranking has to size against the same table: a card on compute capability 12
-    has no int8 kernels and always pays the float16 peak, and the two reading
-    different tables put "Recommended for your PC" and "may be too large for
-    your graphics card" on one row.
+    ranking has to size against the same table: a card whose supported compute
+    types omit int8 always pays the float16 peak, and the two reading
+    different tables put "Recommended for your PC" and "leaves little room
+    for VRChat" on one row.
     """
     if compute_type != "auto":
         return compute_type
@@ -97,9 +111,7 @@ def resolved_compute_type(compute_type: str = "auto", device_index: int = 0) -> 
         # supports on a machine without one is a probe for an answer nothing
         # reads: the VRAM gate only applies on the gpu_low tier.
         return "float32"
-    return best_compute_type(
-        "cuda", device_index, cc=compute_capability(device_index)
-    )
+    return best_compute_type("cuda", device_index)
 
 
 def _rank_whisper(
@@ -130,8 +142,8 @@ def _rank_whisper(
 
     ``compute`` picks WHICH measured VRAM peak the budget is applied to: the
     same model costs 1.13x to 1.67x more at float16 than at int8_float16, and a
-    card on compute capability 12 or above has no int8 kernels, so it always
-    pays the higher one. It defaults to the int8 table for the import-time,
+    card whose supported compute types omit every int8* entry always pays the
+    higher one. It defaults to the int8 table for the import-time,
     machine-blind ``WHISPER_PREFERENCE``; a caller that knows the card passes
     :func:`resolved_compute_type`, which is the same value the Settings fit
     warning sizes against.
@@ -157,11 +169,10 @@ def _rank_whisper(
         raise KeyError(tier)
     on_gpu = tier != "cpu"
     gate = _LATENCY_GATE_S["gpu" if on_gpu else "cpu"]
-    # Through vram_budget_mb, not the same arithmetic inline: this is the rule
-    # the Settings fit warning reads, and re-deriving it here let the two drift
-    # apart with every test still green.
-    budget_mb = (_GPU_LOW_FALLBACK_BUDGET_MB if vram_mb is None
-                 else vram_budget_mb(vram_mb))
+    # Through vram_budget_mb, not inline, so the two cannot drift apart. An
+    # unreadable card (no pynvml, or the import-time ranking, which must not
+    # touch NVML) is charged the VRChat reservation alone: the floor a real 8 GB card gets.
+    budget_mb = vram_budget_mb(_VRCHAT_RESERVE_MB if vram_mb is None else vram_mb, compute)
     peaks = stt_vram_table(compute) if vram is None else vram
 
     def order(ids: list[str]) -> list[str]:
@@ -256,6 +267,8 @@ MT_PREFERENCE: dict[str, list[str]] = {
 
 def _validate() -> None:
     """Self-check the tables against the registries (dev-time invariant)."""
+    if _FLOOR_WHISPER_ID != PRESETS["cpu"][0]:
+        raise ValueError("_FLOOR_WHISPER_ID must match PRESETS['cpu'][0]")
     for tier in PRESETS:
         if set(WHISPER_PREFERENCE[tier]) != set(WHISPER_MODELS):
             raise ValueError(f"WHISPER_PREFERENCE[{tier!r}] must cover every whisper id")
@@ -311,16 +324,25 @@ def detected_vram_mb(index: int = 0) -> int | None:
     return None if vram is None else vram // (1024 ** 2)
 
 
-# Cards with this much total VRAM can spare memory for near-instant captions
-# alongside VRChat; smaller cards default to CPU (user decision 2026-07-08).
-# Bound to the tier bar rather than restated, so the two cannot drift into
-# defaulting a card to CPU while sizing it gpu_high.
-_GPU_DEFAULT_VRAM_BYTES = _VRAM_HIGH_BYTES
+# large-v3-turbo and nllb-600M-int8, both resident on CUDA, measured on the
+# reference machine (RTX 5090, sm120): at float16, the pair takes 4198 MB; at
+# int8_float16, 2339 MB. best_compute_type picks int8_float16 wherever
+# CTranslate2 reports it supported. The bar itself is 8 GB (user decision
+# 2026-09-12), lower than the 16 GB the tier split uses; vram_budget_mb's
+# reserve is what decides how much of that 8 GB the voice model actually
+# keeps, not this constant.
+#
+# Built the same way as _VRAM_HIGH_BYTES and under the nominal figure for the
+# same reason: NVML reports what the driver leaves addressable, not the
+# number on the box. Must stay <= _VRAM_HIGH_BYTES, or a card sized for the
+# gpu_high tier could default to CPU.
+_GPU_DEFAULT_VRAM_BYTES = 8 * 1024 ** 3 - _VRAM_NOMINAL_SLACK
 
 
 def default_device_choice(index: int = 0) -> str:
     """Wizard default: ``"gpu"`` when CUDA is usable (:func:`can_run_cuda`)
-    and card ``index`` has >= 16 GB, else ``"cpu"``. VRAM alone is not enough:
+    and card ``index`` has at least ``_GPU_DEFAULT_VRAM_BYTES``, else
+    ``"cpu"``. VRAM alone is not enough:
     NVML reads it from the display driver, which says nothing about whether this
     install ships the CUDA runtime to drive the card. ``index`` is
     ``stt.device_index``, so a multi-GPU box judges the card the engines load

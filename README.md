@@ -36,8 +36,9 @@ download. There's no Python to install and no API keys — everything runs
 locally on Windows 10 or 11.
 
 1. **Check your hardware.** VRCC runs on any Windows 10/11 PC.
-   - **NVIDIA GPU** (driver 570 or newer): use the CUDA build for
-     near-instant captions.
+   - **NVIDIA GPU** (driver 570 or newer): use the CUDA build. With 8 GB
+     of VRAM or more, captions run on the card. A smaller card still takes
+     the CUDA build, but captions run on the processor.
    - **AMD/Intel graphics, or no GPU:** use the CPU build. Captions are
      identical, just a moment slower.
 
@@ -84,7 +85,7 @@ developers only — see [DEVELOPING.md](DEVELOPING.md).
 Python，也不需要 API 密钥——所有功能都在本地的 Windows 10 或 11 上运行。
 
 1. **确认你的硬件。** VRCC 可在任何 Windows 10/11 电脑上运行。
-   - **NVIDIA GPU**（驱动 570 或更新版本）：使用 CUDA 版本，字幕几乎即时显示。
+   - **NVIDIA GPU**（驱动 570 或更新版本）：显存 8 GB 及以上时使用 CUDA 版本，字幕几乎即时显示；显存较小的显卡仍应使用 CUDA 版本，只是字幕改由处理器运行。
    - **AMD/Intel 显卡，或没有 GPU：**使用 CPU 版本。字幕内容完全相同，只是稍慢一点。
 
 2. **下载适合你硬件的版本。** 前往[最新发布版本](https://github.com/dljr-github/VRCC/releases/latest)，下载与之匹配的 zip 压缩包：
@@ -116,7 +117,7 @@ VRCC を使い始めるのにかかる時間は約5分、これに一度きり�
 すべて Windows 10 または 11 上でローカルに動作します。
 
 1. **ハードウェアを確認します。** VRCC は Windows 10/11 の PC であれば動作します。
-   - **NVIDIA GPU**（ドライバー 570 以降）：CUDA 版を使うと、字幕がほぼ即座に表示されます。
+   - **NVIDIA GPU**（ドライバー 570 以降）：VRAM が 8 GB 以上なら CUDA 版を使うと、字幕がほぼ即座に表示されます。それより小さいカードでも CUDA 版を使うべきですが、字幕はプロセッサで処理されます。
    - **AMD/Intel のグラフィックス、または GPU なし：**CPU 版を使います。字幕の内容は同じで、少し遅くなるだけです。
 
 2. **お使いのハードウェアに合った版をダウンロードします。** [最新リリース](https://github.com/dljr-github/VRCC/releases/latest)から、環境に合った zip をダウンロードします。
@@ -148,7 +149,7 @@ VRCC를 실행하기까지는 약 5분과 한 번만 받으면 되는 모델 다
 또는 11에서 로컬로 실행됩니다.
 
 1. **하드웨어를 확인하세요.** VRCC는 모든 Windows 10/11 PC에서 실행됩니다.
-   - **NVIDIA GPU**(드라이버 570 이상): CUDA 버전을 사용하면 자막이 거의 즉시 표시됩니다.
+   - **NVIDIA GPU**(드라이버 570 이상): VRAM이 8 GB 이상이면 CUDA 버전을 사용할 때 자막이 거의 즉시 표시됩니다. 그보다 작은 카드도 CUDA 버전을 사용해야 하지만, 자막은 프로세서에서 처리됩니다.
    - **AMD/Intel 그래픽 또는 GPU 없음:** CPU 버전을 사용하세요. 자막 내용은 동일하며, 조금 더 느릴 뿐입니다.
 
 2. **하드웨어에 맞는 버전을 다운로드하세요.** [최신 릴리스](https://github.com/dljr-github/VRCC/releases/latest)에서 해당하는 zip 파일을 다운로드합니다.
@@ -177,8 +178,10 @@ grab the zip that matches your hardware, unzip it anywhere, and run
 downloads the models for you.
 
 - The CUDA zip (its name starts with `VRCC-cuda-windows-x64`) for PCs
-  with an NVIDIA GPU (driver 570 or newer). Near-instant captions, and it
-  falls back to CPU by itself when no usable GPU is found.
+  with an NVIDIA GPU (driver 570 or newer). With 8 GB of VRAM or more,
+  captions run on the card and are near-instant. A smaller card still
+  takes this build, with captions running on the processor instead, and
+  it falls back to CPU by itself when no usable GPU is found.
 - The CPU zip (`VRCC-windows-x64`) is a much smaller download. Captions
   are identical, just a moment slower; the default models are sized to
   keep up on CPU.
@@ -198,15 +201,22 @@ Windows display language), and downloads them:
 | Your machine | Speech-to-text | Translation | Download |
 | ------------ | -------------- | ----------- | -------- |
 | NVIDIA GPU with 16 GB+ VRAM | `large-v3-turbo` | `nllb-1.3B-int8` | ~3 GB |
-| Any other NVIDIA GPU | `large-v3-turbo` | `nllb-600M-int8` | ~2.3 GB |
-| No GPU, a language Parakeet covers | `parakeet-tdt-0.6b-v3` | `nllb-600M-int8` | ~1.3 GB |
-| No GPU, any other language | whisper `small` | `nllb-600M-int8` | ~1.1 GB |
+| NVIDIA GPU with 11 GB to 16 GB VRAM | `large-v3-turbo` | `nllb-600M-int8` | ~2.3 GB |
+| No GPU, or an NVIDIA GPU under 11 GB, a language Parakeet covers | `parakeet-tdt-0.6b-v3` | `nllb-600M-int8` | ~1.3 GB |
+| No GPU, or an NVIDIA GPU under 11 GB, any other language | whisper `small` | `nllb-600M-int8` | ~1.1 GB |
+
+VRChat itself wants a lot of the card's video memory. VRCC reserves 8 GB for
+it and sizes the voice model against whatever the card has left once the
+translation model is accounted for, which is why `large-v3-turbo` needs
+roughly 11 GB rather than 8: under that, it would leave VRChat too little
+room to run alongside it.
 
 Japanese, Korean and Chinese use the same models as everything else. Parakeet
-does not cover them, so a no-GPU machine takes whisper `small` rather than
-Parakeet. `sense-voice-small` is still available in the Models window and is
-much smaller (240 MB), but faster-whisper transcribed real VRChat speech more
-accurately in testing, so it is no longer recommended.
+does not cover them, so a machine with no GPU, or an NVIDIA GPU under 11 GB,
+takes whisper `small` rather than Parakeet. `sense-voice-small` is still
+available in the Models window and is much smaller (240 MB), but
+faster-whisper transcribed real VRChat speech more accurately in testing, so
+it is no longer recommended.
 
 The wizard shows what it picked and lets you switch the run device before
 downloading.
