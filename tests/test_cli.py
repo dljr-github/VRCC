@@ -51,6 +51,8 @@ def test_second_launch_returns_zero_without_importing_the_app(monkeypatch):
     were wrong. An earlier test module in the same session may already have
     imported vrcc.app, so drop it first and assert it did not come back.
     """
+    import inspect
+
     import vrcc.cli as cli
 
     monkeypatch.delitem(sys.modules, "vrcc.app", raising=False)
@@ -73,6 +75,11 @@ def test_second_launch_returns_zero_without_importing_the_app(monkeypatch):
     assert cli.main() == 0
     assert rung == [True]
     assert "vrcc.app" not in sys.modules
+    # sys.modules alone cannot see a hoist to module scope: this test module
+    # already imported vrcc.cli at collection time, so cli.py would not
+    # re-execute and vrcc.app would never reappear even if the import moved
+    # above main(). Pin the import to main()'s own source as well.
+    assert "from vrcc.app import run" in inspect.getsource(cli.main)
 
 
 def test_first_launch_runs_the_app(monkeypatch):
@@ -115,3 +122,34 @@ def test_guard_is_created_after_argparse(monkeypatch):
     with pytest.raises(SystemExit):
         cli.main()
     assert created == []
+
+
+def test_release_runs_even_when_the_app_raises(monkeypatch):
+    """release() sits in a finally: a crash inside run() must not leave the
+    mutex handle open for the rest of the process."""
+    import types
+
+    import vrcc.cli as cli
+
+    fake = types.ModuleType("vrcc.app")
+
+    def _run(portable=False, verbose=False, guard=None):
+        raise RuntimeError("boom")
+
+    fake.run = _run
+    monkeypatch.setitem(sys.modules, "vrcc.app", fake)
+    monkeypatch.setattr(sys, "argv", ["vrcc"])
+
+    released = []
+
+    class _Allowed:
+        def acquire(self):
+            return True
+
+        def release(self):
+            released.append(True)
+
+    monkeypatch.setattr(cli, "InstanceGuard", lambda *a, **k: _Allowed())
+    with pytest.raises(RuntimeError):
+        cli.main()
+    assert released == [True]
