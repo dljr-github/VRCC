@@ -10,7 +10,10 @@ The branding wiring (exe icon, inline version resource) is guarded the same
 way, by spec text, so these checks run without PyInstaller installed.
 """
 
+import importlib.util
+import os
 import re
+import sys
 from pathlib import Path
 
 from vrcc import __version__
@@ -120,11 +123,21 @@ def test_spec_ships_soundcard():
 
 _SPLASH_PNG = Path(__file__).resolve().parent.parent / "assets" / "splash.png"
 _SPLASH_SVG = Path(__file__).resolve().parent.parent / "assets" / "splash.svg"
+_MAKE_SPLASH_SOURCE = Path(__file__).resolve().parent.parent / "tools" / "make_splash.py"
 
 # PyInstaller resizes an oversized splash only when Pillow is installed, and
 # Pillow is not a dependency of this project. PyInstaller/building/splash.py
 # defaults max_img_size to this, and raises on a larger image without Pillow.
 _MAX_SPLASH = (760, 480)
+
+
+def _load_make_splash():
+    """tools/ carries no __init__.py, so make_splash.py is loaded from its
+    file path rather than imported by module name."""
+    spec = importlib.util.spec_from_file_location("make_splash", _MAKE_SPLASH_SOURCE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _png_size(blob: bytes) -> tuple[int, int]:
@@ -154,13 +167,38 @@ def test_splash_png_fits_without_pillow():
 
 def test_splash_png_avoids_the_windows_transparency_key():
     """The bootloader treats pure magenta as transparent on Windows, so the art
-    must not contain it or holes appear in the image."""
-    assert b"\xff\x00\xff" not in _SPLASH_PNG.read_bytes()
+    must not contain it or holes appear in the image. PNG pixel data is
+    zlib-compressed, so the check has to decode actual pixels; a raw byte scan
+    over the compressed file proves nothing about what the image shows."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QImage
+
+    image = QImage(str(_SPLASH_PNG))
+    assert not image.isNull(), "could not decode splash.png"
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            assert (color.red(), color.green(), color.blue()) != (255, 0, 255), (
+                x,
+                y,
+            )
 
 
 def test_splash_svg_source_is_xml_text():
     """This does not prove the PNG was generated from this SVG; that guarantee
-    comes from regenerating with tools/make_splash.py and diffing the result,
-    not from a test. This only rules out an empty or non-XML file being
-    checked in as the source of record."""
+    comes from the render round trip below. This only rules out an empty or
+    non-XML file being checked in as the source of record."""
     assert _SPLASH_SVG.read_text(encoding="utf-8").lstrip().startswith("<")
+
+
+def test_splash_png_matches_a_fresh_render_of_the_svg():
+    """Nothing else regenerates splash.png from splash.svg on every run, so a
+    committed PNG that has drifted from its SVG would otherwise pass every
+    other check in this file."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QGuiApplication
+
+    QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
+    make_splash = _load_make_splash()
+    blob, _, _ = make_splash.render_png(make_splash.SVG)
+    assert blob == _SPLASH_PNG.read_bytes()

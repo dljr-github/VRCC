@@ -28,9 +28,9 @@ def render_png(svg: Path) -> tuple[bytes, int, int]:
     renderer = QSvgRenderer(str(svg))
     if not renderer.isValid():
         raise SystemExit(f"unreadable SVG: {svg}")
-    # The SVG's own width/height decide the render size, not a constant here,
-    # so growing splash.svg past max_img_size is caught at generation time
-    # instead of by a release build that has no Pillow to fall back on.
+    # width and height must track the SVG's own declaration: the max_img_size
+    # check below only guards anything real if it reflects the file that
+    # actually ships.
     default = renderer.defaultSize()
     width, height = default.width(), default.height()
     if width > MAX_SIZE[0] or height > MAX_SIZE[1]:
