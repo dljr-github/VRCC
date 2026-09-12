@@ -85,6 +85,22 @@ def _walk_imports(progress) -> None:
             logger.warning("boot: %s group failed to import", key, exc_info=True)
 
 
+def _close_native_splash() -> None:
+    """Dismiss the bootloader's splash once Qt has something on screen.
+
+    ``pyi_splash`` is injected by PyInstaller and exists only inside a frozen
+    build, so a source run finds nothing to close and must stay quiet about it.
+    """
+    try:
+        import pyi_splash
+    except ImportError:
+        return
+    try:
+        pyi_splash.close()
+    except Exception:  # noqa: BLE001 -- a stuck splash must not stop the launch
+        logger.debug("could not close the bootloader splash", exc_info=True)
+
+
 def _run_app(**kwargs) -> int:
     """Hand off to the composition root. A seam so tests never build the real
     engine stack, the real window, or a real Qt event loop."""
@@ -156,6 +172,7 @@ def boot(portable: bool = False, verbose: bool = False, guard=None) -> int:
         panel = BootPanel(store.config.gui.theme)
         panel.show()
         app.processEvents()
+        _close_native_splash()
         progress = _Both(panel, LogProgress(), app)
     except Exception:  # noqa: BLE001 -- see the comment above: the walk must still run
         logger.warning("boot: could not build the progress panel", exc_info=True)

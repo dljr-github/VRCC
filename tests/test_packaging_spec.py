@@ -229,7 +229,7 @@ def test_spec_passes_the_splash_to_the_exe():
 
 def test_spec_collects_the_splash_binaries():
     text = _SPEC.read_text(encoding="utf-8")
-    coll_call = text.split("coll = COLLECT(", 1)[1]
+    coll_call = text.split("coll = COLLECT(", 1)[1].split("\n)", 1)[0]
     assert "splash.binaries," in coll_call, (
         "a one-folder build needs the splash's own binaries in COLLECT"
     )

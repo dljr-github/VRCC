@@ -243,3 +243,25 @@ def test_both_close_is_idempotent(qapp, caplog):
         panel.deleteLater()
     completions = [r for r in caplog.records if "boot steps complete" in r.getMessage()]
     assert len(completions) == 1
+
+
+def test_close_native_splash_is_silent_without_the_module(caplog):
+    """pyi_splash exists only in a frozen build. A source run must not warn
+    about its absence: there is no splash to close."""
+    with caplog.at_level(logging.DEBUG, logger="vrcc.boot"):
+        boot_mod._close_native_splash()
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_close_native_splash_calls_close_when_present(monkeypatch):
+    """When the module is there, it must actually be closed, or the splash
+    sits on top of the app for the whole session."""
+    import sys
+    import types
+
+    closed = []
+    fake = types.ModuleType("pyi_splash")
+    fake.close = lambda: closed.append(True)
+    monkeypatch.setitem(sys.modules, "pyi_splash", fake)
+    boot_mod._close_native_splash()
+    assert closed == [True]

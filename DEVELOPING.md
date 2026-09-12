@@ -131,6 +131,34 @@ install, and shares the same default models directory. Distribute the whole
 `dist\VRCC` folder; pair the exe with `--portable` if you want a fully
 self-contained folder.
 
+## Regenerating the icon and the splash image
+
+`vrcc/vrcc.ico` and `assets/splash.png` are both generated files. Do not
+hand-edit either one.
+
+`tools/make_icon.py` renders the SVGs under `assets/icon/` into the ICO
+that the window and the packaged exe both use:
+
+```
+.venv\Scripts\python tools\make_icon.py
+```
+
+`tools/make_splash.py` renders `assets/splash.svg` into `assets/splash.png`,
+the image PyInstaller's bootloader paints before the interpreter itself has
+started:
+
+```
+.venv\Scripts\python tools\make_splash.py
+```
+
+The splash has to stay within PyInstaller's default splash size. Pillow is
+not a dependency of this project, and only Pillow lets the bootloader
+resize an oversized splash at build time, so anything larger fails the
+release build outright rather than just looking wrong. The tool checks the
+limit when it renders, and `tests/test_packaging_spec.py` checks the
+committed PNG against the same limit, so the exact figure lives in code
+instead of going stale in this file.
+
 ## Contributing a UI translation
 
 Adding a UI translation is a single JSON file in `vrcc/i18n/`: copy the
