@@ -274,10 +274,13 @@ def test_the_ranking_reads_the_same_budget_function_settings_does(monkeypatch):
     disagreement vram_budget_mb exists to prevent: Settings offering,
     uncommented, a model the recommender had just ruled out.
     """
-    from vrcc.core import recommend
+    from vrcc.core import recommend, recommend_rank
 
     before = recommend._rank_whisper("gpu_low", vram_mb=8 * 1024)
-    monkeypatch.setattr(recommend, "vram_budget_mb", lambda total_mb, compute: 0)
+    # vram_budget_mb is defined in recommend_rank (recommend only re-exports
+    # it for Settings), and _rank_whisper reads it as a bare name resolved on
+    # the module where _rank_whisper itself is defined: patch it there.
+    monkeypatch.setattr(recommend_rank, "vram_budget_mb", lambda total_mb, compute: 0)
     after = recommend._rank_whisper("gpu_low", vram_mb=8 * 1024)
 
     assert before != after, "the ranking did not consult the shared budget"

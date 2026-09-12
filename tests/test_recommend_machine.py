@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from tests.test_recommend import _EXPECTED_WHISPER_PREFERENCE, _FakeDM, _TIERS
-from vrcc.core import recommend
+from vrcc.core import recommend, recommend_rank
 from vrcc.stt.registry import WHISPER_MODELS
 
 
@@ -204,7 +204,10 @@ def test_float16_10gb_is_the_case_the_floor_exists_for(monkeypatch):
     assert whisper_ja == "small"
 
     unfloored = 10239 - recommend._VRCHAT_RESERVE_MB - recommend._MT_MARGINAL_MB
-    monkeypatch.setattr(recommend, "vram_budget_mb", lambda total_mb, compute: unfloored)
+    # vram_budget_mb is defined in recommend_rank (recommend only re-exports
+    # it), and _rank_whisper reads it as a bare name resolved on the module
+    # where _rank_whisper itself is defined: patch it there.
+    monkeypatch.setattr(recommend_rank, "vram_budget_mb", lambda total_mb, compute: unfloored)
     ranked = recommend._rank_whisper(
         "gpu_low", languages=("ja",), vram_mb=10239, compute="float16"
     )
@@ -222,7 +225,10 @@ def test_an_english_speaker_is_not_the_floors_case():
 def test_validate_ties_the_floor_to_the_cpu_preset(monkeypatch):
     assert recommend._FLOOR_WHISPER_ID == recommend.PRESETS["cpu"][0]
 
-    monkeypatch.setattr(recommend, "_FLOOR_WHISPER_ID", "not-the-cpu-preset")
+    # _FLOOR_WHISPER_ID is defined in recommend_rank (recommend only
+    # re-exports it), and _validate reads it as a bare name resolved on the
+    # module where _validate itself is defined: patch it there.
+    monkeypatch.setattr(recommend_rank, "_FLOOR_WHISPER_ID", "not-the-cpu-preset")
     with pytest.raises(ValueError):
         recommend._validate()
 
