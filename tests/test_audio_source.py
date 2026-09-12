@@ -183,6 +183,114 @@ class TestMicSourceResampleFallback:
         assert fallback.kwargs["blocksize"] == 0
         assert fallback.start_calls == 1
 
+    def test_fallback_saturation_counts_any_channel_over_threshold(self, monkeypatch):
+        from vrcc.audio import source as source_module
+
+        monkeypatch.setattr(
+            source_module.sd,
+            "query_devices",
+            lambda device, kind: {"default_samplerate": 16000.0, "max_input_channels": 2},
+        )
+        monkeypatch.setattr(source_module.soxr, "resample", lambda x, i, o: x)
+
+        factory = FakeFactory(fail_when=_direct_fail)
+        mic = MicSource(stream_factory=factory)
+        mic.start(lambda frame: None)
+
+        # One channel clipped, the other quiet: any-channel semantics on raw
+        # indata must still count the row (a channel average would mask it).
+        indata = np.zeros((4, 2), dtype=np.float32)
+        indata[:, 0] = 1.0
+        factory.streams[0].deliver(indata)
+
+        assert mic._clipped_samples == 4
+        assert mic._total_samples == 4
+
+    def test_fallback_open_logs_resample_fallback_true(self, monkeypatch, caplog):
+        from vrcc.audio import source as source_module
+
+        monkeypatch.setattr(
+            source_module.sd,
+            "query_devices",
+            lambda device, kind: {"default_samplerate": 44100.0, "max_input_channels": 1},
+        )
+        factory = FakeFactory(fail_when=_direct_fail)
+        mic = MicSource(device=9, stream_factory=factory)
+
+        with caplog.at_level(logging.INFO, logger="vrcc.audio"):
+            mic.start(lambda frame: None)
+
+        open_records = [
+            r for r in caplog.records if "microphone capture open" in r.getMessage()
+        ]
+        assert len(open_records) == 1
+        assert "resample_fallback=True" in open_records[0].getMessage()
+
+    def test_clean_session_logs_nothing_on_stop(self, monkeypatch, caplog):
+        from vrcc.audio import source as source_module
+
+        monkeypatch.setattr(
+            source_module.sd,
+            "query_devices",
+            lambda device, kind: {"default_samplerate": 16000.0, "max_input_channels": 1},
+        )
+        monkeypatch.setattr(source_module.soxr, "resample", lambda x, i, o: x)
+
+        factory = FakeFactory(fail_when=_direct_fail)
+        mic = MicSource(stream_factory=factory)
+        mic.start(lambda frame: None)
+        # The forced fallback logs its own open-time warning; only stop() is
+        # under test here.
+        caplog.clear()
+
+        quiet = np.zeros((512, 1), dtype=np.float32)
+        with caplog.at_level(logging.WARNING, logger="vrcc.audio"):
+            factory.streams[0].deliver(quiet)  # audio flows, but nothing to report
+            mic.stop()
+
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+    @pytest.mark.parametrize("loud", [False, True])
+    def test_repeated_callback_errors_summarized_with_or_without_clipping(
+        self, monkeypatch, caplog, loud
+    ):
+        from vrcc.audio import source as source_module
+
+        monkeypatch.setattr(
+            source_module.sd,
+            "query_devices",
+            lambda device, kind: {"default_samplerate": 16000.0, "max_input_channels": 1},
+        )
+
+        def bad_resample(x, i, o):
+            raise RuntimeError("resample blew up")
+
+        monkeypatch.setattr(source_module.soxr, "resample", bad_resample)
+
+        factory = FakeFactory(fail_when=_direct_fail)
+        mic = MicSource(stream_factory=factory)
+        mic.start(lambda frame: None)
+
+        level = 1.0 if loud else 0.0
+        indata = np.full((512, 1), level, dtype=np.float32)
+        with caplog.at_level(logging.WARNING, logger="vrcc.audio"):
+            # Clip counting runs before the resample call in the callback,
+            # so the counters still advance even though every delivery ends
+            # in bad_resample raising.
+            for _ in range(5):
+                factory.streams[0].deliver(indata)
+            mic.stop()
+
+        # One combined summary record either way; the saturation segment
+        # only shows up when the delivered audio actually clipped.
+        summaries = [
+            r for r in caplog.records if "audio capture stopped" in r.getMessage()
+        ]
+        assert len(summaries) == 1
+        msg = summaries[0].getMessage()
+        assert "4 repeated callback errors" in msg
+        assert ("saturation" in msg) == loud
+
     def test_fallback_callback_exception_does_not_propagate(self, monkeypatch, caplog):
         from vrcc.audio import source as source_module
 

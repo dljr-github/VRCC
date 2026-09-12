@@ -362,6 +362,24 @@ def test_empty_state_html_scales_font():
     assert "font-size:14px" in html  # round(12 * 1.2) sub
 
 
+def test_empty_state_text_listening_no_speech_swaps_only_sub_line():
+    from vrcc.gui.caption_log import empty_state_text
+
+    default_msg, default_sub = empty_state_text("ready")
+    msg, sub = empty_state_text("ready", listening_no_speech=True)
+    assert msg == default_msg  # headline unchanged
+    assert sub != default_sub
+    assert "arriving" in sub
+
+
+def test_empty_state_text_listening_no_speech_ignored_while_loading():
+    from vrcc.gui.caption_log import empty_state_text
+
+    # loading copy takes priority: a no-speech judgement makes no sense
+    # before the model is even ready to judge anything.
+    assert empty_state_text("loading", listening_no_speech=True) == empty_state_text("loading")
+
+
 def test_render_partial_colors_dict_does_not_raise():
     # The documented 5-key override shape must not KeyError on border/bad for a
     # translated + not_sent row (regression for `colors or _DEFAULT_COLORS`).

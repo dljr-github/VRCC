@@ -371,10 +371,12 @@ class TestSilenceDecouple:
     def test_high_threshold_does_not_raise_the_silence_bar(self):
         # At a high speech threshold, mid-utterance dips to 0.40 must NOT count
         # as silence (silence bar pinned at 0.35), so no finalize fires.
-        cfg = VadConfig(threshold=0.60, silence_threshold=0.35)
-        # Speech, then 30 frames dipping to 0.40. At threshold 0.60 a coupled
-        # formula would call 0.40 silence; the decoupled bar stays at 0.35, so
-        # 0.40 is dead band and the utterance must not finalize.
+        # relative_silence_ratio=0.0 pinned explicitly: this isolates the
+        # absolute dead band alone, independent of whatever ratio ships as the
+        # VadConfig default. At threshold 0.60 a coupled formula would call
+        # 0.40 silence; the decoupled bar stays at 0.35, so 0.40 is dead band
+        # and the utterance must not finalize even held for 30 frames.
+        cfg = VadConfig(threshold=0.60, silence_threshold=0.35, relative_silence_ratio=0.0)
         probs = [0.9] + [0.40] * 30
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -386,9 +388,10 @@ class TestSilenceDecouple:
     def test_silence_bar_clamped_below_speech_threshold(self):
         # At high sensitivity the speech threshold is low, so the silence bar
         # must clamp to threshold - MIN_GAP (0.25 here), not the raw
-        # silence_threshold (0.35). A 0.28 probe sits in the dead band under the
-        # clamp; without the clamp it would count as silence and finalize.
-        cfg = VadConfig(threshold=0.30, silence_threshold=0.35)
+        # silence_threshold (0.35). A 0.28 probe sits in the dead band under
+        # the clamp; without the clamp it would count as silence and finalize.
+        # relative_silence_ratio=0.0 pinned explicitly, same reason as above.
+        cfg = VadConfig(threshold=0.30, silence_threshold=0.35, relative_silence_ratio=0.0)
         probs = [0.9] + [0.28] * 30
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)

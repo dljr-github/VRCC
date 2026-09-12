@@ -7,10 +7,16 @@ warm_up / unload / transcribe), turning mono float32 16 kHz audio into an
 ``auto`` runs these models on CPU even when CUDA is available: the int8
 exports measured no faster on CUDA than CPU (see
 benchmarks/rtx-5090-ryzen-9950x3d.json) and a CUDA session takes VRAM from
-VRChat; an explicit ``cuda`` config still builds CUDA sessions. These
-models report no per-segment confidence or no-speech probability, so results
-carry neutral gate values (0.0) and the VAD is the effective quality gate.
-Zero Qt.
+VRChat; an explicit ``cuda`` config still builds CUDA sessions. This model
+reports no no-speech probability, so ``SttResult.no_speech_prob`` stays a
+neutral 0.0. It does carry a per-token logprob (onnx_asr's
+``with_timestamps()``, requested via ``need_logprobs="yes"``), and the mean
+of those is checked against ``cfg.parakeet_avg_logprob_gate`` before a result
+is returned -- see
+:attr:`vrcc.core.config.SttConfig.parakeet_avg_logprob_gate` for the
+measurement this threshold comes from. Switching from plain ``recognize()`` to
+``with_timestamps()`` costs no measurable latency (median 0.1293s vs 0.1305s
+over 30 utterances, int8 CPU, 3 warm runs). Zero Qt.
 """
 
 from __future__ import annotations
@@ -63,6 +69,10 @@ class OnnxAsrEngine:
         self._model_factory = model_factory
 
         self._model = None
+        # The timestamped adapter over self._model, cached once at build time
+        # rather than re-wrapped per call: with_timestamps() just returns a
+        # thin adapter object, no session rebuild.
+        self._model_ts = None
         self._device: str | None = None
 
     # -- lifecycle -----------------------------------------------------------
@@ -123,7 +133,11 @@ class OnnxAsrEngine:
                 )
             )
         except Exception as exc:
+            # Both references, as unload() drops both: _model_ts holds the
+            # same sessions, so clearing only _model would keep a failed
+            # engine's CUDA allocation alive for the rest of the process.
             self._model = None
+            self._model_ts = None
             self._bus.publish(EngineStateChanged("stt", "failed", str(exc)))
             raise
 
@@ -140,6 +154,7 @@ class OnnxAsrEngine:
     def unload(self) -> None:
         """Drop the model reference. Safe to call when not loaded."""
         self._model = None
+        self._model_ts = None
 
     # -- transcription ---------------------------------------------------------
 
@@ -148,15 +163,19 @@ class OnnxAsrEngine:
     ) -> SttResult | None:
         """Transcribe ``samples`` (mono float32, 16 kHz) into an :class:`SttResult`.
 
-        Returns ``None`` for empty text. The transducers auto-detect within
-        their set but don't report it. ``detect_language=True`` (the heard
-        stream, captioning someone else's speech) gets ``language=None``:
-        nobody has evidence for what these decoders heard, and a fabricated
-        code would hand the translator a source it never detected. Otherwise
-        ``language`` echoes the configured source ("en" when set to auto, the
-        MT source fallback the main pipeline already depends on -- do not
-        also null this branch, it is a separate case from detect_language).
-        Raises ``RuntimeError`` if called before :meth:`load`.
+        Returns ``None`` for empty text, or when the mean per-token logprob
+        falls below ``cfg.parakeet_avg_logprob_gate`` (see
+        :attr:`vrcc.core.config.SttConfig.parakeet_avg_logprob_gate` for the
+        measurement backing that threshold). The transducers auto-detect
+        within their set but don't report it.
+        ``detect_language=True`` (the heard stream, captioning someone else's
+        speech) gets ``language=None``: nobody has evidence for what these
+        decoders heard, and a fabricated code would hand the translator a
+        source it never detected. Otherwise ``language`` echoes the
+        configured source ("en" when set to auto, the MT source fallback the
+        main pipeline already depends on -- do not also null this branch, it
+        is a separate case from detect_language). Raises ``RuntimeError`` if
+        called before :meth:`load`.
 
         ``detect_language`` is accepted for parity with :class:`SttEngine`, so
         one caller can serve either engine.
@@ -167,12 +186,23 @@ class OnnxAsrEngine:
                 "call load() first."
             )
 
-        text = self._model.recognize(
+        result = self._model_ts.recognize(
             np.ascontiguousarray(samples, dtype=np.float32),
             sample_rate=_SAMPLE_RATE,
         )
-        text = (text or "").strip()
+        text = (result.text or "").strip()
         if not text:
+            return None
+
+        # Missing/empty logprobs (a future onnx_asr build changing its
+        # contract) fall back to the neutral value rather than gating blind.
+        logprobs = result.logprobs
+        avg_logprob = sum(logprobs) / len(logprobs) if logprobs else 0.0
+        if logprobs and avg_logprob < self._cfg.parakeet_avg_logprob_gate:
+            logger.debug(
+                "%s gated by avg_logprob: %.3f < %.3f",
+                self._spec.id, avg_logprob, self._cfg.parakeet_avg_logprob_gate,
+            )
             return None
 
         source = self._cfg.source_language
@@ -182,10 +212,10 @@ class OnnxAsrEngine:
             language = "en"
         else:
             language = get(source).whisper
-        # No confidence/no-speech signals from these decoders: neutral values
-        # that always pass SttConfig's gates (VAD is the effective gate).
+        # No no-speech signal from this decoder: neutral value, always passes
+        # SttConfig.no_speech_gate.
         return SttResult(
-            text=text, language=language, avg_logprob=0.0, no_speech_prob=0.0
+            text=text, language=language, avg_logprob=avg_logprob, no_speech_prob=0.0
         )
 
     # -- internals -------------------------------------------------------------
@@ -246,18 +276,25 @@ class OnnxAsrEngine:
         return _CPU_PROVIDERS
 
     def _build_model(self, providers: tuple):
-        """Construct the onnx-asr model from the already-downloaded files."""
+        """Construct the onnx-asr model from the already-downloaded files.
+
+        Caches the ``with_timestamps()`` adapter alongside it: it is a thin
+        wrapper, not a rebuilt session, and transcribe() needs it for
+        per-token logprobs.
+        """
         factory = self._model_factory
         if factory is None:
             import onnx_asr
 
             factory = onnx_asr.load_model
-        return factory(
+        model = factory(
             self._spec.asr_type,
             self._model_dir,
             quantization=self._spec.quantization,
             providers=list(providers),
         )
+        self._model_ts = model.with_timestamps()
+        return model
 
 
 def _session_providers(obj, depth: int = 3) -> set[str]:

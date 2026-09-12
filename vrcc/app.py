@@ -16,7 +16,6 @@ from vrcc.core import calibrate, hardware
 from vrcc.core.bus import EventBus
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.core.engine_stack import (
-    EngineOwners,
     apply_hear_others,
     build_engine_stack,
     start_hear_others_guarded,
@@ -51,7 +50,7 @@ def _make_source_with_denoise(config, device_cfg: str) -> MicSource:
     return MicSource(_resolve_audio_device(device_cfg), denoiser=denoiser)
 
 
-def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, owners) -> None:
+def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, pipeline) -> None:
     """Mark each engine kind that failed at startup, and unhook a dead
     translator from every consumer of it.
 
@@ -73,7 +72,7 @@ def _retire_failed_engines(failed_kinds, loaded: dict, startup_ids: dict, owners
             continue
         loaded[kind] = _FAILED
         if kind == "mt":
-            owners.set_mt(None)
+            pipeline.set_mt(None)
 
 
 def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
@@ -132,6 +131,16 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     for warning in store.load_warnings:
         logger.warning("config: %s", warning)
 
+    # Deliberately ahead of any window: the first-run wizard (below, when
+    # models_ready() is False) reads can_run_cuda() for its device
+    # recommendation, and that probe caches its result for the process, so
+    # calling it before the nvidia wheel DLL dirs are registered pins a
+    # wheels-only GPU install to CPU for the rest of the run (see
+    # hardware._cublas_available). In-situ cost on this machine, warm OS
+    # cache, onnxruntime already imported by this point: 0.079-0.080s over
+    # three runs, all DLL work, no import left to pay -- too small to chase a
+    # deferral that would have to outrace EngineLoader's background thread,
+    # which calls resolve() the moment it starts.
     hardware.setup_cuda_dlls()
 
     # Qt imports are deliberately lazy so this module (and build_engine_stack /
@@ -185,9 +194,6 @@ def run(portable: bool = False, verbose: bool = False) -> int:
         calibrate.cached_factor(store.config)
 
     stack = build_engine_stack(store, bus, paths)
-    # Every holder of the shared engines, not just the pipeline: a swap that
-    # reached one of two consumers left the other calling an unloaded engine.
-    owners = EngineOwners(stack.pipeline, stack.heard)
 
     # Flipped once _start_pipeline_guarded succeeds; _status_after_swap reads
     # it so a green swap never claims "Capturing" over a never-started pipeline.
@@ -228,7 +234,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
             # capture the swap already started. Runs for a dead translator too,
             # which no longer stops capture, so re-picking it still swaps.
             _retire_failed_engines(
-                loader.failed_kinds, reloader._loaded, startup_ids, owners
+                loader.failed_kinds, reloader._loaded, startup_ids, stack.pipeline
             )
             if not success:
                 logger.warning(
@@ -324,7 +330,7 @@ def run(portable: bool = False, verbose: bool = False) -> int:
     }
 
     reloader = _Reloader(
-        pipeline=owners,
+        pipeline=stack.pipeline,
         build=_build_engine,
         load=_load_engine,
         set_swapping=stack.pipeline.set_swapping,

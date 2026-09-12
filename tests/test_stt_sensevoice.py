@@ -48,16 +48,23 @@ _META = {
 
 
 class _FakeSession:
-    """Quacks like onnxruntime.InferenceSession over a scripted token path."""
+    """Quacks like onnxruntime.InferenceSession over a scripted token path.
+
+    ``logit_scale`` sets the winning logit at each step (rest stay 0), which
+    sets the softmax confidence the gate sees: 12.0 (default) keeps every
+    non-gating test comfortably above SttConfig.sensevoice_avg_logprob_gate;
+    a gating test passes a small scale to simulate a babble-degraded decode.
+    """
 
     def __init__(
         self, token_ids, providers=("CPUExecutionProvider",), meta=None,
-        providers_after_run=None,
+        providers_after_run=None, logit_scale=12.0,
     ):
         self._token_ids = list(token_ids)
         self._providers = list(providers)
         self._meta = dict(_META if meta is None else meta)
         self._providers_after_run = providers_after_run
+        self._logit_scale = logit_scale
         self.runs: list[dict] = []
 
     def run(self, outputs, feeds):
@@ -69,7 +76,7 @@ class _FakeSession:
         vocab = len(_VOCAB)
         logits = np.zeros((1, len(self._token_ids), vocab), dtype=np.float32)
         for step, token_id in enumerate(self._token_ids):
-            logits[0, step, token_id] = 1.0
+            logits[0, step, token_id] = self._logit_scale
         return [logits]
 
     def get_modelmeta(self):
@@ -84,7 +91,7 @@ class _RecordingFactory:
 
     def __init__(
         self, token_ids=(1, 3, 4, 5, 6, 7), fail_at=(), session_providers=None, meta=None,
-        providers_after_run=None,
+        providers_after_run=None, logit_scale=12.0,
     ):
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeSession] = []
@@ -93,6 +100,7 @@ class _RecordingFactory:
         self._session_providers = session_providers
         self._meta = meta
         self._providers_after_run = providers_after_run
+        self._logit_scale = logit_scale
 
     def __call__(self, path, sess_options=None, providers=None):
         idx = len(self.calls)
@@ -104,7 +112,7 @@ class _RecordingFactory:
         reported = self._session_providers or providers or ["CPUExecutionProvider"]
         session = _FakeSession(
             self._token_ids, providers=_names(reported), meta=self._meta,
-            providers_after_run=self._providers_after_run,
+            providers_after_run=self._providers_after_run, logit_scale=self._logit_scale,
         )
         self.built.append(session)
         return session
@@ -307,8 +315,8 @@ def test_transcribe_strips_tags_and_reports_the_detected_language(model_dir):
     assert result.text == "hello world"
     # The one thing parakeet cannot do: tell the translator what it heard.
     assert result.language == "ja"
-    assert result.avg_logprob == 0.0
-    assert result.no_speech_prob == 0.0
+    assert result.avg_logprob < 0.0  # real mean non-blank logprob, not neutral
+    assert result.no_speech_prob == 0.0  # no usable no-speech signal (measured, rejected)
 
 
 def test_transcribe_collapses_ctc_repeats_and_blanks(model_dir):
@@ -348,6 +356,31 @@ def test_transcribe_returns_none_for_audio_shorter_than_one_frame(model_dir):
     assert factory.built[0].runs == []  # never reached the session
 
 
+def test_transcribe_confident_result_passes_the_sensevoice_gate(model_dir):
+    cfg = SttConfig()
+    factory = _RecordingFactory(logit_scale=12.0)
+    eng = _engine(model_dir, factory)
+    eng.load()
+
+    result = eng.transcribe(_speech())
+
+    assert result is not None
+    assert result.avg_logprob >= cfg.sensevoice_avg_logprob_gate
+
+
+def test_transcribe_low_confidence_result_is_gated(model_dir, caplog):
+    # A small winning logit over this 9-token toy vocab simulates a
+    # babble-degraded decode: mean non-blank logprob well below the gate.
+    factory = _RecordingFactory(logit_scale=0.3)
+    eng = _engine(model_dir, factory)
+    eng.load()
+
+    with caplog.at_level("DEBUG", logger="vrcc.stt.sensevoice"):
+        assert eng.transcribe(_speech()) is None
+
+    assert "avg_logprob" in caplog.text
+
+
 def test_transcribe_returns_none_for_empty_text(model_dir):
     factory = _RecordingFactory(token_ids=(0, 0, 0))  # all blanks
     eng = _engine(model_dir, factory)
@@ -380,72 +413,8 @@ def test_transcribe_feeds_the_expected_input_contract(model_dir):
 
 
 # --------------------------------------------------------------------------
-# metadata-driven language slot
+# metadata-driven language slot -> test_stt_sensevoice_language_slot.py
 # --------------------------------------------------------------------------
-
-@pytest.mark.parametrize(
-    ("source", "expected"),
-    [("auto", 0), ("English", 4), ("Japanese", 11), ("Korean", 12),
-     ("Chinese Simplified", 3)],
-)
-def test_language_slot_comes_from_the_models_own_metadata(model_dir, source, expected):
-    factory = _RecordingFactory()
-    eng = _engine(model_dir, factory, source_language=source)
-    eng.load()
-    eng.transcribe(_speech())
-
-    assert factory.built[0].runs[0]["language"][0] == expected
-
-
-def test_language_outside_the_models_set_uses_auto(model_dir):
-    # French has no lang_* slot in this export; auto beats guessing.
-    factory = _RecordingFactory()
-    eng = _engine(model_dir, factory, source_language="French")
-    eng.load()
-    eng.transcribe(_speech())
-
-    assert factory.built[0].runs[0]["language"][0] == 0
-
-
-def test_language_slot_follows_a_live_source_language_change(model_dir):
-    """The spoken-language combo writes straight to the live config without
-    rebuilding the engine, so the slot must be read per transcribe."""
-    factory = _RecordingFactory()
-    eng = _engine(model_dir, factory, source_language="Japanese")
-    eng.load()
-    eng.transcribe(_speech())
-
-    eng._cfg.source_language = "Korean"
-    eng.transcribe(_speech())
-
-    slots = [run["language"][0] for run in factory.built[0].runs]
-    assert slots == [11, 12]
-
-
-def test_cantonese_slot_does_not_displace_mandarin_for_chinese(model_dir):
-    """lang_zh and lang_yue both map to the Whisper code "zh"; a VRCC
-    "Chinese" source must pin Mandarin, not Cantonese."""
-    factory = _RecordingFactory()
-    eng = _engine(model_dir, factory, source_language="Chinese Traditional")
-    eng.load()
-    eng.transcribe(_speech())
-
-    assert factory.built[0].runs[0]["language"][0] == 3  # lang_zh, not lang_yue (7)
-
-
-def test_normalize_samples_metadata_drives_the_amplitude_scale(model_dir):
-    """normalize_samples=1 means the export wants [-1, 1] audio and =0 means
-    int16 scale. Getting it wrong does not raise, it silently shifts every
-    filterbank energy, so the flag has to actually reach the front-end."""
-    features = {}
-    for flag in ("0", "1"):
-        factory = _RecordingFactory(meta=dict(_META, normalize_samples=flag))
-        engine = _engine(model_dir, factory)
-        engine.load()
-        engine.transcribe(_speech())
-        features[flag] = factory.built[0].runs[0]["x"]
-
-    assert not np.allclose(features["0"], features["1"])
 
 
 # --------------------------------------------------------------------------

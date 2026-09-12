@@ -13,6 +13,7 @@ import threading
 import time
 
 from vrcc.core.config import AppConfig
+from vrcc.core.engine_slot import EngineSlot
 from vrcc.core.events import HeardPhrase
 
 from .heard_fakes import _Mt, _Segmenter, _Stt, _phrases, _stream, _wait
@@ -111,14 +112,14 @@ def test_no_translation_engine_still_publishes_the_transcript():
 def test_transcription_is_serialised_against_the_main_pipeline():
     """The engines are shared rather than duplicated, so a second copy of a
     2.5 GB model is not loaded. That is only safe while both callers hold the
-    same lock."""
+    same slot's lock."""
     stt = _Stt()
-    lock = threading.Lock()
-    stream, source, bus = _stream(stt=stt, locks=(lock, threading.Lock()))
+    stt_slot = EngineSlot(stt)
+    stream, source, bus = _stream(slots=(stt_slot, EngineSlot(_Mt())))
     try:
         stream.start()
         # The main pipeline is mid-decode: the heard worker must wait.
-        with lock:
+        with stt_slot.borrow():
             source.feed()
             time.sleep(0.1)
             assert stt.calls == 0, "decoded while the other stream held the lock"
@@ -128,6 +129,29 @@ def test_transcription_is_serialised_against_the_main_pipeline():
 
     assert stt.calls == 1
     assert stt.max_concurrent <= 1
+
+
+def test_translation_is_serialised_against_the_main_pipeline():
+    """Same sharing as the STT engine: translate() runs with the MT slot's
+    lock held, so a caller already holding it (the main pipeline mid-swap or
+    mid-translate) delays this stream rather than racing it."""
+    cfg = AppConfig()
+    cfg.stt.spoken_languages = ["English"]
+    cfg.translate.targets = ["Japanese"]
+    mt = _Mt()
+    mt_slot = EngineSlot(mt)
+    stream, source, bus = _stream(cfg=cfg, slots=(EngineSlot(_Stt()), mt_slot))
+    try:
+        stream.start()
+        with mt_slot.borrow():
+            source.feed()
+            time.sleep(0.1)
+            assert mt.calls == [], "translated while the other stream held the lock"
+        _wait(bus)
+    finally:
+        stream.stop()
+
+    assert len(mt.calls) == 1
 
 
 # -- robustness ---------------------------------------------------------------

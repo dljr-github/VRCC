@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
         self._engine_failures_reported: set[str] = set()
         # Per-utterance caption rows with delivery status (pure model, re-rendered).
         self._caption_model = CaptionModel()
+        self._listening, self._meter_moved, self._speech_seen = False, False, False
 
         self.setWindowTitle("VRCC")
         self._build_ui()
@@ -212,6 +213,7 @@ class MainWindow(QMainWindow):
             (b.update_result, self._on_update_result),
             (b.heard_phrase, self._on_heard_phrase),
             (b.heard_level, self._on_heard_level),
+            (b.speech_started, self._on_speech_started),
         )
 
     def _connect_bridge(self) -> None:
@@ -228,6 +230,11 @@ class MainWindow(QMainWindow):
 
     def _on_mic_level(self, rms: float, vad_prob: float) -> None:
         self._mic_meter.set_level(rms)
+        if self._listening and rms > 0:
+            status_render.note_meter_moved(self)
+
+    def _on_speech_started(self, event) -> None:
+        status_render.note_speech_started(self)
 
     def _translate_active(self) -> bool:
         # Live config AND a live engine: an MT engine can hot-swap in
@@ -367,7 +374,8 @@ class MainWindow(QMainWindow):
                 [(row.key, render_row_html(row, self._p, self._scale)) for row in rows]
             )
             return
-        msg, sub = empty_state_text(self._engine_states.get("stt"))
+        no_speech = status_render.listening_no_speech(self)
+        msg, sub = empty_state_text(self._engine_states.get("stt"), listening_no_speech=no_speech)
         self._log_follow.set_html(empty_state_html(msg, sub, self._p, self._scale))
 
     # -- mute chip / status rendering --------------------------------------
@@ -392,7 +400,10 @@ class MainWindow(QMainWindow):
         self._render_capture_status()
 
     def _render_capture_status(self) -> None:
-        status_render.render_capture_status(self)
+        listening = status_render.render_capture_status(self)
+        if listening != self._listening:
+            self._meter_moved, self._speech_seen, self._listening = False, False, listening
+            self._render_log()
 
     def reload_from_config(self) -> None:
         """Re-sync the toolbar controls to config (e.g. after the modal Settings

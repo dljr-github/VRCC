@@ -87,3 +87,31 @@ def render_capture_status(w) -> bool:
     w._capture_label.setText(text)
     w._capture_label.setStyleSheet(f"color: {color}; padding: 2px 8px;")
     return listening
+
+
+def listening_no_speech(w) -> bool:
+    """Whether sound is arriving but no utterance has started since the app
+    began listening: the condition behind the alternate empty-state sub-line
+    in :func:`vrcc.gui.caption_log.empty_state_text`."""
+    return w._listening and w._meter_moved and not w._speech_seen
+
+
+def note_meter_moved(w) -> None:
+    """Latch the first nonzero mic level of this listening run and repaint
+    the log once. MicLevel keeps firing while listening, so only the edge
+    may repaint."""
+    if not w._meter_moved:
+        w._meter_moved = True
+        w._render_log()
+
+
+def note_speech_started(w) -> None:
+    """Latch the first utterance of this listening run and repaint the log.
+
+    The repaint is required, not an optimization: a final the STT quality
+    gate suppresses publishes nothing else this window listens for, so
+    without it the "no speech heard yet" sub-line outlives the speech that
+    disproves it, in exactly the session a user would be diagnosing."""
+    if not w._speech_seen:
+        w._speech_seen = True
+        w._render_log()

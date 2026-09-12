@@ -21,52 +21,9 @@ import platformdirs
 from pydantic import BaseModel, Field, ValidationError
 
 from vrcc.core.config_migrate import apply_migrations
+from vrcc.core.vad_config import AudioConfig, VadConfig
 
 logger = logging.getLogger("vrcc.core.config")
-
-
-class AudioConfig(BaseModel):
-    device: str = "auto"
-    energy_gate_enabled: bool = False
-    energy_threshold: int = 300
-    # GTCRN noise suppression before the VAD/STT. Off by default: it corrupts
-    # short words on quiet clean speech (SenseVoice decodes "testing" as
-    # "Investesting" at 0.5) and clean-clip accuracy drops as strength rises,
-    # while its win is only on genuinely noisy input, so a noisy-room user opts
-    # in rather than every user paying the cost. strength is a dry/wet blend in
-    # [0,1]; a gentle 0.25 when enabled, since 0.5 was where the short-word
-    # damage set in.
-    denoise_enabled: bool = False
-    denoise_strength: float = Field(default=0.25, ge=0.0, le=1.0)
-    # Caption what the SPEAKERS play, so other people in VRChat can be read as
-    # well as heard. Off by default: it is a second transcription stream, and
-    # what it captures is the whole output device rather than VRChat's voice
-    # channel, so it is opt-in rather than a surprise. Empty device means the
-    # current default speaker, resolved at capture time so a headset swap is
-    # followed.
-    hear_others_enabled: bool = False
-    hear_others_device: str = ""
-    # Empty means whatever the user speaks, which is right for almost everyone.
-    # Set explicitly by someone who wants to read others in a language they are
-    # not captioning themselves in.
-    hear_others_language: str = ""
-
-
-class VadConfig(BaseModel):
-    # Silero speech probability to start an utterance. Errs sensitive on
-    # purpose: a missed utterance is silent and reads as a broken app, while a
-    # false trigger is visible and easy to turn down. Clean speech sits only
-    # just above 0.5, so a lower bar also catches soft or unclear speech.
-    threshold: float = 0.35
-    # Silence bar, decoupled from the speech threshold so raising sensitivity
-    # (lowering the speech threshold) never raises the silence bar and chops
-    # words mid-utterance. Clamped below the speech threshold at use.
-    silence_threshold: float = 0.25
-    speculative_silence_ms: int = 250
-    finalize_silence_ms: int = 600
-    min_utterance_ms: int = 500
-    pre_roll_ms: int = 150
-    max_utterance_s: float = 28.0
 
 
 class SttConfig(BaseModel):
@@ -89,6 +46,19 @@ class SttConfig(BaseModel):
     without_timestamps: bool = True
     avg_logprob_gate: float = -0.8
     no_speech_gate: float = 0.6
+    # Parakeet and SenseVoice each report a mean per-token logprob on their
+    # own scale, an order of magnitude tighter than whisper's length-weighted
+    # avg_logprob_gate above, so that gate does not apply to them. Measured
+    # through create_stt_engine on real weights: 50 LibriSpeech test-clean
+    # utterances (tools/bench_stt.load_utterances), babble = 6 other
+    # utterances summed and mixed in at 0 dB (tools/denoise_realnoise_gate.
+    # mix_at_snr). Worst clean utterance was -0.204 (parakeet) / -0.173
+    # (sensevoice); both gates sit about 2x past that, biased toward letting
+    # marginal audio through rather than the clean/babble20 boundary. At 0 dB
+    # babble, suppressed count on the same 50 utterances went 8->46
+    # (parakeet) and 0->36 (sensevoice).
+    parakeet_avg_logprob_gate: float = -0.4
+    sensevoice_avg_logprob_gate: float = -0.35
     initial_prompt: str = ""
     no_repeat_ngram_size: int = 3
     # Drop a transcription whose worst segment compresses past this. A runaway

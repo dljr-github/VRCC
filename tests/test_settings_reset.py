@@ -341,9 +341,12 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
     store.config.osc.ip = "10.0.0.5"
     # Tuning to be reset away from defaults.
     store.config.vad.threshold = 0.60
+    store.config.vad.relative_silence_ratio = 0.2
     store.config.gui.update_check_enabled = False  # a preference, not tuning
     store.config.stt.avg_logprob_gate = -2.5
     store.config.stt.no_speech_gate = 0.9
+    store.config.stt.parakeet_avg_logprob_gate = -1.0
+    store.config.stt.sensevoice_avg_logprob_gate = -1.0
     store.config.stt.condition_on_previous_text = True
     store.config.audio.denoise_enabled = True
     store.config.audio.denoise_strength = 0.9
@@ -356,8 +359,11 @@ def test_reset_defaults_resets_tuning_keeps_personal(tmp_path, monkeypatch):
         d = AppConfig()
         # Tuning reset.
         assert store.config.vad.threshold == d.vad.threshold
+        assert store.config.vad.relative_silence_ratio == d.vad.relative_silence_ratio
         assert store.config.audio.denoise_enabled == d.audio.denoise_enabled
         assert store.config.audio.denoise_strength == d.audio.denoise_strength
+        assert store.config.stt.parakeet_avg_logprob_gate == d.stt.parakeet_avg_logprob_gate
+        assert store.config.stt.sensevoice_avg_logprob_gate == d.stt.sensevoice_avg_logprob_gate
         # Personal preserved.
         assert store.config.audio.device == "My USB Mic"
         assert store.config.stt.source_language == "Japanese"
@@ -423,3 +429,42 @@ def test_recommended_confirm_body_names_the_precision_it_resets(qapp, tmp_path, 
     finally:
         dlg.close()
         dlg.deleteLater()
+
+
+# Fields NOT listed in settings_reset._RESET_FIELDS for each section: personal
+# choices (mic/model/device/language/appearance) rather than tuning. Spelled
+# out explicitly so a field added to a model anywhere forces a decision here
+# instead of silently falling out of "Reset tuning to defaults" (as
+# parakeet_avg_logprob_gate/sensevoice_avg_logprob_gate did before this test).
+_NOT_TUNING = {
+    "vad": set(),
+    "audio": {"device", "hear_others_enabled", "hear_others_device", "hear_others_language"},
+    "stt": {
+        "model", "device", "device_index", "compute_type", "cpu_threads",
+        "num_workers", "source_language", "spoken_languages",
+        "without_timestamps", "initial_prompt", "extra_transcribe_kwargs",
+    },
+    "translate": {
+        "enabled", "model", "device", "device_index", "compute_type",
+        "inter_threads", "intra_threads", "max_queued_batches", "targets",
+        "extra_translate_kwargs",
+    },
+    "gui": {"theme", "font_scale", "ui_language", "window_geometry", "update_check_enabled"},
+}
+
+
+def test_reset_fields_are_exhaustive():
+    """Every model field is accounted for in exactly one of
+    settings_reset._RESET_FIELDS (tuning, restored by "Reset tuning to
+    defaults") or _NOT_TUNING (personal, deliberately left alone). A field
+    in neither is a field nobody decided about."""
+    from vrcc.core.config import _SECTION_MODELS
+    from vrcc.gui.settings_reset import _RESET_FIELDS
+
+    for section, not_tuning in _NOT_TUNING.items():
+        model_fields = set(_SECTION_MODELS[section].model_fields)
+        tuning = set(_RESET_FIELDS.get(section, ()))
+        assert not (tuning & not_tuning), f"{section}: field marked both tuning and personal"
+        assert tuning | not_tuning == model_fields, (
+            f"{section}: undecided field(s) {model_fields - tuning - not_tuning}"
+        )

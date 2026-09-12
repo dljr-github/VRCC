@@ -125,6 +125,9 @@ def test_build_stack_with_all_fakes_starts_and_stops_clean(tmp_path):
     assert stack.pipeline is not None
     assert stack.mt is not None
     assert stack.mute is not None
+    assert stack.heard is not None
+    assert stack.heard._stt_slot is stack.pipeline.stt_slot
+    assert stack.heard._mt_slot is stack.pipeline.mt_slot
 
     stack.pipeline.start()
     assert source.started is True

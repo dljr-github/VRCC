@@ -8,14 +8,13 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 from vrcc.core.bus import EventBus
 from vrcc.core.config import SttConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.stt import create_stt_engine
-from vrcc.stt.engine import SttEngine, SttResult
+from vrcc.stt.engine import SttEngine
 from vrcc.stt.onnx_asr import OnnxAsrEngine
 from vrcc.stt.registry import WHISPER_MODELS
 
@@ -24,25 +23,34 @@ PARAKEET = WHISPER_MODELS[PARAKEET_ID]
 
 
 class _FakeModel:
-    """Records recognize() calls; returns a canned text.
+    """Records with_timestamps().recognize() calls; returns a canned text and
+    per-token logprobs (the real onnx_asr TimestampedResult contract).
 
     ``providers_after_run`` mirrors onnxruntime's CUDA->CPU fallback, which
     only shows up on the encoder session's get_providers() after a run: when
     set, each recognize() call flips the encoder's reported providers to it.
     """
 
-    def __init__(self, text: str = "hello there", providers_after_run=None) -> None:
+    def __init__(
+        self, text: str = "hello there", logprobs=None, providers_after_run=None,
+    ) -> None:
         self.text = text
+        # Confident by default (mean well above every gate exercised below);
+        # gating tests pass their own low-confidence logprobs.
+        self.logprobs = [-0.02, -0.03, -0.01] if logprobs is None else logprobs
         self.calls: list[SimpleNamespace] = []
         self._providers_after_run = providers_after_run
 
-    def recognize(self, samples, sample_rate=16000, **kwargs):
+    def with_timestamps(self):
+        return SimpleNamespace(recognize=self._recognize_ts)
+
+    def _recognize_ts(self, samples, sample_rate=16000, **kwargs):
         self.calls.append(
             SimpleNamespace(samples=samples, sample_rate=sample_rate, kwargs=kwargs)
         )
         if self._providers_after_run is not None:
             self.asr._encoder._providers = list(self._providers_after_run)
-        return self.text
+        return SimpleNamespace(text=self.text, logprobs=self.logprobs)
 
 
 class _FakeSession:
@@ -65,7 +73,7 @@ class _RecordingFactory:
 
     def __init__(
         self, text: str = "hello there", fail_at=(), session_providers=None,
-        providers_after_run=None,
+        providers_after_run=None, logprobs=None,
     ) -> None:
         self.calls: list[SimpleNamespace] = []
         self.built: list[_FakeModel] = []
@@ -73,6 +81,7 @@ class _RecordingFactory:
         self._fail_at = set(fail_at)
         self._session_providers = session_providers
         self._providers_after_run = providers_after_run
+        self._logprobs = logprobs
 
     def __call__(self, model, path, *, quantization, providers):
         idx = len(self.calls)
@@ -83,7 +92,10 @@ class _RecordingFactory:
         )
         if idx in self._fail_at:
             raise RuntimeError("CUDA provider unavailable")
-        m = _FakeModel(self._text, providers_after_run=self._providers_after_run)
+        m = _FakeModel(
+            self._text, logprobs=self._logprobs,
+            providers_after_run=self._providers_after_run,
+        )
         if self._session_providers is not None:
             m.asr = SimpleNamespace(
                 _encoder=_FakeSession(self._session_providers)
@@ -360,93 +372,8 @@ def test_load_cpu_build_failure_publishes_failed_and_raises(model_dir):
 
 
 # --------------------------------------------------------------------------
-# transcribe()
+# transcribe() -> test_stt_onnx_asr_transcribe.py
 # --------------------------------------------------------------------------
-
-def _loaded_engine(model_dir, spec=PARAKEET, text="hello there", **cfg_over):
-    bus = EventBus()
-    factory = _RecordingFactory(text)
-    cfg_over.setdefault("model", spec.id)
-    eng = OnnxAsrEngine(_cfg(**cfg_over), spec, model_dir, bus, model_factory=factory)
-    eng.load()
-    return eng, factory
-
-
-def test_transcribe_before_load_raises(model_dir):
-    eng = OnnxAsrEngine(
-        _cfg(), PARAKEET, model_dir, EventBus(), model_factory=_RecordingFactory()
-    )
-    with pytest.raises(RuntimeError, match="load"):
-        eng.transcribe(np.zeros(160, dtype=np.float32))
-
-
-def test_transcribe_returns_result_with_neutral_gates(model_dir):
-    eng, factory = _loaded_engine(model_dir, text="  Bonjour tout le monde  ")
-    result = eng.transcribe(np.zeros(1600, dtype=np.float32))
-
-    assert isinstance(result, SttResult)
-    assert result.text == "Bonjour tout le monde"
-    assert result.avg_logprob == 0.0
-    assert result.no_speech_prob == 0.0
-    # Neutral values always pass the default SttConfig gates.
-    cfg = SttConfig()
-    assert result.avg_logprob >= cfg.avg_logprob_gate
-    assert result.no_speech_prob <= cfg.no_speech_gate
-    call = factory.built[0].calls[0]
-    assert call.sample_rate == 16000
-    assert call.samples.dtype == np.float32
-
-
-def test_transcribe_empty_text_returns_none(model_dir):
-    eng, _ = _loaded_engine(model_dir, text="   ")
-    assert eng.transcribe(np.zeros(1600, dtype=np.float32)) is None
-
-
-def test_transcribe_language_echoes_configured_source(model_dir):
-    eng, _ = _loaded_engine(model_dir, source_language="French")
-    assert eng.transcribe(np.zeros(160, dtype=np.float32)).language == "fr"
-
-
-def test_transcribe_language_auto_falls_back_to_english(model_dir):
-    eng, _ = _loaded_engine(model_dir, source_language="auto")
-    assert eng.transcribe(np.zeros(160, dtype=np.float32)).language == "en"
-
-
-def test_transcribe_detect_language_reports_none(model_dir):
-    """Nobody has evidence for what these decoders actually heard; "en" was a
-    fabricated tag that fed the translator a source it never detected."""
-    eng, _ = _loaded_engine(model_dir, source_language="French")
-    result = eng.transcribe(np.zeros(160, dtype=np.float32), detect_language=True)
-    assert result.language is None
-
-
-def test_transcribe_detect_language_overrides_the_auto_fallback(model_dir):
-    """The two branches must not collapse into one: detect_language=True is
-    the heard stream asking about someone else's speech, and must return None
-    even when source_language is also "auto"."""
-    eng, _ = _loaded_engine(model_dir, source_language="auto")
-    result = eng.transcribe(np.zeros(160, dtype=np.float32), detect_language=True)
-    assert result.language is None
-
-
-def test_transducer_passes_no_language_option(model_dir):
-    eng, factory = _loaded_engine(model_dir, source_language="French")
-    eng.transcribe(np.zeros(160, dtype=np.float32))
-    assert factory.built[0].calls[0].kwargs == {}
-
-
-def test_warm_up_transcribes_half_second_of_silence(model_dir):
-    eng, factory = _loaded_engine(model_dir)
-    eng.warm_up()
-    call = factory.built[0].calls[0]
-    assert len(call.samples) == 8000
-
-
-def test_unload_drops_model_and_transcribe_raises(model_dir):
-    eng, _ = _loaded_engine(model_dir)
-    eng.unload()
-    with pytest.raises(RuntimeError):
-        eng.transcribe(np.zeros(160, dtype=np.float32))
 
 
 # --------------------------------------------------------------------------

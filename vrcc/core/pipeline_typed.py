@@ -39,7 +39,7 @@ def submit_typed(p: "Pipeline", text: str) -> bool:
     utterance_id = p._next_message_id()
     src_cfg = p._config.stt.source_language
     src = languages.get("English") if src_cfg == "auto" else languages.get(src_cfg)
-    translating = p._mt is not None and p._config.translate.enabled
+    translating = p.mt_slot.current is not None and p._config.translate.enabled
 
     if translating:
         # This call runs on the GUI thread (the Send button), unlike the

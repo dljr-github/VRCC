@@ -31,7 +31,7 @@ def test_a_swapped_voice_model_reaches_this_stream_too():
     stream, source, bus = _stream(stt=old)
     try:
         stream.start()
-        stream.set_stt(new)
+        stream._stt_slot.swap(new)
         source.feed()
         _wait(bus)
     finally:
@@ -47,7 +47,7 @@ def test_a_detached_voice_model_drops_the_utterance_rather_than_raising():
     stream, source, bus = _stream()
     try:
         stream.start()
-        stream.set_stt(None)
+        stream._stt_slot.swap(None)
         source.feed()
         time.sleep(0.15)
     finally:
@@ -67,7 +67,7 @@ def test_translation_switched_on_after_launch_reaches_this_stream():
     stream, source, bus = _stream(cfg=cfg, mt=None)
     try:
         stream.start()
-        stream.set_mt(mt)
+        stream._mt_slot.swap(mt)
         source.feed()
         _wait(bus)
     finally:

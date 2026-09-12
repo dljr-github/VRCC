@@ -113,6 +113,46 @@ def stt_vram_table(compute_type: str) -> dict[str, int]:
     return STT_VRAM_MB if compute_type.startswith("int8") else STT_VRAM_FP16_MB
 
 
+# Word error rate under babble noise. Informational only: nothing in
+# vrcc/core/recommend.py reads this table, and it must not be wired in to
+# reorder STT_BENCH or change what recommend.py picks -- a babble measurement
+# on a defective noise bed once suggested a much larger Parakeet penalty than
+# this, and that scare turned out to be the bed, not the model.
+#
+# Measured 2026-09-12 on the reference machine's CPU (Ryzen 9 9950X3D), on
+# tools/bench_noise.py's babble bed (6 corpus speakers overlaid, seeded), 50
+# LibriSpeech test-clean utterances, all quality gates open (see
+# tools/bench_stt.py bench_model docstring):
+#   python tools/bench_stt.py --device cpu --utterances 50 --out <dir>
+#   python tools/bench_stt.py --device cpu --utterances 50 --noise babble --snr 10 --out <dir>
+#   python tools/bench_stt.py --device cpu --utterances 50 --noise babble --snr 5  --out <dir>
+#   python tools/bench_stt.py --device cpu --utterances 50 --noise babble --snr 0  --out <dir>
+# Parakeet leads clean audio and holds its lead through 10 dB SNR; below
+# roughly 5-7 dB it loses to whisper small and sense-voice by about 1.8x.
+# That is a real effect but far too small, and too far down the SNR range,
+# to justify reordering the ranking above.
+#
+# sense-voice-small is unmeasured in STT_BENCH on purpose (see
+# _rank_whisper's docstring) but is included here since this table never
+# feeds the ranking. A model/condition pair absent below is unmeasured, not
+# zero: never treat a missing entry as a clean win.
+# id -> {condition: wer}
+STT_BENCH_NOISE: dict[str, dict[str, float]] = {
+    "parakeet-tdt-0.6b-v3": {
+        "clean": 0.0224, "babble_10db": 0.0342,
+        "babble_5db": 0.2028, "babble_0db": 0.5979,
+    },
+    "small": {
+        "clean": 0.0436, "babble_10db": 0.0472,
+        "babble_5db": 0.1120, "babble_0db": 0.4139,
+    },
+    "sense-voice-small": {
+        "clean": 0.0342, "babble_10db": 0.0460,
+        "babble_5db": 0.1050, "babble_0db": 0.2759,
+    },
+}
+
+
 # Same probe, same session, for the translation models. Not read by the
 # ranking (the MT preset is per tier, not per card), but it is the other half
 # of what VRCC puts on the card and it is what _GPU_LOW_VRAM_SHARE leaves room

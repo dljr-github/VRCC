@@ -5,13 +5,13 @@ engine tests. Not a test module: no test_ functions live here.
 
 from __future__ import annotations
 
-import threading
 import time
 
 import numpy as np
 
 from vrcc.audio.segmenter import SegFinal, SegLevel
 from vrcc.core.config import AppConfig
+from vrcc.core.engine_slot import EngineSlot
 from vrcc.core.events import HeardPhrase
 from vrcc.core.heard import HeardStream
 
@@ -103,13 +103,19 @@ class _Mt:
 _DEFAULT = object()
 
 
-def _stream(cfg=None, stt=None, mt=_DEFAULT, segmenter=None, source=None, locks=None):
+def _stream(cfg=None, stt=None, mt=_DEFAULT, segmenter=None, source=None, slots=None):
+    """``slots``, when given, is a pre-built ``(stt_slot, mt_slot)`` pair --
+    for a test that needs to hold one of the locks itself (see
+    test_transcription_is_serialised_against_the_main_pipeline)."""
     cfg = cfg or AppConfig()
     source = source or _Source()
-    stt_lock, mt_lock = locks or (threading.Lock(), threading.Lock())
+    if slots is not None:
+        stt_slot, mt_slot = slots
+    else:
+        stt_slot = EngineSlot(stt or _Stt())
+        mt_slot = EngineSlot(_Mt() if mt is _DEFAULT else mt)
     stream = HeardStream(
-        cfg, _Bus(), source, segmenter or _Segmenter(), stt or _Stt(),
-        _Mt() if mt is _DEFAULT else mt, stt_lock, mt_lock,
+        cfg, _Bus(), source, segmenter or _Segmenter(), stt_slot, mt_slot,
     )
     return stream, source, stream._bus
 

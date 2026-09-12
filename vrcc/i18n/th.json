@@ -350,6 +350,7 @@
   "queued": "รอส่ง",
   "sent": "ส่งแล้ว",
   "sent<br/>shortened to fit": "ส่งแล้ว<br/>ย่อให้พอดี",
+  "sound is arriving, no speech heard yet": "มีเสียงเข้ามา แต่ยังตรวจไม่พบคำพูด",
   "then in your VRChat chatbox": "จากนั้นจึงไปแสดงในกล่องแชท VRChat ของคุณ",
   "translating…": "กำลังแปล…",
   "translation model": "โมเดลแปลภาษา",

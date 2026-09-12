@@ -30,7 +30,9 @@ this directory -- don't edit by hand; see [README.md](README.md) for how to
 add your machine. WER is word error rate on LibriSpeech test-clean English
 (lower is better) and only ranks English accuracy; latency is the median
 wall-clock time to transcribe one utterance; RTF is processing time over
-audio duration (0.05 = 20x real time).
+audio duration (0.05 = 20x real time). Each machine's dataset line names
+the noise condition when the file is a noisy run (see README.md); a plain
+"LibriSpeech test-clean" line is a clean run.
 """
 
 

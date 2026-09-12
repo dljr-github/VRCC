@@ -276,10 +276,18 @@ def render_rows_html(
     return "".join(render_row_html(row, colors, scale) for row in rows)
 
 
-def empty_state_text(stt_state: str | None) -> tuple[str, str]:
+def empty_state_text(
+    stt_state: str | None, listening_no_speech: bool = False
+) -> tuple[str, str]:
     """(headline, sub) for a log with no rows yet, chosen from the voice
     model's state. Lives here rather than in the window because it is the
-    empty half of the same feed the renderers above draw."""
+    empty half of the same feed the renderers above draw.
+
+    ``listening_no_speech``: the mic has moved and no utterance has started
+    since. Swaps only the sub-line, worded as what the app is hearing, not
+    a diagnosis -- the likely causes (wrong input device, the mute gate)
+    are outside what this line can know.
+    """
     if stt_state == "failed":
         # Inviting someone to speak at a model that never loaded wastes their
         # time and reads as the app ignoring them.
@@ -289,6 +297,11 @@ def empty_state_text(stt_state: str | None) -> tuple[str, str]:
         )
     if stt_state in (None, "loading"):
         return tr("Getting the voice model ready…"), tr("usually takes a few seconds")
+    if listening_no_speech:
+        return (
+            tr("Say something - captions appear here"),
+            tr("sound is arriving, no speech heard yet"),
+        )
     return (
         tr("Say something - captions appear here"),
         tr("then in your VRChat chatbox"),

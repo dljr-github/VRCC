@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QByteArray, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
@@ -180,6 +182,17 @@ class IconButton(QPushButton):
             self.setText(fallback_text)
 
 
+# Floor a few dB under the energy gate, ceiling 6 dB of headroom below full
+# scale (0 dBFS). At those bounds, _MIC_ACTIVE_RMS (0.01 = -40.0 dBFS) fills
+# 2 of 8 segments and the energy gate default 300/32768 (-40.8 dBFS) fills 1
+# of 8; rms 0.05 (-26.0 dBFS) fills 4 of 8, and only a signal near -6 dBFS
+# (rms ~0.5) fills the meter. Same mapping for the mic and loopback (heard)
+# meters, both float32 rms in [0, 1] (see vrcc/core/heard.py). Pinned in
+# test_widgets.py.
+_METER_DB_MIN = -48.0
+_METER_DB_MAX = -6.0
+
+
 class MicMeter(QWidget):
     def __init__(self, parent=None, colors: dict | None = None) -> None:
         super().__init__(parent)
@@ -190,7 +203,12 @@ class MicMeter(QWidget):
         self.setMinimumWidth(60)
 
     def set_level(self, rms: float) -> None:
-        self._level = max(0.0, min(1.0, rms * 20.0))
+        if rms <= 0.0:
+            self._level = 0.0
+        else:
+            dbfs = 20.0 * math.log10(rms)
+            span = _METER_DB_MAX - _METER_DB_MIN
+            self._level = max(0.0, min(1.0, (dbfs - _METER_DB_MIN) / span))
         self.update()
 
     def set_active(self, active: bool) -> None:
