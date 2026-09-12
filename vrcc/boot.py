@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QApplication
 
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.core.logs import setup_logging
-from vrcc.core.progress import LogProgress, NoProgress
+from vrcc.core.progress import LogProgress
 
 logger = logging.getLogger("vrcc.boot")
 
@@ -108,7 +108,7 @@ def boot(portable: bool = False, verbose: bool = False, guard=None) -> int:
     # A launch that cannot draw a progress bar must still start the app, so
     # everything from here through building the panel falls back to a
     # log-only reporter rather than aborting the launch.
-    progress = NoProgress()
+    progress = LogProgress()
     try:
         app = QApplication.instance() or QApplication([])
 

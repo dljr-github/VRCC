@@ -397,10 +397,11 @@ downloads; check that a model's license fits your use:
   (localhost mDNS/OSCQuery discovery), OSC enabled in-game, and an avatar
   that reports `MuteSelf`.
 - **A small screen appears when VRCC starts**: it names what VRCC is
-  loading and closes once the main window opens. The first launch after
-  an update or a reboot is slower, because Windows reads the whole
-  program folder from disk. If a launch dies, the newest log file's last
-  line names the step it stopped on.
+  loading and closes once VRCC has something ready to show. The first
+  launch after an update or a reboot is slower, because Windows is
+  reading the program's files from disk for the first time. If a launch
+  dies, the newest log file shows how far it got, which helps when
+  reporting a problem.
 - **First transcription is slow**: model load and warm-up continue
   inside the window after the startup screen closes; captions flow at
   full speed afterwards.
