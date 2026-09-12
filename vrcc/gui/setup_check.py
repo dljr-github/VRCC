@@ -52,6 +52,12 @@ class SetupCheck(QObject):
         # Outlives every window rebuild: make_window() closes over the same
         # Pipeline for the life of the process, only the window is replaced.
         self._pipeline = window._pipeline
+        # Kept only for a later place_beside(), never read otherwise: a
+        # UI-language change destroys and recreates this window, and this
+        # controller deliberately survives that rebuild, so the reference
+        # can outlive the C++ object it points at. _show_panel() below
+        # checks shiboken6.isValid() before using it for that reason.
+        self._window = window
         self._panel = SetupPanel()
 
         self._facts = SetupFacts(vrchat_found=detector.detected)
@@ -81,11 +87,8 @@ class SetupCheck(QObject):
         self._timer.timeout.connect(self._recompute)
         self._timer.start(_POLL_MS)
 
-        if not store.config.gui.setup_check_done:
-            # Both must already be shown: place_beside reads frameGeometry(),
-            # which under-reports on an unshown window (no title bar yet).
-            self._panel.show()
-            self._panel.place_beside(window)
+        # The first tick shows the panel when it's due (below), so this
+        # needs no show/place_beside of its own.
         self._recompute()
 
     # -- worker-thread handlers: latch once, forward once -------------------
@@ -134,6 +137,13 @@ class SetupCheck(QObject):
     def _recompute(self) -> None:
         if self._panel is None:
             return
+        # Cheap attribute read guards a Qt call: this runs four times a
+        # second, and Settings can clear the flag to bring the panel back
+        # (settings_simple.py), so a closed or never-shown panel must
+        # reappear on its own rather than needing this controller poked.
+        if not self._store.config.gui.setup_check_done and not self._panel.isVisible():
+            self._show_panel()
+
         # Read fresh every time rather than caching a value from
         # construction: neither field has a bus event to invalidate a cache.
         self._facts.captioning = self._pipeline.captioning_enabled
@@ -150,6 +160,17 @@ class SetupCheck(QObject):
                 self._store.config.gui.setup_check_done = True
                 self._store.save_soon()
         self._was_required_passed = now_passed
+
+    def _show_panel(self) -> None:
+        # Both must already be shown before place_beside: it reads
+        # frameGeometry(), which under-reports on an unshown window (no
+        # title bar yet). Shown unconditionally either way: a stale window
+        # reference must not leave the panel undisplayed, only unpositioned.
+        self._panel.show()
+        import shiboken6
+
+        if shiboken6.isValid(self._window):
+            self._panel.place_beside(self._window)
 
     def stop(self) -> None:
         """Unsubscribe from the bus, stop polling, hide the panel. Idempotent
