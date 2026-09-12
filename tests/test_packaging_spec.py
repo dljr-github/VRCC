@@ -116,3 +116,51 @@ def test_spec_ships_soundcard():
         "vrcc.spec must bundle soundcard's package data; it reads a cffi cdef "
         "header (mediafoundation.py.h) from beside its own source at import"
     )
+
+
+_SPLASH_PNG = Path(__file__).resolve().parent.parent / "assets" / "splash.png"
+_SPLASH_SVG = Path(__file__).resolve().parent.parent / "assets" / "splash.svg"
+
+# PyInstaller resizes an oversized splash only when Pillow is installed, and
+# Pillow is not a dependency of this project. PyInstaller/building/splash.py
+# defaults max_img_size to this, and raises on a larger image without Pillow.
+_MAX_SPLASH = (760, 480)
+
+
+def _png_size(blob: bytes) -> tuple[int, int]:
+    """Width and height straight out of the IHDR chunk, so this check needs no
+    image library of its own."""
+    assert blob[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    assert blob[12:16] == b"IHDR", "first chunk is not IHDR"
+    return int.from_bytes(blob[16:20], "big"), int.from_bytes(blob[20:24], "big")
+
+
+def test_splash_sources_exist():
+    assert _SPLASH_SVG.exists(), "assets/splash.svg is the drawn source of record"
+    assert _SPLASH_PNG.exists(), "assets/splash.png is what PyInstaller reads"
+
+
+def test_splash_png_is_a_png():
+    _png_size(_SPLASH_PNG.read_bytes())
+
+
+def test_splash_png_fits_without_pillow():
+    """An image over max_img_size makes PyInstaller demand Pillow, which this
+    project does not depend on, so the release build would fail."""
+    width, height = _png_size(_SPLASH_PNG.read_bytes())
+    assert width <= _MAX_SPLASH[0], width
+    assert height <= _MAX_SPLASH[1], height
+
+
+def test_splash_png_avoids_the_windows_transparency_key():
+    """The bootloader treats pure magenta as transparent on Windows, so the art
+    must not contain it or holes appear in the image."""
+    assert b"\xff\x00\xff" not in _SPLASH_PNG.read_bytes()
+
+
+def test_splash_svg_source_is_xml_text():
+    """This does not prove the PNG was generated from this SVG; that guarantee
+    comes from regenerating with tools/make_splash.py and diffing the result,
+    not from a test. This only rules out an empty or non-XML file being
+    checked in as the source of record."""
+    assert _SPLASH_SVG.read_text(encoding="utf-8").lstrip().startswith("<")
