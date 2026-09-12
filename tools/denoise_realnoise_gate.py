@@ -1,8 +1,7 @@
 """Pre-default-on real-noise gate for the GTCRN denoiser.
 
 The shipped noise-suppression toggle (``AudioConfig.denoise_enabled``) ships
-off by default because its win was only ever measured on synthetic noise
-(see ``docs/superpowers/specs/2026-07-21-noise-suppression-design.md``).
+off by default because its win was only ever measured on synthetic noise.
 This script is the promised follow-up check: it mixes the clean speech
 fixtures committed under ``tests/integration/audio/`` with REAL recorded
 noise (cafe, fan, keyboard, TV/crowd babble, ...) at a set of target SNRs,
@@ -10,7 +9,7 @@ transcribes both the raw mix and the denoised mix with the real cached
 Whisper model, and prints whether the gentle denoise still beats or matches
 raw transcription on real noise. If it does, the toggle default may be
 flipped to on in a follow-up change; if it does not, the feature stays
-shipped opt-in and the limitation gets recorded in the spec.
+shipped opt-in.
 
 This is deliberately not a pytest: it needs real noise recordings that are
 not committed to the repo (licensing is unclear and/or the files are too
