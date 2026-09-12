@@ -306,9 +306,11 @@ def empty_state_text(
         return tr("Getting the voice model ready…"), tr("usually takes a few seconds")
     if captioning_off:
         # A paused toggle means the app isn't listening, so inviting speech
-        # here is the same contradiction this branch exists to remove.
+        # here is the same contradiction this branch exists to remove. The
+        # button name is interpolated (not repeated as a literal) so this
+        # copy and the button's own label can never name it differently.
         return (
-            tr("Paused - press Start captioning"),
+            tr("Paused - press {button}", button=tr("Start captioning")),
             tr("captions stay off until you do"),
         )
     if listening_no_speech:

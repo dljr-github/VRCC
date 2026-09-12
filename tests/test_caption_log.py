@@ -399,6 +399,18 @@ def test_empty_state_text_default_unchanged_when_captioning_on():
     )
 
 
+def test_empty_state_text_failed_outranks_captioning_off():
+    from vrcc.gui.caption_log import empty_state_text
+
+    # failed is checked first in the function body; pin that a captioning
+    # judgement never reaches it either way.
+    assert (
+        empty_state_text("failed", captioning_off=True)
+        == empty_state_text("failed", captioning_off=False)
+        == empty_state_text("failed")
+    )
+
+
 def test_empty_state_text_captioning_off_ignored_while_loading():
     from vrcc.gui.caption_log import empty_state_text
 

@@ -4,8 +4,9 @@ so the capture label's whole truth table lives in one place.
 
 The capture label folds in the pipeline's mute gate: mute sync drops captions
 silently inside the pipeline, so a label derived from the toggle alone would
-claim "Listening" over a closed gate. Every helper takes the window, mutates
-its widgets directly and runs on the GUI thread.
+claim "Listening" over a closed gate. Every helper takes the window and runs
+on the GUI thread; most mutate its widgets directly, one hands back html for
+the caller to set.
 """
 
 from __future__ import annotations
