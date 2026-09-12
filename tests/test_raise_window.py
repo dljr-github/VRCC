@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 
@@ -38,18 +39,21 @@ class _Guard:
         return False
 
 
-def _pump(app, done, timeout: float = 1.0) -> None:
-    """Process events until done() holds or timeout passes.
+def _pump(app, done, timeout: float = 1.0) -> bool:
+    """Process events until done() holds or timeout passes, returning whether
+    it held by the end.
 
-    A bare processEvents loop with no sleep can finish 50 iterations in a
-    fraction of a millisecond, faster than a 1 ms QTimer interval can become
-    due, so the timer never fires within a fixed iteration count. Spacing
-    the calls with a short sleep gives real wall clock time a chance to pass.
+    A bare processEvents loop can outrun a 1 ms QTimer interval before the
+    timer is due to fire, so the wait needs real wall clock time between
+    calls, not just repeated draining of the Qt event queue.
     """
     deadline = time.monotonic() + timeout
-    while not done() and time.monotonic() < deadline:
+    while time.monotonic() < deadline:
+        if done():
+            return True
         time.sleep(0.001)
         app.processEvents()
+    return bool(done())
 
 
 def test_no_visible_window_picks_nothing(qapp):
@@ -107,7 +111,7 @@ def test_modal_wins_over_the_main_window(qapp):
         main.deleteLater()
 
 
-def test_raise_window_clears_minimised_and_does_not_raise(qapp):
+def test_raise_window_clears_minimised_and_does_not_throw(qapp):
     from PySide6.QtCore import Qt
 
     w = QMainWindow()
@@ -132,14 +136,17 @@ def test_watch_polls_the_guard(qapp):
         timer.deleteLater()
 
 
-def test_watch_raises_on_a_ring(qapp):
+def test_watch_raises_on_a_ring(qapp, monkeypatch):
     guard = _Guard(rings=1)
     w = QMainWindow()
     w.show()
+    raised = []
+    monkeypatch.setattr("vrcc.gui.raise_window.raise_window", raised.append)
     timer = install_raise_watch(qapp, guard, interval_ms=1)
     try:
         _pump(qapp, lambda: guard.rings == 0)
         assert guard.rings == 0
+        assert raised == [w]
     finally:
         timer.stop()
         timer.deleteLater()
@@ -147,14 +154,19 @@ def test_watch_raises_on_a_ring(qapp):
         w.deleteLater()
 
 
-def test_watch_survives_a_ring_with_no_window(qapp):
+def test_watch_survives_a_ring_with_no_window(qapp, caplog):
     """A ring during the import walk, before any window exists, must not
-    raise an exception on the timer thread."""
+    raise an exception on the Qt main thread."""
     guard = _Guard(rings=1)
     timer = install_raise_watch(qapp, guard, interval_ms=1)
     try:
-        _pump(qapp, lambda: guard.rings == 0)
+        with caplog.at_level(logging.DEBUG, logger="vrcc.gui.raise_window"):
+            _pump(qapp, lambda: guard.rings == 0)
         assert guard.rings == 0
+        assert not any(
+            "raise watch tick failed" in record.getMessage()
+            for record in caplog.records
+        )
     finally:
         timer.stop()
         timer.deleteLater()

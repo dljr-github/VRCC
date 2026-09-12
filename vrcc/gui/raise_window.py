@@ -9,12 +9,12 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QMainWindow, QWidget
 
 logger = logging.getLogger("vrcc.gui.raise_window")
 
 
-def pick_raise_target(app):
+def pick_raise_target(app) -> QWidget | None:
     """The window a ring should bring forward, or None when nothing is up yet.
 
     A modal beats the main window: during the first-run wizard the main window
@@ -50,7 +50,7 @@ def raise_window(widget) -> None:
     widget.activateWindow()
 
 
-def install_raise_watch(app, guard, interval_ms: int = 250):
+def install_raise_watch(app, guard, interval_ms: int = 250) -> QTimer:
     """Poll the doorbell and raise on a ring. Returns the timer so a caller can
     stop it; the app owns it for the process lifetime otherwise.
 
