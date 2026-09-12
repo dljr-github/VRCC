@@ -50,9 +50,10 @@ def vram_warning(
     size_mb: int, device: str = "auto", model_id: str | None = None,
     device_index: int = 0, compute_type: str = "auto",
 ) -> str | None:
-    """Warn when a model likely won't fit on the graphics card. ``None`` if it
-    fits, if there's no graphics card / unknown VRAM, or if the model is set to
-    run on the processor (``device == "cpu"``).
+    """Warn when a model would leave the graphics card little room for
+    VRChat (which covers not fitting at all). ``None`` if it clears the
+    budget, if there's no graphics card / unknown VRAM, or if the model is
+    set to run on the processor (``device == "cpu"``).
 
     ``model_id`` selects the measured peak in preference to scaling
     ``size_mb``, and ``device_index`` names the card the engines are pinned to,
@@ -62,10 +63,10 @@ def vram_warning(
     reason ``size_mb`` is still taken.
 
     ``compute_type`` picks WHICH measured peak: the same model costs 1.13x to
-    1.67x more at float16 than at int8_float16, and a card on compute
-    capability 12 or above has no int8 kernels, so it always pays the higher
-    one. Sizing a Blackwell card off the int8 table left large-v3 silent on a
-    12 GB card at a real 4379 MB against a 4093 MB budget.
+    1.67x more at float16 than at int8_float16, and a card whose supported
+    compute types omit every int8* entry always pays the higher one. Sizing
+    such a card off the int8 table left large-v3 silent on a 12 GB card at a
+    real 4379 MB against a 4093 MB budget.
     """
     if device == "cpu":
         return None
@@ -84,11 +85,12 @@ def vram_warning(
         if peak_mb is None:
             peak_mb = mt_vram_table(compute).get(model_id)
     need_mb = peak_mb if peak_mb is not None else size_mb * _VRAM_OVERHEAD
-    if need_mb <= recommend.vram_budget_mb(total // 1024**2):
+    if need_mb <= recommend.vram_budget_mb(total // 1024**2, compute):
         return None
     return tr(
-        "This model may be too large for your graphics card (~{gb:.0f} GB). "
-        "It could run on your processor instead (slower) or fail to load.",
+        "This model would leave little room on your graphics card "
+        "(~{gb:.0f} GB) for VRChat. It could run on your processor "
+        "instead (slower).",
         gb=total / 1024**3,
     )
 

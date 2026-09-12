@@ -272,7 +272,7 @@
   "These options apply only while captioning is turned on in the main window.": "這些選項僅在主視窗中開啟字幕時生效。",
   "They read": "對方看的語言",
   "This is the model VRCC is currently using. Captions stop until you choose another in Settings.": "這是 VRCC 目前使用中的模型。字幕將會停止，直到你在「設定」中選擇另一個模型。",
-  "This model may be too large for your graphics card (~{gb:.0f} GB). It could run on your processor instead (slower) or fail to load.": "這個模型對你的顯示卡（約 {gb:.0f} GB）來說可能太大。它可能會改在處理器上執行（較慢），或載入失敗。",
+  "This model would leave little room on your graphics card (~{gb:.0f} GB) for VRChat. It could run on your processor instead (slower).": "這個模型會讓你的顯示卡（約 {gb:.0f} GB）幾乎沒有餘裕留給 VRChat。它可能會改在處理器上執行（較慢）。",
   "This picks the voice and translation models for your hardware and spoken language, returns the device, thread and search settings to their recommended values, and sets the performance mode, which also rewrites the pause timings on the Advanced page. Your languages, microphone, OSC address and appearance stay as they are.": "這會根據你的硬體和口語選擇語音與翻譯模型，把裝置、執行緒和搜尋設定還原為建議值，並設定效能模式，該模式還會重寫進階頁面上的停頓時間。你的語言、麥克風、OSC 位址和外觀維持不變。",
   "This puts sensitivity, timing and other tuning back to their normal values. Your microphone, languages, models, chatbox address and appearance stay as they are.": "這會將靈敏度、時序與其他微調設定還原為正常值。你的麥克風、語言、模型、聊天框位址與外觀維持不變。",
   "This version of VRCC cannot use your graphics card. The CUDA download can use it.": "這個版本的 VRCC 無法使用你的顯示卡。CUDA 下載版則可以使用。",

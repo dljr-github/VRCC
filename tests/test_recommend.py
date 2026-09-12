@@ -54,11 +54,14 @@ _EXPECTED_WHISPER_PREFERENCE = {
         "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
         "sense-voice-small",
     ],
-    # large-v3 (3090 MB) fails the gpu_low VRAM cap and drops to the
-    # unrestricted tail.
+    # Language-blind and machine-blind, gpu_low sizes against the VRChat
+    # reservation with nothing known about the real card (vram_budget_mb's
+    # unknown-VRAM path), which floors the budget at "small"'s own peak: only
+    # tiny/base/small clear it, and turbo/medium/large-v3 sink to the
+    # unrestricted tail, fastest first.
     "gpu_low": [
-        "large-v3-turbo", "medium", "small", "base", "tiny", "large-v3",
-        "parakeet-tdt-0.6b-v3", "distil-large-v3.5", "distil-small.en",
+        "small", "base", "tiny", "large-v3-turbo", "medium", "large-v3",
+        "parakeet-tdt-0.6b-v3", "distil-small.en", "distil-large-v3.5",
         "sense-voice-small",
     ],
     # On CPU parakeet stays inside the 1.0 s budget and beats every
@@ -82,7 +85,10 @@ def test_preset_whisper_ids_lead_their_derived_lists():
     # _validate() already enforces preset-leads; pin the concrete ids so a
     # benchmark edit that changes a tier's default is an explicit test diff.
     assert recommend.PRESETS["gpu_high"][0] == "large-v3-turbo"
-    assert recommend.PRESETS["gpu_low"][0] == "large-v3-turbo"
+    # Same floor as the CPU preset: gpu_low's language-blind default sizes
+    # against an unknown card, which vram_budget_mb treats as offering VRChat
+    # its reservation and nothing more (see _validate's floor invariant).
+    assert recommend.PRESETS["gpu_low"][0] == "small"
     assert recommend.PRESETS["cpu"][0] == "small"
     for tier in _TIERS:
         assert recommend.WHISPER_PREFERENCE[tier][0] == recommend.PRESETS[tier][0]

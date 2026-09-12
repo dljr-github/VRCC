@@ -37,23 +37,14 @@ class TestBestComputeType:
     def test_cpu_typical_prefers_int8(self):
         assert hardware.best_compute_type("cpu", 0, supported=CPU_TYPICAL) == "int8"
 
-    def test_sm120_full_support_drops_int8_variants(self):
-        # sm120 (Blackwell+) rule: cc major >= 12 drops all int8* entries
-        # first, so the ladder's next candidate (float16) wins even though
-        # int8_float16 is technically "supported".
-        result = hardware.best_compute_type(
-            "cuda", 0, supported=FULL_SUPPORT, cc=(12, 0)
-        )
-        assert result == "float16"
-
     def test_empty_support_falls_back_to_float32(self):
         assert hardware.best_compute_type("cuda", 0, supported=set()) == "float32"
 
-    def test_sm120_rule_does_not_apply_below_major_12(self):
-        result = hardware.best_compute_type(
-            "cuda", 0, supported=FULL_SUPPORT, cc=(8, 9)
-        )
-        assert result == "int8_float16"
+    def test_no_int8_kernels_falls_back_down_the_ladder(self):
+        # A card whose get_supported_compute_types genuinely omits every
+        # int8* entry still walks the rest of the ladder correctly.
+        supported = {"float16", "bfloat16", "float32"}
+        assert hardware.best_compute_type("cuda", 0, supported=supported) == "float16"
 
     def test_default_supported_comes_from_ctranslate2(self, monkeypatch):
         monkeypatch.setattr(
@@ -66,6 +57,21 @@ class TestResolve:
     def test_auto_device_prefers_cuda_when_usable(self, monkeypatch):
         monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
         monkeypatch.setattr(hardware, "compute_capability", lambda index: None)
+        monkeypatch.setattr(
+            ctranslate2, "get_supported_compute_types", lambda device, index: FULL_SUPPORT
+        )
+
+        device, index, compute = hardware.resolve("auto", 0, "auto")
+
+        assert device == "cuda"
+        assert compute == "int8_float16"
+
+    def test_auto_compute_on_a_cc12_card_prefers_int8(self, monkeypatch):
+        # A cc>=12 card whose supported set includes int8_float16 resolves to
+        # it, not to float16: get_supported_compute_types already says what
+        # the card can run, so no capability rule overrides it.
+        monkeypatch.setattr(hardware, "can_run_cuda", lambda: True)
+        monkeypatch.setattr(hardware, "compute_capability", lambda index: (12, 0))
         monkeypatch.setattr(
             ctranslate2, "get_supported_compute_types", lambda device, index: FULL_SUPPORT
         )

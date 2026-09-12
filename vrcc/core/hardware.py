@@ -351,12 +351,16 @@ def best_compute_type(
     device: str,
     index: int,
     supported: set[str] | None = None,
-    cc: tuple[int, int] | None = None,
 ) -> str:
     """Pick the best CTranslate2 compute type for `device`/`index`: the first
     entry of the int8_float16 > ... > float32 ladder present in `supported`
-    (defaults to CT2's supported set). The sm120 rule drops all `int8*` types on
-    cc major >= 12 (no fast int8 kernels there). Falls back to `"float32"`.
+    (defaults to CT2's supported set). Falls back to `"float32"`.
+
+    `get_supported_compute_types` is the only gate: CT2 already reports what
+    a card can run. On the reference machine (RTX 5090, sm120) int8_float16
+    costs 5 ms more than float16 on STT and 9 ms more on MT decode for
+    1859 MB less VRAM, and the STT cost sits inside the 350 ms speculative
+    window (`vad_config.py`, `segmenter.py`).
     """
     if supported is None:
         try:
@@ -365,9 +369,6 @@ def best_compute_type(
             supported = set()
     else:
         supported = set(supported)
-
-    if cc is not None and cc[0] >= 12:
-        supported = {ct for ct in supported if not ct.startswith("int8")}
 
     for candidate in _COMPUTE_TYPE_LADDER:
         if candidate in supported:
@@ -399,8 +400,7 @@ def resolve(
         device = "cpu"
 
     if compute_cfg == "auto":
-        cc = compute_capability(device_index) if device == "cuda" else None
-        compute = best_compute_type(device, device_index, cc=cc)
+        compute = best_compute_type(device, device_index)
     else:
         compute = compute_cfg
 

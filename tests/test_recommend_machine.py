@@ -8,8 +8,10 @@ from test_recommend.py for the 500-line cap.
 
 from __future__ import annotations
 
+import pytest
+
 from tests.test_recommend import _EXPECTED_WHISPER_PREFERENCE, _FakeDM, _TIERS
-from vrcc.core import recommend
+from vrcc.core import recommend, recommend_rank
 from vrcc.stt.registry import WHISPER_MODELS
 
 
@@ -105,25 +107,17 @@ def test_unknown_vram_keeps_the_conservative_fixed_cap():
     )
 
 
-def test_budget_leaves_room_for_the_translation_model():
-    # The share exists so the second third can hold the MT preset. If a tier's
-    # MT model outgrew its third, the split would be a fiction.
-    #
-    # Sized at int8, which is what a 6 GB card runs: every card below compute
-    # capability 12 has int8 kernels, and only compute capability 12 and above
-    # pays the float16 peaks. Comparing a 6 GB card against the float16 row
-    # measures a combination that cannot exist.
+def test_marginal_mt_cost_is_never_its_own_standalone_peak():
+    # _MT_MARGINAL_MB is the cost of adding the translation model to an
+    # already-resident STT model, not the MT model's own full footprint:
+    # MT_VRAM_INT8_MB already pays for a CUDA context of its own, and the
+    # measured pair shares one context rather than paying for two. A budget
+    # that mistakenly charged the standalone peak would starve the voice
+    # model of headroom the two processes never actually spend twice.
     from vrcc.core.bench_tables import mt_vram_table
 
-    mt_peak = mt_vram_table("int8_float16")[recommend._MT_PRESET["gpu_low"]]
-    assert mt_peak <= 6 * 1024 // recommend._GPU_LOW_VRAM_SHARE
-
-    # A 12 GB Blackwell card is gpu_low too, and it does pay float16.
-    from vrcc.core.bench_tables import MT_VRAM_MB
-
-    assert MT_VRAM_MB[recommend._MT_PRESET["gpu_low"]] <= (
-        12 * 1024 // recommend._GPU_LOW_VRAM_SHARE
-    )
+    mt_standalone = mt_vram_table("int8_float16")[recommend._MT_PRESET["gpu_low"]]
+    assert recommend._MT_MARGINAL_MB < mt_standalone
 
 
 def test_small_card_loses_a_model_a_large_one_keeps():
@@ -178,3 +172,72 @@ def test_vram_table_never_says_a_bigger_model_is_cheaper():
     peaks = [STT_VRAM_MB[model_id] for model_id in ladder]
 
     assert peaks == sorted(peaks), dict(zip(ladder, peaks))
+
+
+# -- the VRChat reservation ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("nvml_mb", "expected"),
+    [
+        (8151, "small"),          # the 8 GB compromise
+        (10239, "small"),         # raw budget (1022) is under turbo's peak
+        (12287, "large-v3-turbo"),  # headroom past the reservation reopens it
+    ],
+)
+def test_the_decision_table_at_int8_float16(nvml_mb, expected):
+    whisper, _mt = recommend.preset_for_tier(
+        "gpu_low", (), 1.0, nvml_mb, "int8_float16",
+    )
+    assert whisper == expected
+
+
+def test_float16_10gb_is_the_case_the_floor_exists_for(monkeypatch):
+    # Raw budget (1022) is under small's fp16 peak (1115): unfloored, small
+    # itself would not fit and the blind/non-English pick falls to "base".
+    # The floor lands both back on "small".
+    whisper, _mt = recommend.preset_for_tier("gpu_low", (), 1.0, 10239, "float16")
+    assert whisper == "small"
+    whisper_ja, _mt = recommend.preset_for_tier(
+        "gpu_low", ("ja",), 1.0, 10239, "float16"
+    )
+    assert whisper_ja == "small"
+
+    unfloored = 10239 - recommend._VRCHAT_RESERVE_MB - recommend._MT_MARGINAL_MB
+    # vram_budget_mb is defined in recommend_rank (recommend only re-exports
+    # it), and _rank_whisper reads it as a bare name resolved on the module
+    # where _rank_whisper itself is defined: patch it there.
+    monkeypatch.setattr(recommend_rank, "vram_budget_mb", lambda total_mb, compute: unfloored)
+    ranked = recommend._rank_whisper(
+        "gpu_low", languages=("ja",), vram_mb=10239, compute="float16"
+    )
+    assert ranked[0] == "base"
+
+
+def test_an_english_speaker_is_not_the_floors_case():
+    # Parakeet carries no measured VRAM row (onnx backend, never gated on
+    # gpu_low), so an English speaker lands on it with or without the floor;
+    # the floor's job is the non-English and language-blind picks above.
+    whisper, _mt = recommend.preset_for_tier("gpu_low", ("en",), 1.0, 10239, "float16")
+    assert whisper == "parakeet-tdt-0.6b-v3"
+
+
+def test_validate_ties_the_floor_to_the_cpu_preset(monkeypatch):
+    assert recommend._FLOOR_WHISPER_ID == recommend.PRESETS["cpu"][0]
+
+    # _FLOOR_WHISPER_ID is defined in recommend_rank (recommend only
+    # re-exports it), and _validate reads it as a bare name resolved on the
+    # module where _validate itself is defined: patch it there.
+    monkeypatch.setattr(recommend_rank, "_FLOOR_WHISPER_ID", "not-the-cpu-preset")
+    with pytest.raises(ValueError):
+        recommend._validate()
+
+
+def test_unknown_vram_is_charged_exactly_the_reservation():
+    # The conservative reading this session settled on: an unreadable card
+    # (no pynvml, or the import-time ranking, which must not touch NVML) gets
+    # exactly what vram_budget_mb would give a card offering VRChat its
+    # reservation and nothing more, not a separately chosen number.
+    assert recommend._rank_whisper("gpu_low", vram_mb=None) == recommend._rank_whisper(
+        "gpu_low", vram_mb=recommend._VRCHAT_RESERVE_MB
+    )

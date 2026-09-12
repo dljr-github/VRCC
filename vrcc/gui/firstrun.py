@@ -86,13 +86,18 @@ class FirstRunWizard(QDialog):
         self.tier = recommend.detect_tier(index)
         # Machine speed and VRAM are read before the first recommendation so
         # the plan reads right at once (~57 ms cold, then stored). Default
-        # device is GPU only at >=16 GB (user decision); _refresh_plan re-derives.
+        # device is GPU only at >=8 GB (recommend._GPU_DEFAULT_VRAM_BYTES);
+        # _refresh_plan re-derives.
         self._factor = calibrate.cached_factor(self._store.config)
         self._vram_mb = recommend.detected_vram_mb(index)
+        cfg = self._store.config
+        self._compute = recommend.resolved_compute_type(
+            cfg.stt.compute_type, cfg.stt.device_index
+        )
         self._default_choice = recommend.default_device_choice(index)
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
             self._default_choice, self.tier, self._spoken_codes(),
-            self._factor, self._vram_mb)
+            self._factor, self._vram_mb, self._compute)
         # Resolved once at construction (theme + text size are restart-applied).
         self._p = PALETTE[resolve_theme(self._store.config.gui.theme)]
         self._scale = max(0.5, min(2.0, self._store.config.gui.font_scale))
@@ -299,7 +304,7 @@ class FirstRunWizard(QDialog):
         place."""
         self.recommended_whisper, self.recommended_mt = recommend.preset_for_choice(
             "cpu" if self._cpu_chosen() else "gpu", self.tier,
-            self._spoken_codes(), self._factor, self._vram_mb,
+            self._spoken_codes(), self._factor, self._vram_mb, self._compute,
         )
         # A target the plan's MT model writes the same way as another is dropped
         # from config on the first main-window load, so it must not be offerable.

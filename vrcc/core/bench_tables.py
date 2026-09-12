@@ -48,10 +48,8 @@ BEAM_BENCH: dict[str, dict[str, tuple[float, float]]] = {
 # Peak GPU memory the app adds while transcribing, in MB: NVML used-memory at
 # rest subtracted from the peak across load, warm-up and four transcriptions,
 # so it covers the CUDA context and the decode workspace, not just the weights.
-# Measured 2026-08-08 on the reference machine at int8_float16, which is what
-# best_compute_type resolves to on the cards the gpu_low budget governs (the
-# reference card is sm120, where int8 is dropped, so a plain run there would
-# have measured float16 and overstated every row).
+# Measured 2026-08-08 on the reference machine (RTX 5090) with the compute
+# type pinned to int8_float16, which is what the gpu_low budget sizes against.
 #
 # A checkpoint size cannot stand in for this. The ratio of peak to file size
 # runs from 0.89x (large-v3, whose int8 weights are the bulk of a 3090 MB file)
@@ -82,10 +80,9 @@ STT_VRAM_MB: dict[str, int] = {
     "distil-small.en": 699,
 }
 
-# Same probe, same models, at the float16 the engines resolve to on compute
-# capability >= 12: best_compute_type drops every int8 type there, so a
-# Blackwell card never runs the peaks above. Measured 2026-08-10 on the
-# reference machine (RTX 5090, sm120).
+# Same probe, same models, at float16, which is what the engines run when a
+# card's supported compute types omit every int8* entry. Measured 2026-08-10
+# on the reference machine (RTX 5090, sm120).
 #
 # The two tables disagree by 1.13x to 1.67x, which is why neither a scaling
 # factor nor always sizing at the worst case works. A factor understates
@@ -107,8 +104,8 @@ STT_VRAM_FP16_MB: dict[str, int] = {
 def stt_vram_table(compute_type: str) -> dict[str, int]:
     """Peaks for the compute type the engines will actually use.
 
-    Keyed on the resolved compute type rather than on compute capability, so a
-    card with no int8 kernels for any other reason is sized right too.
+    Keyed on the resolved compute type rather than assumed from the card, so a
+    card whose supported compute types omit int8 is sized right too.
     """
     return STT_VRAM_MB if compute_type.startswith("int8") else STT_VRAM_FP16_MB
 
@@ -156,8 +153,9 @@ STT_BENCH_NOISE: dict[str, dict[str, float]] = {
 # Same probe, same session, for the translation models. Not read by the
 # ranking (the MT preset is per tier, not per card), but it is the other half
 # of what VRCC puts on the card and it is what _GPU_LOW_VRAM_SHARE leaves room
-# for, so it is recorded here rather than in a comment. Measured at the
-# reference card's own float16, so these overstate an older card slightly.
+# for, so it is recorded here rather than in a comment. Measured at float16 on
+# the reference machine; a card whose supported compute types include int8
+# pays MT_VRAM_INT8_MB instead.
 # id -> peak_mb
 MT_VRAM_MB: dict[str, int] = {
     "m2m100-418M-int8": 1604,
@@ -166,11 +164,11 @@ MT_VRAM_MB: dict[str, int] = {
     "nllb-1.3B-int8": 4273,
 }
 
-# The same models at int8_float16, which is what every card below compute
-# capability 12 actually runs. Measured 2026-08-10 on the reference machine.
-# The gap is large (nllb-600M 2188 at float16 against 1372 here), so sizing a
-# 6 GB card off the float16 row put the gpu_low preset over a budget it fits
-# with room to spare.
+# The same models at int8_float16, which is what a card runs whenever its
+# supported compute types include it. Measured 2026-08-10 on the reference
+# machine. The gap is large (nllb-600M 2188 at float16 against 1372 here), so
+# sizing a 6 GB card off the float16 row put the gpu_low preset over a budget
+# it fits with room to spare.
 MT_VRAM_INT8_MB: dict[str, int] = {
     "m2m100-418M-int8": 996,
     "m2m100-1.2B-int8": 2011,

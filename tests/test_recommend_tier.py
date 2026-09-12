@@ -51,10 +51,10 @@ def test_real_16gb_cards_clear_the_16gb_bar(monkeypatch):
     assert recommend.detect_tier() == "gpu_low"
 
 
-def test_the_two_16gb_bars_cannot_drift_apart():
+def test_default_bar_never_exceeds_the_high_tier_bar():
     # A card that is sized gpu_high but defaulted to the CPU would download
     # models the wizard then refuses to run on the card they were picked for.
-    assert recommend._GPU_DEFAULT_VRAM_BYTES == recommend._VRAM_HIGH_BYTES
+    assert recommend._GPU_DEFAULT_VRAM_BYTES <= recommend._VRAM_HIGH_BYTES
 
 
 def test_detect_tier_gpu_low_when_vram_small_or_unknown(monkeypatch):
@@ -67,15 +67,33 @@ def test_detect_tier_gpu_low_when_vram_small_or_unknown(monkeypatch):
     assert recommend.detect_tier() == "gpu_low"
 
 
-def test_default_device_choice_gpu_at_16gb(monkeypatch):
+def test_default_device_choice_gpu_at_8gb(monkeypatch):
     monkeypatch.setattr(recommend, "can_run_cuda", lambda: True)
     monkeypatch.setattr(recommend, "total_vram_bytes", lambda index=0: 24 * 1024 ** 3)
     assert recommend.default_device_choice() == "gpu"
     monkeypatch.setattr(recommend, "total_vram_bytes", lambda index=0: 16 * 1024 ** 3)
     assert recommend.default_device_choice() == "gpu"
     monkeypatch.setattr(recommend, "total_vram_bytes", lambda index=0: 8 * 1024 ** 3)
+    assert recommend.default_device_choice() == "gpu"
+    monkeypatch.setattr(recommend, "total_vram_bytes", lambda index=0: 6 * 1024 ** 3)
     assert recommend.default_device_choice() == "cpu"
     monkeypatch.setattr(recommend, "total_vram_bytes", lambda index=0: None)
+    assert recommend.default_device_choice() == "cpu"
+
+
+def test_default_device_choice_bar_is_inclusive(monkeypatch):
+    # The exact boundary the code computes: a card reporting the bar itself
+    # clears it, one byte under does not.
+    monkeypatch.setattr(recommend, "can_run_cuda", lambda: True)
+    monkeypatch.setattr(
+        recommend, "total_vram_bytes",
+        lambda index=0: recommend._GPU_DEFAULT_VRAM_BYTES,
+    )
+    assert recommend.default_device_choice() == "gpu"
+    monkeypatch.setattr(
+        recommend, "total_vram_bytes",
+        lambda index=0: recommend._GPU_DEFAULT_VRAM_BYTES - 1,
+    )
     assert recommend.default_device_choice() == "cpu"
 
 
@@ -95,6 +113,13 @@ def _card(monkeypatch, gb, cc):
         recommend, "total_vram_bytes", lambda index=0: int(gb * 1024**3 * 0.995)
     )
     monkeypatch.setattr(recommend, "compute_capability", lambda index=0: cc)
+
+
+def test_a_real_8gb_card_clears_the_default_bar(monkeypatch):
+    # NVML underreports the nominal figure (see _VRAM_HIGH_BYTES), so the
+    # bar has to sit under 8 GiB for a real 8 GB card to clear it.
+    _card(monkeypatch, 8, (8, 6))
+    assert recommend.default_device_choice() == "gpu"
 
 
 def test_an_old_large_card_is_not_high_tier(monkeypatch):
