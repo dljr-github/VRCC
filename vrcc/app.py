@@ -95,16 +95,32 @@ def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
         return False
 
 
-def run(portable: bool = False, verbose: bool = False, guard=None) -> int:
-    """Launch the GUI app. Returns the process exit code."""
-    paths = default_paths(portable)
-    setup_logging(paths.logs_dir, verbose)
-    logger.info("VRCC starting (portable=%s)", portable)
+def run(
+    portable: bool = False,
+    verbose: bool = False,
+    guard=None,
+    paths=None,
+    store=None,
+    progress=None,
+) -> int:
+    """Launch the GUI app. Returns the process exit code.
 
-    store = ConfigStore(paths.config_file)
-    store.load()
-    for warning in store.load_warnings:
-        logger.warning("config: %s", warning)
+    ``paths``, ``store`` and ``progress`` let boot() hand over what it already
+    built: setup_logging opens a fresh file handler on every call, so calling
+    it again here would duplicate every log record, and a second ConfigStore
+    would leave this run closing over a different store than boot themed the
+    panel from.
+    """
+    if paths is None:
+        paths = default_paths(portable)
+        setup_logging(paths.logs_dir, verbose)
+        logger.info("VRCC starting (portable=%s)", portable)
+
+    if store is None:
+        store = ConfigStore(paths.config_file)
+        store.load()
+        for warning in store.load_warnings:
+            logger.warning("config: %s", warning)
 
     # Deliberately ahead of any window: the first-run wizard (below, when
     # models_ready() is False) reads can_run_cuda() for its device
@@ -158,6 +174,11 @@ def run(portable: bool = False, verbose: bool = False, guard=None) -> int:
     # the time window = make_window() runs, below.
     updater = UpdateChecker(bus, __version__)
     dm = DownloadManager(paths.models_dir, bus)
+
+    if progress is not None:
+        # Before the gate, not after: the first-run wizard is app-modal, and
+        # a boot panel still open behind it would never get a repaint.
+        progress.close()
 
     if not _models_ready(store.config, dm):
         wizard = FirstRunWizard(store, dm, bridge)
@@ -414,6 +435,11 @@ def run(portable: bool = False, verbose: bool = False, guard=None) -> int:
     )
     window = make_window()
     window.show()
+    if progress is not None:
+        # Covers the path with no wizard, where the gate above already ran
+        # but nothing has closed the panel yet. close() is idempotent, so
+        # this is a no-op on the wizard path.
+        progress.close()
 
     def rebuild_main_window() -> None:
         nonlocal window

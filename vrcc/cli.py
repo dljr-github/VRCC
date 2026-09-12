@@ -21,10 +21,10 @@ def main() -> int:
     """Parse arguments, then decide whether this copy may run.
 
     Order is a contract, not a preference: the single-instance guard sits
-    after parse_args and before the app import, so a refused launch exits
-    without paying for sounddevice, huggingface_hub and faster_whisper.
-    Nothing Qt may move above it, or a second copy would flash a window and
-    vanish.
+    after parse_args and before the boot import, so a refused launch exits
+    without paying for sounddevice, huggingface_hub, faster_whisper and Qt
+    itself. Nothing Qt may move above it, or a second copy would flash a
+    window and vanish.
     """
     _ensure_std_streams()
     parser = argparse.ArgumentParser(prog="vrcc")
@@ -41,9 +41,9 @@ def main() -> int:
         return 0
 
     try:
-        from vrcc.app import run
+        from vrcc.boot import boot
 
-        return run(portable=args.portable, verbose=args.verbose, guard=guard)
+        return boot(portable=args.portable, verbose=args.verbose, guard=guard)
     finally:
         guard.release()
 
