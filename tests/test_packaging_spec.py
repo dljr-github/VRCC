@@ -202,3 +202,46 @@ def test_splash_png_matches_a_fresh_render_of_the_svg():
     make_splash = _load_make_splash()
     blob, _, _ = make_splash.render_png(make_splash.SVG)
     assert blob == _SPLASH_PNG.read_bytes()
+
+
+def test_spec_defines_the_splash_target():
+    text = _SPEC.read_text(encoding="utf-8")
+    assert "splash = Splash(" in text, (
+        "vrcc.spec must define a Splash target so the bootloader paints "
+        "before the interpreter starts"
+    )
+    assert 'os.path.join(REPO_ROOT, "assets", "splash.png")' in text
+
+
+def test_spec_passes_the_splash_to_the_exe():
+    """PyInstaller validates EXE's positional arguments against (PYZ, Splash)
+    at PyInstaller/building/api.py:543-544, so the object goes in positionally
+    rather than as a keyword."""
+    text = _SPEC.read_text(encoding="utf-8")
+    # Split on the closing paren at the start of a line, not the first one:
+    # the EXE call contains os.path.join(...) and a naive split stops inside it.
+    exe_call = text.split("exe = EXE(", 1)[1].split("\n)", 1)[0]
+    assert "splash," in exe_call, (
+        "the Splash object is passed positionally to EXE; without it the "
+        "bootloader has nothing to show"
+    )
+
+
+def test_spec_collects_the_splash_binaries():
+    text = _SPEC.read_text(encoding="utf-8")
+    coll_call = text.split("coll = COLLECT(", 1)[1]
+    assert "splash.binaries," in coll_call, (
+        "a one-folder build needs the splash's own binaries in COLLECT"
+    )
+
+
+def test_spec_gives_the_splash_no_text():
+    """The bootloader's text channel mangles a message by slicing between the
+    first open paren and the last close paren, and CJK over it is unverified.
+    This app ships in 17 languages, so the splash carries a logo and nothing
+    else."""
+    text = _SPEC.read_text(encoding="utf-8")
+    splash_call = text.split("splash = Splash(", 1)[1].split("\n)", 1)[0]
+    assert "text_pos" not in splash_call
+    assert "text_size" not in splash_call
+    assert "text_color" not in splash_call

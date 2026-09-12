@@ -170,10 +170,23 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# assets/splash.png stays under PyInstaller's default max_img_size of
+# (760, 480); past that it demands Pillow, which this project does not
+# depend on. No text_pos/text_size/text_color: the bootloader's text channel
+# slices a message between the first open paren and the last close paren,
+# and CJK over that channel is unverified, while this app ships 17 languages.
+splash = Splash(
+    os.path.join(REPO_ROOT, "assets", "splash.png"),
+    binaries=a.binaries,
+    datas=a.datas,
+    always_on_top=True,
+)
+
 exe = EXE(
     pyz,
     a.scripts,
     [],
+    splash,
     exclude_binaries=True,
     name="VRCC",
     debug=False,
@@ -192,6 +205,7 @@ exe = EXE(
 
 coll = COLLECT(
     exe,
+    splash.binaries,
     a.binaries,
     a.datas,
     strip=False,
