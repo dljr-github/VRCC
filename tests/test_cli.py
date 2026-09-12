@@ -56,6 +56,7 @@ def test_second_launch_returns_zero_without_importing_the_app(monkeypatch):
     import vrcc.cli as cli
 
     monkeypatch.delitem(sys.modules, "vrcc.app", raising=False)
+    monkeypatch.delitem(sys.modules, "vrcc.boot", raising=False)
     monkeypatch.setattr(sys, "argv", ["vrcc"])
 
     rung = []
@@ -75,11 +76,12 @@ def test_second_launch_returns_zero_without_importing_the_app(monkeypatch):
     assert cli.main() == 0
     assert rung == [True]
     assert "vrcc.app" not in sys.modules
+    assert "vrcc.boot" not in sys.modules
     # sys.modules alone cannot see a hoist to module scope: this test module
     # already imported vrcc.cli at collection time, so cli.py would not
-    # re-execute and vrcc.app would never reappear even if the import moved
+    # re-execute and vrcc.boot would never reappear even if the import moved
     # above main(). Pin the import to main()'s own source as well.
-    assert "from vrcc.app import run" in inspect.getsource(cli.main)
+    assert "from vrcc.boot import boot" in inspect.getsource(cli.main)
 
 
 def test_first_launch_runs_the_app(monkeypatch):
@@ -87,15 +89,15 @@ def test_first_launch_runs_the_app(monkeypatch):
 
     import vrcc.cli as cli
 
-    fake = types.ModuleType("vrcc.app")
+    fake = types.ModuleType("vrcc.boot")
     calls = []
 
     def _run(portable=False, verbose=False, guard=None):
         calls.append((portable, verbose, guard))
         return 7
 
-    fake.run = _run
-    monkeypatch.setitem(sys.modules, "vrcc.app", fake)
+    fake.boot = _run
+    monkeypatch.setitem(sys.modules, "vrcc.boot", fake)
     monkeypatch.setattr(sys, "argv", ["vrcc", "--portable"])
 
     class _Allowed:
@@ -131,13 +133,13 @@ def test_release_runs_even_when_the_app_raises(monkeypatch):
 
     import vrcc.cli as cli
 
-    fake = types.ModuleType("vrcc.app")
+    fake = types.ModuleType("vrcc.boot")
 
     def _run(portable=False, verbose=False, guard=None):
         raise RuntimeError("boom")
 
-    fake.run = _run
-    monkeypatch.setitem(sys.modules, "vrcc.app", fake)
+    fake.boot = _run
+    monkeypatch.setitem(sys.modules, "vrcc.boot", fake)
     monkeypatch.setattr(sys, "argv", ["vrcc"])
 
     released = []
@@ -164,3 +166,15 @@ def test_run_signature_accepts_guard():
     import vrcc.app
 
     assert "guard" in inspect.signature(vrcc.app.run).parameters
+
+
+def test_boot_signature_accepts_the_cli_keywords():
+    """Test 7 pins the real run(); this pins the real boot(). Every other test
+    in this module installs a fake, so without these two a signature change
+    would break every launch while the suite stayed green."""
+    import inspect
+
+    import vrcc.boot
+
+    params = inspect.signature(vrcc.boot.boot).parameters
+    assert {"portable", "verbose", "guard"} <= set(params)

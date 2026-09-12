@@ -32,6 +32,7 @@ from vrcc.core.startup import (
 )
 from vrcc.core.updates import UpdateChecker
 from vrcc.download.manager import DownloadManager
+from vrcc.gui.window_swap import _swap_main_window
 from vrcc.i18n import tr
 from vrcc.osc.mutesync import MuteSync
 from vrcc.osc.vrchat_detect import VrchatDetector
@@ -94,42 +95,32 @@ def _start_pipeline_guarded(pipeline: Pipeline, bus: EventBus) -> bool:
         return False
 
 
-def _swap_main_window(old, make_window, detector, mute):
-    """Replace ``old`` with a freshly built MainWindow and carry its runtime
-    state across: nothing replays bus events for a late subscriber, so the
-    fresh window would otherwise sit on "Starting" and "VRChat: checking"
-    until the next transition. The capture label carries verbatim; a red
-    failure must stay red whether or not the pipeline ever started, and
-    paused-vs-listening re-derives from the captioning toggle, which the
-    fresh window reads from the pipeline at construction. ``mute`` is the
-    live MuteSync coordinator (``None`` if mute sync was never enabled);
-    republishing it alongside the detector means a language change while
-    muted doesn't leave the rebuilt window's mute chip hidden."""
-    old.disconnect_bridge()
-    fresh = make_window()
-    fresh.restoreGeometry(old.saveGeometry())
-    fresh._engine_states.update(old._engine_states)
-    fresh._render_log()
-    fresh.set_capture_status(old._capture_ok, old._capture_reason)
-    detector.republish()
-    if mute is not None:
-        mute.republish()
-    fresh.show()
-    old.hide()
-    old.deleteLater()
-    return fresh
+def run(
+    portable: bool = False,
+    verbose: bool = False,
+    guard=None,
+    paths=None,
+    store=None,
+    progress=None,
+) -> int:
+    """Launch the GUI app. Returns the process exit code.
 
+    ``paths``, ``store`` and ``progress`` let boot() hand over what it already
+    built: setup_logging opens a fresh file handler on every call, so calling
+    it again here would duplicate every log record, and a second ConfigStore
+    would leave this run closing over a different store than boot themed the
+    panel from.
+    """
+    if paths is None:
+        paths = default_paths(portable)
+        setup_logging(paths.logs_dir, verbose)
+        logger.info("VRCC starting (portable=%s)", portable)
 
-def run(portable: bool = False, verbose: bool = False, guard=None) -> int:
-    """Launch the GUI app. Returns the process exit code."""
-    paths = default_paths(portable)
-    setup_logging(paths.logs_dir, verbose)
-    logger.info("VRCC starting (portable=%s)", portable)
-
-    store = ConfigStore(paths.config_file)
-    store.load()
-    for warning in store.load_warnings:
-        logger.warning("config: %s", warning)
+    if store is None:
+        store = ConfigStore(paths.config_file)
+        store.load()
+        for warning in store.load_warnings:
+            logger.warning("config: %s", warning)
 
     # Deliberately ahead of any window: the first-run wizard (below, when
     # models_ready() is False) reads can_run_cuda() for its device
@@ -186,6 +177,10 @@ def run(portable: bool = False, verbose: bool = False, guard=None) -> int:
 
     if not _models_ready(store.config, dm):
         wizard = FirstRunWizard(store, dm, bridge)
+        if progress is not None:
+            # The wizard is app-modal; a boot panel still open behind it
+            # would sit there uselessly until the wizard closes.
+            progress.close()
         if wizard.exec() != QDialog.DialogCode.Accepted:
             logger.info("first-run wizard cancelled; exiting")
             bridge.detach()
@@ -439,6 +434,12 @@ def run(portable: bool = False, verbose: bool = False, guard=None) -> int:
     )
     window = make_window()
     window.show()
+    if progress is not None:
+        # The only close on the path where no wizard ran, so the panel stays
+        # up through build_engine_stack and the loader start below rather
+        # than vanishing early. close() is idempotent, so this is a no-op on
+        # the wizard path, which already closed it above.
+        progress.close()
 
     def rebuild_main_window() -> None:
         nonlocal window
