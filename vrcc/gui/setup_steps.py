@@ -1,7 +1,7 @@
 """The setup check panel's rows and the pure evaluator behind them.
 
-Qt-free on purpose: the panel sits beside the main window (a later task builds
-the widget), but the evidence rules that decide whether a row ticks green live
+Qt-free on purpose: the panel sits beside the main window, but the widget
+stays thin. The evidence rules that decide whether a row ticks green live
 here where they can be tested with no display and read without a debugger.
 
 Each row lands on one of three states. ``pending`` means the evidence hasn't
@@ -12,11 +12,11 @@ failed to load) or because the plain next step is theirs to take (turn on
 captioning, check the microphone). ``pass`` means the bus already reported the
 evidence this row exists to check for.
 
-Every fact here is real bus evidence, not a guess. The three traps that made
-that hard, all confirmed against this tree before this module was written:
-``EngineStateChanged`` carries the translator on the same signal as the voice
-model (translate/engine.py:96,110-114, forwarded on one Qt signal at
-bridge.py:82), so the "model" row reads only the "stt" key. ``PhraseRecognized``
+Every fact here is real bus evidence, not a guess. Three things about the bus
+make that harder than it looks: ``EngineStateChanged`` carries the translator
+on the same signal as the voice model (translate/engine.py:96,110-114,
+forwarded on one Qt signal at bridge.py:82), so the "model" row reads only
+the "stt" key. ``PhraseRecognized``
 and ``ChatboxSent`` both fire for typed text sent from the compose box
 (pipeline_typed.py:61-69, with a negative utterance id from
 pipeline.py:461-469), so "voice" and "chatbox" both need a caller that already

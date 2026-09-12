@@ -1,6 +1,6 @@
-"""The setup check evaluator: every row in every reachable state, the four
-traps the grounding for this feature found, and a copy guard over every
-tr_noop string the module defines.
+"""The setup check evaluator: every row in every reachable state, four traps
+in the bus events that back it, and a copy guard over every tr_noop string
+the module defines.
 """
 
 from __future__ import annotations
