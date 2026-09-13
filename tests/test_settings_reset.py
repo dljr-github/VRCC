@@ -451,7 +451,7 @@ _NOT_TUNING = {
     },
     "gui": {
         "theme", "font_scale", "ui_language", "window_geometry",
-        "update_check_enabled", "setup_check_done",
+        "update_check_enabled", "setup_check_done", "setup_check_requests",
     },
 }
 

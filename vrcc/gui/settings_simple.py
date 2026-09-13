@@ -209,7 +209,7 @@ def _build_app(dlg: "SettingsDialog", form: QFormLayout) -> None:
     reset_defaults.clicked.connect(lambda: settings_reset.confirm_and_reset_defaults(dlg))
     form.addRow("", reset_defaults)
 
-    # Clearing the flag is the whole job: the setup check controller (which
+    # Writing config is the whole job: the setup check controller (which
     # outlives this dialog) polls it and shows the panel itself. app.py has no
     # spare lines for a callback wired through from here to that controller.
     dlg._show_setup_btn = QPushButton(tr("Bring back the setup steps"))
@@ -218,7 +218,12 @@ def _build_app(dlg: "SettingsDialog", form: QFormLayout) -> None:
     )
 
     def on_show_setup():
+        # The counter is what actually reopens the panel; it changes on every
+        # press. Clearing the flag is what lets the check re-latch if the user
+        # completes it again, and on its own it would be a no-op for anyone
+        # who dismissed the panel while the flag was already False.
         dlg._cfg.gui.setup_check_done = False
+        dlg._cfg.gui.setup_check_requests += 1
         dlg._changed()
 
     dlg._show_setup_btn.clicked.connect(on_show_setup)

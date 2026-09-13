@@ -71,17 +71,16 @@ class SetupCheck(QObject):
         # ever sees the reopened panel. Only a fresh transition into "passed"
         # writes the flag.
         self._was_required_passed = required_passed(self._facts)
-        # Bootstrapped True regardless of the stored value, not read from it:
-        # a fresh unmet launch (the ordinary case, flag False) must then read
-        # as a True -> False transition on the very first tick below, so the
-        # initial show and every later Settings-triggered re-show run through
-        # the same edge-triggered path rather than a separate one-time call.
-        self._was_done = True
-        # Set on a detected transition, acted on (and cleared) once no modal
-        # is active: Settings clears the flag while it is still the modal
-        # dialog on screen, so the edge can arrive well before it is safe to
-        # act on.
-        self._reshow_pending = False
+        # Seeded from the STORED value rather than zero: a request written by
+        # an earlier session would otherwise read as fresh here and pop the
+        # panel open on a launch nobody asked it to.
+        self._last_request = store.config.gui.setup_check_requests
+        # Set on a request, acted on (and cleared) once no modal is active:
+        # Settings writes the request while it is still the modal dialog on
+        # screen, so it can arrive well before it is safe to act on. A launch
+        # that has never completed the check opens the panel on the first tick
+        # below, which is the same path a later request takes.
+        self._reshow_pending = not store.config.gui.setup_check_done
 
         # Qt's queued auto-connection hops a worker-thread emit onto this
         # object's own (GUI) thread, the same mechanism BusBridge relies on.
@@ -147,18 +146,20 @@ class SetupCheck(QObject):
     def _recompute(self) -> None:
         if self._panel is None:
             return
-        # Edge-triggered on the flag itself, not level-triggered on
-        # "unmet and hidden": the latter re-fires every tick for the rest of
-        # an unmet session, forcing the panel back within one poll of a user
-        # closing it. Only a True -> False transition (completion, then a
-        # later Settings-triggered clear) may show it; closing the panel
-        # produces no transition, so it stays closed.
-        done = self._store.config.gui.setup_check_done
-        if self._was_done and not done:
+        # Watches the request counter, not setup_check_done: the flag answers
+        # "should this open by itself at launch?", which is a different
+        # question from "the user just asked for it", and a user who dismissed
+        # the panel before finishing holds the flag at False already, so a
+        # press would change nothing. Not level-triggered on "unmet and
+        # hidden" either: that re-fires every tick for the rest of an unmet
+        # session, forcing the panel back within one poll of a user closing
+        # it. Closing the panel changes neither field, so it stays closed.
+        req = self._store.config.gui.setup_check_requests
+        if req != self._last_request:
+            self._last_request = req
             self._reshow_pending = True
-        self._was_done = done
         # A modeless panel must not appear under a modal dialog (Settings is
-        # application-modal): act on a pending transition only once none is
+        # application-modal): act on a pending request only once none is
         # active, rather than dropping it if the poll lands mid-dialog.
         if self._reshow_pending and QApplication.activeModalWidget() is None:
             self._show_panel()

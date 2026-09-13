@@ -1,6 +1,7 @@
-"""The Simple page's "Bring back the setup steps" button: it must clear and
-persist ``gui.setup_check_done`` so the running setup check controller (which
-this dialog never touches directly) notices the change on its own next poll.
+"""The Simple page's "Bring back the setup steps" button: it must bump
+``gui.setup_check_requests`` and clear ``gui.setup_check_done``, then persist
+both, so the running setup check controller (which this dialog never touches
+directly) notices on its own next poll.
 
 Split from tests/test_settings_ui.py, which is at the repo's 500-line cap.
 """
@@ -28,19 +29,43 @@ def _dlg(tmp_path):
     return SettingsDialog(store), store
 
 
-def test_button_clears_and_persists_the_setup_check_flag(qapp, tmp_path, monkeypatch):
+def test_button_records_a_request_and_clears_the_flag(qapp, tmp_path, monkeypatch):
     dlg, store = _dlg(tmp_path)
     saves = []
     monkeypatch.setattr(store, "save_soon", lambda: saves.append(1))
     try:
-        # The common case for pressing this: the check already finished once,
-        # and the flag reflects that.
+        # The check already finished once, and the flag reflects that.
         store.config.gui.setup_check_done = True
+        before = store.config.gui.setup_check_requests
 
         dlg._show_setup_btn.click()
 
+        assert store.config.gui.setup_check_requests == before + 1
         assert store.config.gui.setup_check_done is False
         assert saves == [1]
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+
+def test_every_press_records_a_fresh_request(qapp, tmp_path, monkeypatch):
+    """The state the flag alone cannot express. Someone who dismissed the
+    panel before finishing setup already has setup_check_done False, so
+    clearing it writes nothing new; and a press deliberately leaves it False,
+    so a second press in the same session is the same problem again. The
+    counter has to move both times or the button is dead."""
+    dlg, store = _dlg(tmp_path)
+    monkeypatch.setattr(store, "save_soon", lambda: None)
+    try:
+        assert store.config.gui.setup_check_done is False
+        assert store.config.gui.setup_check_requests == 0
+
+        dlg._show_setup_btn.click()
+        assert store.config.gui.setup_check_requests == 1
+
+        dlg._show_setup_btn.click()
+        assert store.config.gui.setup_check_requests == 2
+        assert store.config.gui.setup_check_done is False
     finally:
         dlg.close()
         dlg.deleteLater()
