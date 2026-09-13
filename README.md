@@ -233,6 +233,21 @@ M2M100 models are the permissive-license alternative (see
 See [Picking a model](#picking-a-model) below for measured accuracy and
 speed.
 
+Once VRCC is ready to run, the main window opens beside a panel of setup
+steps, with rows for turning captioning on, the voice model finishing its load,
+your voice reaching VRCC, VRChat turning up on the network, and a caption going
+out over OSC, plus an optional row for sound picked up from your speakers that
+never blocks the rest. The VRChat row only proves its OSC service advertised
+itself over mDNS, not that anything reached the game, so a network that blocks
+mDNS can leave the row unticked while VRChat runs fine, and the panel goes on
+opening at every launch for as long as that lasts. The caption row is evidence
+in the other direction. It proves a caption was sent, not that VRChat picked it
+up, because OSC never confirms that a message got through, and it drops out of
+what the panel requires whenever sending to VRChat is switched off. The panel
+stops opening on later launches once every row it still requires has passed.
+Closing it before then dismisses it for that session only, and it is back on
+the next start; Settings, on the Simple page, brings it back at any time.
+
 ## Usage
 
 1. Start VRChat and enable OSC: **Action menu → Options → OSC → Enabled**.
@@ -412,6 +427,10 @@ downloads; check that a model's license fits your use:
   launching it again asks the running copy to show itself. If it doesn't
   come forward, Windows may be holding focus for whatever you clicked
   last, so the taskbar button is where to look.
+- **Setup steps don't reappear**: closing the panel dismisses it for that
+  session, and it opens again next start unless the rows it requires have
+  passed. To get it back straight away, open **Settings → Simple** and use
+  **Bring back the setup steps**.
 
 ## Developing
 

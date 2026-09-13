@@ -130,3 +130,21 @@ def test_disconnect_bridge_stops_speech_started_too(qapp, tmp_path):
         assert w._speech_seen is False
     finally:
         w.close(); w.deleteLater(); bridge.detach()
+
+
+def test_toggling_captioning_repaints_empty_state_before_capture_confirms(qapp, tmp_path):
+    # _capture_ok stays None until the mic thread reports in, and
+    # render_capture_status returns listening=False both before and after the
+    # toggle in that window (it checks _capture_ok before the toggle), so the
+    # flip-based repaint in _render_capture_status never fires here. The empty
+    # state reads the toggle directly, so it needs a repaint of its own.
+    w, bridge = _window(tmp_path)
+    try:
+        w._engine_states["stt"] = "ready"
+        w._render_log()
+        assert "Start captioning" in w._log.toPlainText()
+
+        w._captioning_btn.setChecked(True)  # -> _on_captions_toggled
+        assert "Start captioning" not in w._log.toPlainText()
+    finally:
+        w.close(); w.deleteLater(); bridge.detach()

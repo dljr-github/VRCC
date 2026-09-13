@@ -277,7 +277,10 @@ def render_rows_html(
 
 
 def empty_state_text(
-    stt_state: str | None, listening_no_speech: bool = False
+    stt_state: str | None,
+    listening_no_speech: bool = False,
+    *,
+    captioning_off: bool = False,
 ) -> tuple[str, str]:
     """(headline, sub) for a log with no rows yet, chosen from the voice
     model's state. Lives here rather than in the window because it is the
@@ -287,6 +290,10 @@ def empty_state_text(
     since. Swaps only the sub-line, worded as what the app is hearing, not
     a diagnosis -- the likely causes (wrong input device, the mute gate)
     are outside what this line can know.
+
+    ``captioning_off``: the captioning toggle itself is off, so nothing is
+    listening at all. Takes priority over ``listening_no_speech`` -- that
+    flag presumes the app is listening, which is exactly what this is not.
     """
     if stt_state == "failed":
         # Inviting someone to speak at a model that never loaded wastes their
@@ -297,6 +304,15 @@ def empty_state_text(
         )
     if stt_state in (None, "loading"):
         return tr("Getting the voice model ready…"), tr("usually takes a few seconds")
+    if captioning_off:
+        # A paused toggle means the app isn't listening, so inviting speech
+        # here is the same contradiction this branch exists to remove. The
+        # button name is interpolated (not repeated as a literal) so this
+        # copy and the button's own label can never name it differently.
+        return (
+            tr("Paused - press {button}", button=tr("Start captioning")),
+            tr("captions stay off until you do"),
+        )
     if listening_no_speech:
         return (
             tr("Say something - captions appear here"),

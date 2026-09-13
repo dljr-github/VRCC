@@ -106,12 +106,12 @@ def test_rebuilt_window_is_repushed_vrchat_state_and_capture_ok(qapp, tmp_path):
         detector.add_service(
             None, "_oscjson._tcp.local.", "VRChat-Client-7._oscjson._tcp.local."
         )
-        assert "connected" in old._vrchat_label.text()
+        assert "found" in old._vrchat_label.text()
         old.set_capture_status(True)  # the pipeline started and is healthy
 
         fresh = _swap_main_window(old, make_window, detector, None)
 
-        assert "connected" in fresh._vrchat_label.text()
+        assert "found" in fresh._vrchat_label.text()
         assert fresh._capture_label.text() == "Paused - not listening"
     finally:
         for w in (old, fresh):

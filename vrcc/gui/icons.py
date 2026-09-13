@@ -70,6 +70,36 @@ def x_svg(color: str) -> str:
     )
 
 
+def tick_svg(color: str) -> str:
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" '
+        f'viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round">'
+        '<polyline points="5 13 10 18 19 7"/></svg>'
+    )
+
+
+def circle_svg(color: str) -> str:
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" '
+        f'viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2">'
+        '<circle cx="12" cy="12" r="7"/></svg>'
+    )
+
+
+def alert_svg(color: str) -> str:
+    # A vertical stroke plus a dot drawn as a zero-length stroke (the round
+    # linecap turns it into a circle): the usual notice mark, distinct from
+    # both x_svg's cross and tick_svg's check.
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" '
+        f'viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round">'
+        '<line x1="12" y1="7" x2="12" y2="13"/>'
+        '<line x1="12" y1="17" x2="12" y2="17.01"/></svg>'
+    )
+
+
 # Human sentences for known AppError codes; the status bar shows these, the log
 # keeps the raw code+message (see MainWindow._on_app_error). A code with no
 # entry here shows HANDLER_ERROR's sentence, so every code a publisher can emit

@@ -161,6 +161,7 @@ def run(
     from vrcc.gui.main_window import MainWindow
     from vrcc.gui.models_dialog import ModelsDialog
     from vrcc.gui.settings import SettingsDialog
+    from vrcc.gui.setup_check import start as start_setup_check
     from vrcc.gui.style import apply_font_scale, apply_theme_guarded
 
     apply_theme_guarded(app, store.config.gui.theme, store.config.gui.font_scale)
@@ -445,6 +446,7 @@ def run(
         nonlocal window
         apply_ui_language(app, store.config.gui.ui_language)
         window = _swap_main_window(window, make_window, detector, live_apply.mute)
+        setup_check.set_window(window)
 
     # Run the driver-floor check before the loader (its flag drives resolve()'s
     # CPU fallback) but after the window subscribes to the bridge, so a
@@ -457,9 +459,10 @@ def run(
     )
     loader.start()
 
-    # Passively watch for VRChat's OSCQuery service so the UI can tell the user
-    # whether the chatbox is actually reachable (OSC has no delivery ack).
+    # Passively watch for VRChat's OSCQuery service. All the UI can say from it
+    # is that VRChat advertised itself; OSC itself has no delivery ack at all.
     detector = VrchatDetector(bus)
+    setup_check = start_setup_check(bus, store, window, detector)
     detector.start()
 
     if store.config.gui.update_check_enabled:
@@ -470,6 +473,7 @@ def run(
         exit_code = app.exec()
     finally:
         detector.stop()
+        setup_check.stop()
         stack.pipeline.stop()
         if stack.heard is not None:
             stack.heard.stop()

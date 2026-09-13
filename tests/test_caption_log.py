@@ -380,6 +380,55 @@ def test_empty_state_text_listening_no_speech_ignored_while_loading():
     assert empty_state_text("loading", listening_no_speech=True) == empty_state_text("loading")
 
 
+def test_empty_state_text_captioning_off_does_not_invite_speech():
+    from vrcc.gui.caption_log import empty_state_text
+
+    msg, sub = empty_state_text("ready", captioning_off=True)
+    assert "Say something" not in msg
+    assert "Start captioning" in msg  # names the control that starts it
+
+
+def test_empty_state_text_default_unchanged_when_captioning_on():
+    from vrcc.gui.caption_log import empty_state_text
+
+    # captioning_off defaults to False: existing callers that never pass it
+    # keep today's copy.
+    assert empty_state_text("ready") == (
+        "Say something - captions appear here",
+        "then in your VRChat chatbox",
+    )
+
+
+def test_empty_state_text_failed_outranks_captioning_off():
+    from vrcc.gui.caption_log import empty_state_text
+
+    # failed is checked first in the function body; pin that a captioning
+    # judgement never reaches it either way.
+    assert (
+        empty_state_text("failed", captioning_off=True)
+        == empty_state_text("failed", captioning_off=False)
+        == empty_state_text("failed")
+    )
+
+
+def test_empty_state_text_captioning_off_ignored_while_loading():
+    from vrcc.gui.caption_log import empty_state_text
+
+    # Same priority rule as listening_no_speech: loading copy pre-empts
+    # everything else, including a captioning judgement.
+    assert empty_state_text("loading", captioning_off=True) == empty_state_text("loading")
+
+
+def test_empty_state_text_captioning_off_outranks_listening_no_speech():
+    from vrcc.gui.caption_log import empty_state_text
+
+    # listening_no_speech presumes the app is listening; captioning_off says
+    # it is not, so it must win if both are somehow set at once.
+    off = empty_state_text("ready", listening_no_speech=True, captioning_off=True)
+    assert off == empty_state_text("ready", captioning_off=True)
+    assert "arriving" not in off[1]
+
+
 def test_render_partial_colors_dict_does_not_raise():
     # The documented 5-key override shape must not KeyError on border/bad for a
     # translated + not_sent row (regression for `colors or _DEFAULT_COLORS`).

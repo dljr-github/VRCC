@@ -134,6 +134,16 @@ class GuiConfig(BaseModel):
     window_geometry: str = ""
     # Check GitHub releases on launch and offer a notice. Opt out here.
     update_check_enabled: bool = True
+    # Set once every required Setup check row has real evidence. A runtime
+    # preference like update_check_enabled above, not tuning, so "Reset
+    # tuning to defaults" must never clear it back to False.
+    setup_check_done: bool = False
+    # Monotonic counter whose VALUE carries no meaning; only a change in it
+    # does. Settings bumps it to ask for the panel right now, which the flag
+    # above cannot express: a user who dismissed the panel before finishing
+    # already has it False, so clearing it again says nothing. Also a runtime
+    # preference, so "Reset tuning to defaults" must never clear it either.
+    setup_check_requests: int = 0
 
 
 # Bumped when a stored config needs rewriting rather than just loading.

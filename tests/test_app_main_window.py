@@ -314,7 +314,7 @@ def test_vrchat_status_chip_reflects_detection(qapp, tmp_path):
     window, bridge = _main_window(store)
     try:
         window._on_vrchat_detected(SimpleNamespace(detected=True))
-        assert "connected" in window._vrchat_label.text()
+        assert "found" in window._vrchat_label.text()
         window._on_vrchat_detected(SimpleNamespace(detected=False))
         assert "not detected" in window._vrchat_label.text().lower()
     finally:
