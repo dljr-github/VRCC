@@ -63,10 +63,34 @@ def test_the_settings_button_still_reopens_after_a_permanent_dismiss(
         assert check._panel.isVisible()
 
 
+def test_dismissing_first_does_not_double_write_when_rows_later_pass(
+    qapp, tmp_path, monkeypatch
+):
+    """_recompute's transition guard (`if not ...setup_check_done`) must
+    still hold after a manual dismiss: the required rows passing later in
+    the same session must not write the flag, or call save_soon, again."""
+    with _running(tmp_path) as (check, store, _):
+        calls = []
+        monkeypatch.setattr(store, "save_soon", lambda: calls.append(1))
+
+        check._panel._dismiss_button.click()
+        assert calls == [1]
+
+        check._facts.captioning = True
+        check._facts.engine_states["stt"] = "ready"
+        check._facts.spoken_utterance = True
+        check._facts.vrchat_found = True
+        check._facts.spoken_chatbox_send = True
+        assert required_passed(check._facts) is True
+        check._recompute()
+
+        assert calls == [1]
+        assert store.config.gui.setup_check_done is True
+
+
 def test_plain_close_panel_leaves_the_flag_false(qapp, tmp_path):
-    """Not a regression this change should ever touch: closing the panel
-    without the dismiss button must still leave the flag False, so the
-    panel returns on the next launch."""
+    """Closing the panel without the dismiss button must still leave the
+    flag False, so the panel returns on the next launch."""
     with _running(tmp_path) as (check, store, _):
         assert check._panel.isVisible()
 
