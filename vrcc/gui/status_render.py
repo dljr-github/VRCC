@@ -23,7 +23,7 @@ def render_vrchat(w, detected) -> None:
         "VRChat must be running on this PC."
     )
     if detected is True:
-        w._vrchat_label.setText(tr("VRChat: connected"))
+        w._vrchat_label.setText(tr("VRChat: found"))
         w._vrchat_label.setStyleSheet(f"color: {w._p['good']}; padding: 2px 8px;")
         w._vrchat_label.setToolTip(tr("VRChat's OSC service was found on this network."))
     elif detected is False:
