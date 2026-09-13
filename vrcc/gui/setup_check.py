@@ -54,11 +54,12 @@ class SetupCheck(QObject):
         # Outlives every window rebuild: make_window() closes over the same
         # Pipeline for the life of the process, only the window is replaced.
         self._pipeline = window._pipeline
-        # Kept only for a later place_beside(), never read otherwise: a
-        # UI-language change destroys and recreates this window, and this
-        # controller deliberately survives that rebuild, so the reference
-        # can outlive the C++ object it points at. _show_panel() below
-        # checks shiboken6.isValid() before using it for that reason.
+        # Kept only for a later place_beside(), never read otherwise. A
+        # UI-language change destroys and recreates this window while this
+        # controller deliberately survives the rebuild, so app.py hands the
+        # replacement over through set_window(); the shiboken6.isValid()
+        # guard in _show_panel() below is the backstop for any path that
+        # does not.
         self._window = window
         self._panel = SetupPanel()
 
@@ -188,6 +189,11 @@ class SetupCheck(QObject):
                 self._store.config.gui.setup_check_done = True
                 self._store.save_soon()
         self._was_required_passed = now_passed
+
+    def set_window(self, window) -> None:
+        """Adopt the main window a rebuild just created, so the next show
+        still anchors the panel beside it instead of leaving Qt to place it."""
+        self._window = window
 
     def _show_panel(self) -> None:
         import shiboken6

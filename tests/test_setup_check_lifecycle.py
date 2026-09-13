@@ -341,6 +341,69 @@ def test_controller_survives_app_swap_main_window(qapp, tmp_path):
         bridge.detach()
 
 
+def test_set_window_anchors_a_later_show_to_the_rebuilt_window(qapp, tmp_path, monkeypatch):
+    """The window reference taken at construction points at a C++ object the
+    rebuild destroys, and _show_panel then skips place_beside entirely, so a
+    bring-back after a language change lands wherever Qt puts it. app.py
+    hands the replacement over instead."""
+    store = _store(tmp_path)
+    store.config.gui.setup_check_done = True
+    bus = EventBus()
+    pipeline = _FakePipeline()
+    bridge = BusBridge(bus)
+    old = _window(bridge, store, pipeline)
+    check = start(bus, store, old, _FakeDetector())
+
+    fresh = None
+    try:
+        fresh = _swap_main_window(
+            old, lambda: _window(bridge, store, pipeline), _FakeDetector(), None
+        )
+        check.set_window(fresh)
+        qapp.processEvents()
+
+        placed = []
+        monkeypatch.setattr(check._panel, "place_beside", lambda w: placed.append(w))
+
+        store.config.gui.setup_check_requests += 1
+        check._recompute()
+
+        # Identity, not "was called at all": placing against the destroyed
+        # window is the bug, and a bare call count cannot tell the two apart.
+        assert len(placed) == 1
+        assert placed[0] is fresh
+    finally:
+        check.stop()
+        if fresh is not None:
+            fresh.close()
+            fresh.deleteLater()
+        bridge.detach()
+
+
+def test_app_hands_the_rebuilt_window_to_the_setup_check():
+    """The wiring the test above assumes. app.run() needs a full Qt app,
+    engines and a real event loop to drive, so the call is checked in the
+    source of the rebuild path rather than by running it."""
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "vrcc" / "app.py").read_text(
+        encoding="utf-8"
+    )
+    rebuilds = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef) and node.name == "rebuild_main_window"
+    ]
+    assert len(rebuilds) == 1, "rebuild_main_window moved or was renamed"
+    calls = [
+        node.func.attr
+        for node in ast.walk(rebuilds[0])
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    ]
+    assert "set_window" in calls
+
+
 def test_panel_follows_a_ui_language_change_with_no_row_moving(qapp, tmp_path):
     """The rebuild this controller exists to survive is the one a UI-language
     change performs, and nothing else retranslates the panel afterwards.

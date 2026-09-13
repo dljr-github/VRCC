@@ -446,6 +446,7 @@ def run(
         nonlocal window
         apply_ui_language(app, store.config.gui.ui_language)
         window = _swap_main_window(window, make_window, detector, live_apply.mute)
+        setup_check.set_window(window)
 
     # Run the driver-floor check before the loader (its flag drives resolve()'s
     # CPU fallback) but after the window subscribes to the bridge, so a
