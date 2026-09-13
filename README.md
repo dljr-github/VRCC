@@ -2,16 +2,8 @@
 
 Speak into your microphone and your words appear in the VRChat chatbox as
 live captions, with translations into up to three languages underneath.
-Everything runs locally: speech recognition via
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper), NVIDIA's
-[Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
-(run as an ONNX export via [onnx-asr](https://github.com/istupakov/onnx-asr))
-for European languages, or
-[SenseVoice-Small](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
-for Chinese, Japanese, Korean and English (available, not recommended); and
-machine translation via
-[CTranslate2](https://github.com/OpenNMT/CTranslate2)
-(NLLB / M2M100 / MADLAD models). No cloud services, no API keys.
+Everything runs on your own Windows 10 or 11 PC. No cloud services, no
+API keys.
 
 ```
 You say:   "Hello, how are you today?"
@@ -27,54 +19,94 @@ need them.
 
 ![VRCC walkthrough](assets/walkthrough.gif)
 
-## Setup
+<a id="setup"></a>
 
-**Other languages:** [简体中文](#setup-zh) · [日本語](#setup-ja) · [한국어](#setup-ko)
+## Get VRCC running
 
-Getting VRCC running takes about five minutes, plus a one-time model
-download. There's no Python to install and no API keys — everything runs
-locally on Windows 10 or 11.
+Also in [简体中文](#setup-zh), [日本語](#setup-ja), [한국어](#setup-ko).
 
-1. **Check your hardware.** VRCC runs on any Windows 10/11 PC.
-   - **NVIDIA GPU with 8 GB of VRAM or more** (driver 570 or newer): use
-     the CUDA build. Captions run on the card and appear almost at once.
-   - **Anything else**, including an NVIDIA card under 8 GB, AMD or Intel
-     graphics, and PCs with no GPU: use the CPU build. Captions are
-     identical, just a moment slower.
+This takes about five minutes, plus a one-time model download. There is no
+Python to install and no API keys to find; everything runs locally on
+Windows 10 or 11.
 
-2. **Download the build for your hardware.** From the
-   [latest release](https://github.com/dljr-github/VRCC/releases/latest),
-   download the zip that matches:
-   - `VRCC-cuda-windows-x64` — for NVIDIA GPUs with 8 GB of VRAM or
-     more. Falls back to CPU automatically if no usable GPU is found.
-   - `VRCC-windows-x64` — the smaller, CPU-only download, and the one
-     to take on a card under 8 GB.
+<a id="download"></a>
 
-3. **Unzip and run `VRCC.exe`.** Unzip the folder anywhere and
-   double-click **`VRCC.exe`**. There's nothing to install.
+1. Open the Releases page. The ready-to-run program is not on the repository
+   page you land on first. It sits behind
+   [Releases](https://github.com/dljr-github/VRCC/releases/latest). That link
+   goes straight to the newest one. You will see a version number, the
+   release notes, and at the bottom a list headed **Assets**. The files live
+   in there.
 
-4. **Let the first-run wizard download the models.** The first time you
-   launch VRCC, a wizard checks your machine and picks a speech-to-text
-   model and a translation model for you (a ~1–3 GB download), then
-   fetches them. You can switch the run device or the models before it
-   starts. This only happens once.
+   The last two entries under Assets, "Source code (zip)" and "Source code
+   (tar.gz)", are VRCC's own code rather than the program. Skip both. The two
+   you are choosing between are named `VRCC-cuda-windows-x64` and
+   `VRCC-windows-x64`, each followed by the version number.
 
-5. **Enable OSC in VRChat.** In VRChat, open
-   **Action menu → Options → OSC → Enabled**. VRCC sends captions to
-   VRChat over OSC (default address `127.0.0.1:9000`); without this, they
-   won't reach the chatbox.
+2. Take the zip that suits your PC. `VRCC-cuda-windows-x64` is the CUDA
+   build, for an NVIDIA graphics card with 8 GB of VRAM or more on driver
+   570 or newer. Captions are worked out on the card and appear almost at
+   once. `VRCC-windows-x64` is the CPU build. It is a much smaller download
+   and the one to take on an NVIDIA card under 8 GB, on AMD or Intel
+   graphics, and on a PC with no graphics card at all. Captions are
+   identical, just a moment slower, and the default models are sized to keep
+   up on CPU.
 
-6. **Choose your microphone and languages.** In VRCC, pick your
-   **microphone**, your **source language** (the one you speak), and up to
-   **three target languages** to translate into.
+   To see what you have, press Ctrl+Shift+Esc for Task Manager, open the
+   **Performance** tab and click **GPU**. The card's name, its dedicated
+   memory and the driver version are all on that page. If you would rather
+   not look, take the CUDA zip. It is the bigger download, but it runs on the
+   processor by itself when it finds no card it can use.
 
-7. **Start talking.** Your words appear in the VRChat chatbox as live
-   captions, with the translations underneath. You can also type into the
-   box at the bottom of the window to send text the same way.
+   GPU acceleration covers NVIDIA cards only for now, because there is no AMD
+   hardware here to test on.
+
+3. Unblock the zip, then unpack it. Right-click the file you downloaded and
+   choose **Properties**, at the bottom of the menu. If there is an
+   **Unblock** tickbox near the bottom of the General tab, tick it and click
+   OK. Windows marks files that came from the internet, and clearing the mark
+   here also saves you the warning in the next step.
+
+   Then right-click the zip again and choose **Extract All**. Explorer shows
+   a zip as though it were a folder, but starting the program from in there
+   hands Windows one file out of the middle of it and it will not run. Pick
+   somewhere like Documents and you get a VRCC folder with `VRCC.exe` inside.
+   Keep that folder together and put it wherever you like. There is nothing
+   to install.
+
+4. Run `VRCC.exe`. Double-click it in the folder you just extracted. Windows
+   may put up a blue box headed "Windows protected your PC". Click
+   **More info**, the small link under the message, then the **Run anyway**
+   button that appears. VRCC is not code signed, so Windows shows this for a
+   program it has not seen much of. That box is worth clicking through for
+   the file you took from the Releases page above, and it is not advice to
+   click through it anywhere else. If you ticked Unblock a moment ago, it
+   may not appear at all.
+
+5. Let the first-run wizard download the models. The first time you launch
+   VRCC, a wizard checks your machine and picks a speech-to-text model and a
+   translation model for you (about 1 to 3 GB to fetch), then downloads them.
+   You can switch the run device or the models before it starts. This only
+   happens once. [First run](#first-run) has the table of what it picks and
+   why.
+
+6. Enable OSC in VRChat. Open **Action menu → Options → OSC → Enabled**.
+   VRCC sends captions to VRChat over OSC (default address
+   `127.0.0.1:9000`); without this, they won't reach the chatbox.
+
+7. Choose your microphone and languages. In VRCC, pick your **microphone**,
+   your **source language** (the one you speak), and up to **three target
+   languages** to translate into.
+
+8. Start talking. Your words appear in the VRChat chatbox as live captions,
+   with the translations underneath. You can also type into the box at the
+   bottom of the window to send text the same way.
 
 Later, open **Settings** to change the interface language, swap models, or
-switch between Speed and Quality modes. Building from source is for
-developers only — see [DEVELOPING.md](DEVELOPING.md).
+switch between Speed and Quality modes. [Usage](#usage) covers the rest of
+what VRCC does day to day, and [Troubleshooting](#troubleshooting) is where
+to start if captions never turn up. Building from source is for developers
+who want to contribute (see [DEVELOPING.md](DEVELOPING.md)).
 
 <a id="setup-zh"></a>
 <details>
@@ -171,26 +203,22 @@ VRCC를 실행하기까지는 약 5분과 한 번만 받으면 되는 모델 다
 
 </details>
 
-## Download
+## What runs on your machine
 
-From the [latest release](https://github.com/dljr-github/VRCC/releases/latest),
-grab the zip that matches your hardware, unzip it anywhere, and run
-`VRCC.exe`. Windows 10/11; no Python setup needed. The first-run wizard
-downloads the models for you.
+Your voice never leaves your PC. There is no cloud service behind VRCC and
+no API key to paste in.
 
-- The CUDA zip (its name starts with `VRCC-cuda-windows-x64`) for PCs
-  with an NVIDIA GPU that has 8 GB of VRAM or more (driver 570 or
-  newer). Captions run on the card and are near-instant. It falls back
-  to CPU by itself when no usable GPU is found.
-- The CPU zip (`VRCC-windows-x64`) is a much smaller download, and the
-  one to take on an NVIDIA card under 8 GB. Captions are identical,
-  just a moment slower; the default models are sized to keep up on CPU.
-
-GPU acceleration only supports NVIDIA cards at the moment (no AMD hardware
-to test on). On AMD or Intel graphics, use the CPU build.
-
-Installing from source is only for developers who want to contribute; see
-[DEVELOPING.md](DEVELOPING.md).
+Speech recognition runs through
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper), or NVIDIA's
+[Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
+(run as an ONNX export via [onnx-asr](https://github.com/istupakov/onnx-asr))
+for European languages, or
+[SenseVoice-Small](https://huggingface.co/FunAudioLLM/SenseVoiceSmall) for
+Chinese, Japanese, Korean and English, which is available but not
+recommended. Machine translation runs through
+[CTranslate2](https://github.com/OpenNMT/CTranslate2), with the NLLB, M2M100
+and MADLAD models. The wizard picks from these on your behalf, and
+[Picking a model](#picking-a-model) has the measurements behind the choice.
 
 ## First run
 
@@ -372,6 +400,29 @@ are kept. When reporting a problem, attach the newest file from that folder.
 
 Run with `--portable` to keep config, models and logs in the application's
 own directory instead (handy on a USB stick or for isolated installs).
+
+## Updating
+
+VRCC looks for a newer release when it starts, and puts up a notice if it
+finds one. The notice has a button that opens the release page in your
+browser. Nothing is downloaded or swapped for you, so updating is the same
+few steps as the first time: take the new zip, unblock it, extract it, and
+run `VRCC.exe` from the new folder.
+
+Your settings and your downloaded models do not live in the application
+folder (see the table above), so they carry over by themselves. The models
+are not fetched a second time and the first-run wizard does not reappear.
+You can keep the old folder until you are happy, then delete it.
+
+If you would rather not be told, open **Settings** and go to the
+**Advanced / Power users** page, then untick **Tell me when a new version
+is available**.
+
+A portable install works the other way round. Under `--portable` the
+config, models and logs all sit in the application's own folder, so
+replacing that folder throws them away. Copy `config.json` and the `models`
+folder into the new one first, or unpack the new build over the top of the
+old.
 
 ## Model licenses
 
