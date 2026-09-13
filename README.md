@@ -36,18 +36,19 @@ download. There's no Python to install and no API keys — everything runs
 locally on Windows 10 or 11.
 
 1. **Check your hardware.** VRCC runs on any Windows 10/11 PC.
-   - **NVIDIA GPU** (driver 570 or newer): use the CUDA build. With 8 GB
-     of VRAM or more, captions run on the card. A smaller card still takes
-     the CUDA build, but captions run on the processor.
-   - **AMD/Intel graphics, or no GPU:** use the CPU build. Captions are
+   - **NVIDIA GPU with 8 GB of VRAM or more** (driver 570 or newer): use
+     the CUDA build. Captions run on the card and appear almost at once.
+   - **Anything else**, including an NVIDIA card under 8 GB, AMD or Intel
+     graphics, and PCs with no GPU: use the CPU build. Captions are
      identical, just a moment slower.
 
 2. **Download the build for your hardware.** From the
    [latest release](https://github.com/dljr-github/VRCC/releases/latest),
    download the zip that matches:
-   - `VRCC-cuda-windows-x64` — for NVIDIA GPUs. Falls back to CPU
-     automatically if no usable GPU is found.
-   - `VRCC-windows-x64` — the smaller, CPU-only download.
+   - `VRCC-cuda-windows-x64` — for NVIDIA GPUs with 8 GB of VRAM or
+     more. Falls back to CPU automatically if no usable GPU is found.
+   - `VRCC-windows-x64` — the smaller, CPU-only download, and the one
+     to take on a card under 8 GB.
 
 3. **Unzip and run `VRCC.exe`.** Unzip the folder anywhere and
    double-click **`VRCC.exe`**. There's nothing to install.
@@ -85,12 +86,12 @@ developers only — see [DEVELOPING.md](DEVELOPING.md).
 Python，也不需要 API 密钥——所有功能都在本地的 Windows 10 或 11 上运行。
 
 1. **确认你的硬件。** VRCC 可在任何 Windows 10/11 电脑上运行。
-   - **NVIDIA GPU**（驱动 570 或更新版本）：显存 8 GB 及以上时使用 CUDA 版本，字幕几乎即时显示；显存较小的显卡仍应使用 CUDA 版本，只是字幕改由处理器运行。
-   - **AMD/Intel 显卡，或没有 GPU：**使用 CPU 版本。字幕内容完全相同，只是稍慢一点。
+   - **显存 8 GB 及以上的 NVIDIA GPU**（驱动 570 或更新版本）：使用 CUDA 版本。字幕由显卡处理，几乎即时显示。
+   - **其他情况**，包括显存不足 8 GB 的 NVIDIA 显卡、AMD/Intel 显卡，以及没有 GPU 的电脑：使用 CPU 版本。字幕内容完全相同，只是稍慢一点。
 
 2. **下载适合你硬件的版本。** 前往[最新发布版本](https://github.com/dljr-github/VRCC/releases/latest)，下载与之匹配的 zip 压缩包：
-   - `VRCC-cuda-windows-x64` —— 适用于 NVIDIA GPU。若未检测到可用的 GPU，会自动回退到 CPU。
-   - `VRCC-windows-x64` —— 体积更小、仅使用 CPU 的版本。
+   - `VRCC-cuda-windows-x64` —— 适用于显存 8 GB 及以上的 NVIDIA GPU。若未检测到可用的 GPU，会自动回退到 CPU。
+   - `VRCC-windows-x64` —— 体积更小、仅使用 CPU 的版本。显存不足 8 GB 的显卡请选择这个。
 
 3. **解压并运行 `VRCC.exe`。** 将文件夹解压到任意位置，然后双击 **`VRCC.exe`**。无需安装。
 
@@ -117,12 +118,12 @@ VRCC を使い始めるのにかかる時間は約5分、これに一度きり�
 すべて Windows 10 または 11 上でローカルに動作します。
 
 1. **ハードウェアを確認します。** VRCC は Windows 10/11 の PC であれば動作します。
-   - **NVIDIA GPU**（ドライバー 570 以降）：VRAM が 8 GB 以上なら CUDA 版を使うと、字幕がほぼ即座に表示されます。それより小さいカードでも CUDA 版を使うべきですが、字幕はプロセッサで処理されます。
-   - **AMD/Intel のグラフィックス、または GPU なし：**CPU 版を使います。字幕の内容は同じで、少し遅くなるだけです。
+   - **VRAM が 8 GB 以上の NVIDIA GPU**（ドライバー 570 以降）：CUDA 版を使います。字幕はグラフィックスカードで処理され、ほぼ即座に表示されます。
+   - **それ以外**（VRAM が 8 GB 未満の NVIDIA カード、AMD/Intel のグラフィックス、GPU なしの PC）：CPU 版を使います。字幕の内容は同じで、少し遅くなるだけです。
 
 2. **お使いのハードウェアに合った版をダウンロードします。** [最新リリース](https://github.com/dljr-github/VRCC/releases/latest)から、環境に合った zip をダウンロードします。
-   - `VRCC-cuda-windows-x64` — NVIDIA GPU 向け。使用可能な GPU が見つからない場合は、自動的に CPU にフォールバックします。
-   - `VRCC-windows-x64` — サイズの小さい、CPU 専用のダウンロードです。
+   - `VRCC-cuda-windows-x64` — VRAM が 8 GB 以上の NVIDIA GPU 向け。使用可能な GPU が見つからない場合は、自動的に CPU にフォールバックします。
+   - `VRCC-windows-x64` — サイズの小さい、CPU 専用のダウンロードです。8 GB 未満のカードではこちらを使います。
 
 3. **解凍して `VRCC.exe` を実行します。** フォルダーを任意の場所に解凍し、**`VRCC.exe`** をダブルクリックします。インストールは不要です。
 
@@ -149,12 +150,12 @@ VRCC를 실행하기까지는 약 5분과 한 번만 받으면 되는 모델 다
 또는 11에서 로컬로 실행됩니다.
 
 1. **하드웨어를 확인하세요.** VRCC는 모든 Windows 10/11 PC에서 실행됩니다.
-   - **NVIDIA GPU**(드라이버 570 이상): VRAM이 8 GB 이상이면 CUDA 버전을 사용할 때 자막이 거의 즉시 표시됩니다. 그보다 작은 카드도 CUDA 버전을 사용해야 하지만, 자막은 프로세서에서 처리됩니다.
-   - **AMD/Intel 그래픽 또는 GPU 없음:** CPU 버전을 사용하세요. 자막 내용은 동일하며, 조금 더 느릴 뿐입니다.
+   - **VRAM이 8 GB 이상인 NVIDIA GPU**(드라이버 570 이상): CUDA 버전을 사용하세요. 자막이 그래픽카드에서 처리되어 거의 즉시 표시됩니다.
+   - **그 외**(VRAM이 8 GB 미만인 NVIDIA 카드, AMD/Intel 그래픽, GPU 없는 PC): CPU 버전을 사용하세요. 자막 내용은 동일하며, 조금 더 느릴 뿐입니다.
 
 2. **하드웨어에 맞는 버전을 다운로드하세요.** [최신 릴리스](https://github.com/dljr-github/VRCC/releases/latest)에서 해당하는 zip 파일을 다운로드합니다.
-   - `VRCC-cuda-windows-x64` — NVIDIA GPU용. 사용할 수 있는 GPU가 없으면 자동으로 CPU로 전환됩니다.
-   - `VRCC-windows-x64` — 용량이 더 작은 CPU 전용 다운로드입니다.
+   - `VRCC-cuda-windows-x64` — VRAM이 8 GB 이상인 NVIDIA GPU용. 사용할 수 있는 GPU가 없으면 자동으로 CPU로 전환됩니다.
+   - `VRCC-windows-x64` — 용량이 더 작은 CPU 전용 다운로드입니다. 8 GB 미만 카드에는 이 버전을 사용하세요.
 
 3. **압축을 풀고 `VRCC.exe`를 실행하세요.** 폴더를 원하는 위치에 압축 해제한 뒤 **`VRCC.exe`**를 더블클릭합니다. 설치할 것은 없습니다.
 
@@ -178,13 +179,12 @@ grab the zip that matches your hardware, unzip it anywhere, and run
 downloads the models for you.
 
 - The CUDA zip (its name starts with `VRCC-cuda-windows-x64`) for PCs
-  with an NVIDIA GPU (driver 570 or newer). With 8 GB of VRAM or more,
-  captions run on the card and are near-instant. A smaller card still
-  takes this build, with captions running on the processor instead, and
-  it falls back to CPU by itself when no usable GPU is found.
-- The CPU zip (`VRCC-windows-x64`) is a much smaller download. Captions
-  are identical, just a moment slower; the default models are sized to
-  keep up on CPU.
+  with an NVIDIA GPU that has 8 GB of VRAM or more (driver 570 or
+  newer). Captions run on the card and are near-instant. It falls back
+  to CPU by itself when no usable GPU is found.
+- The CPU zip (`VRCC-windows-x64`) is a much smaller download, and the
+  one to take on an NVIDIA card under 8 GB. Captions are identical,
+  just a moment slower; the default models are sized to keep up on CPU.
 
 GPU acceleration only supports NVIDIA cards at the moment (no AMD hardware
 to test on). On AMD or Intel graphics, use the CPU build.
