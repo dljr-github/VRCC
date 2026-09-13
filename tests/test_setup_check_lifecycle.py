@@ -26,6 +26,7 @@ from vrcc.core.events import ChatboxSent, EngineStateChanged, MicLevel, VrchatDe
 from vrcc.gui.bridge import BusBridge
 from vrcc.gui.setup_check import start
 from vrcc.gui.window_swap import _swap_main_window
+from vrcc.i18n import tr
 from tests.test_setup_check import (  # noqa: F401 -- shared fixtures/fakes
     _FakeDetector,
     _FakePipeline,
@@ -337,4 +338,39 @@ def test_controller_survives_app_swap_main_window(qapp, tmp_path):
         if fresh is not None:
             fresh.close()
             fresh.deleteLater()
+        bridge.detach()
+
+
+def test_panel_follows_a_ui_language_change_with_no_row_moving(qapp, tmp_path):
+    """The rebuild this controller exists to survive is the one a UI-language
+    change performs, and nothing else retranslates the panel afterwards.
+    Caching the applied text on the evaluated states alone left it in the old
+    language until some row happened to move, which on a stalled setup is
+    never. Asserting the label actually changed as well as matching tr()
+    keeps a catalog missing the key from passing this vacuously."""
+    from vrcc.i18n import current_language, set_language
+
+    restore = current_language()
+    set_language("en")
+    store = _store(tmp_path)
+    bus = EventBus()
+    pipeline = _FakePipeline()
+    bridge = BusBridge(bus)
+    window = _window(bridge, store, pipeline)
+    check = start(bus, store, window, _FakeDetector())
+    try:
+        english = check._panel._headline_labels["model"].text()
+        assert english == "Speech recognition"
+
+        set_language("de")
+        check._recompute()  # no fact changed; only the language did
+
+        german = check._panel._headline_labels["model"].text()
+        assert german == tr("Speech recognition")
+        assert german != english
+    finally:
+        set_language(restore)
+        check.stop()
+        window.close()
+        window.deleteLater()
         bridge.detach()

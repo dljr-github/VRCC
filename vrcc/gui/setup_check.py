@@ -28,6 +28,7 @@ from vrcc.core.events import (
 )
 from vrcc.gui.setup_panel import SetupPanel
 from vrcc.gui.setup_steps import SetupFacts, evaluate, required_passed
+from vrcc.i18n import current_language
 
 # Two facts have no bus event of their own (setup_steps.py's own docstring):
 # Pipeline.set_captioning publishes nothing, and osc.send_to_vrchat is a
@@ -64,7 +65,7 @@ class SetupCheck(QObject):
         self._facts = SetupFacts(vrchat_found=detector.detected)
         self._mic_forwarded = False
         self._heard_forwarded = False
-        self._last_states: dict[str, str] | None = None
+        self._last_applied: tuple[str, dict[str, str]] | None = None
         # Tracked apart from the persisted flag: a flag later reset to False
         # (reopening the check from Settings) while the facts are still all
         # passed must not be flipped straight back to True before the user
@@ -170,9 +171,15 @@ class SetupCheck(QObject):
         self._facts.captioning = self._pipeline.captioning_enabled
         self._facts.send_enabled = self._store.config.osc.send_to_vrchat
 
+        # The language belongs in the cache key, not just the states: row_text
+        # resolves through tr() at apply() time, and a UI-language change
+        # rebuilds the main window while this controller survives it, so a
+        # states-only key leaves the panel in the old language until some row
+        # happens to move.
         states = evaluate(self._facts)
-        if states != self._last_states:
-            self._last_states = states
+        key = (current_language(), states)
+        if key != self._last_applied:
+            self._last_applied = key
             self._panel.apply(states)
 
         now_passed = required_passed(self._facts)
