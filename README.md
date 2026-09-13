@@ -180,7 +180,9 @@ up, because OSC never confirms that a message got through, and it drops out of
 what the panel requires whenever sending to VRChat is switched off. The panel
 stops opening on later launches once every row it still requires has passed.
 Closing it before then dismisses it for that session only, and it is back on
-the next start; Settings, on the Simple page, brings it back at any time.
+the next start. Its own **Don't show this again** button dismisses it for
+good instead, whether or not every row has passed. Settings, on the Simple
+page, brings it back either way.
 
 ## Usage
 
@@ -388,8 +390,9 @@ downloads; check that a model's license fits your use:
   last, so the taskbar button is where to look.
 - **Setup steps don't reappear**: closing the panel dismisses it for that
   session, and it opens again next start unless the rows it requires have
-  passed. To get it back straight away, open **Settings → Simple** and use
-  **Bring back the setup steps**.
+  passed. Its own **Don't show this again** button dismisses it for good
+  instead. Either way, open **Settings → Simple** and use **Bring back the
+  setup steps** to get it back.
 
 ## Developing
 
