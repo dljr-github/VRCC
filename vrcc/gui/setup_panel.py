@@ -15,13 +15,14 @@ the user is doing in VRChat or the main window.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from vrcc.gui.icons import alert_svg, circle_svg, tick_svg
 from vrcc.gui.setup_steps import ROWS, row_text
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.gui.widgets import Card, svg_pixmap
+from vrcc.i18n import tr
 
 # The product name, not a phrase that needs a catalog entry in every
 # language: the same choice boot_panel.py makes for the same reason.
@@ -37,10 +38,16 @@ _GAP = 8
 
 class SetupPanel(QWidget):
     """Six rows, each showing `row_text`'s headline and detail for whatever
-    state `apply()` last gave it. `close_panel()` is the teardown callers
-    use; `QWidget.close()` is left alone, since nothing here holds this
-    panel and a BootPanel interchangeably (boot.py's reporter does, which is
-    why BootPanel carries a close() override and this does not)."""
+    state `apply()` last gave it, plus a footer button that reports a
+    permanent dismiss. `close_panel()` is the teardown callers use;
+    `QWidget.close()` is left alone, since nothing here holds this panel and
+    a BootPanel interchangeably (boot.py's reporter does, which is why
+    BootPanel carries a close() override and this does not)."""
+
+    # Reports the click only; this widget holds no ConfigStore and decides
+    # nothing about when the flag is written or the panel reopens, the same
+    # separation apply() keeps from setup_steps.evaluate.
+    dismiss_forever = Signal()
 
     def __init__(self, theme: str = "dark", parent=None) -> None:
         super().__init__(parent, Qt.WindowType.Tool)
@@ -63,6 +70,8 @@ class SetupPanel(QWidget):
 
         for row_id in ROWS:
             card.body.addLayout(self._build_row(row_id, p))
+
+        card.body.addLayout(self._build_dismiss_row())
 
         # apply() has not been called yet at this point; every row starts
         # pending rather than blank, so the panel never shows empty labels.
@@ -92,6 +101,19 @@ class SetupPanel(QWidget):
 
         self._headline_labels[row_id] = headline
         self._detail_labels[row_id] = detail
+        return row
+
+    def _build_dismiss_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addStretch(1)
+        button = QPushButton(tr("Don't show this again"))
+        # Honest counterpart to a button that otherwise reads as permanent:
+        # nothing here can promise silence forever, only that Settings has
+        # a way back in.
+        button.setToolTip(tr("You can bring the setup steps back from Settings."))
+        button.clicked.connect(self.dismiss_forever.emit)
+        self._dismiss_button = button
+        row.addWidget(button)
         return row
 
     def apply(self, states: dict[str, str]) -> None:

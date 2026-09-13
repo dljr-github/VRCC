@@ -84,6 +84,8 @@ class SetupCheck(QObject):
         # below, which is the same path a later request takes.
         self._reshow_pending = not store.config.gui.setup_check_done
 
+        self._panel.dismiss_forever.connect(self._on_dismiss_forever)
+
         # Qt's queued auto-connection hops a worker-thread emit onto this
         # object's own (GUI) thread, the same mechanism BusBridge relies on.
         self._event.connect(self._on_event)
@@ -189,6 +191,19 @@ class SetupCheck(QObject):
                 self._store.config.gui.setup_check_done = True
                 self._store.save_soon()
         self._was_required_passed = now_passed
+
+    def _on_dismiss_forever(self) -> None:
+        """Writes the flag straight away rather than through the request
+        counter: that counter only ever asks this controller to show the
+        panel, never to keep it away, and a fresh launch reads the flag
+        directly (`_reshow_pending` above) so nothing else needs to change
+        for this to stick. Written before `_recompute` runs again, so its
+        `if not ...setup_check_done` guard already sees the flag set and
+        never writes it a second time even if the required rows pass later
+        in the same session."""
+        self._store.config.gui.setup_check_done = True
+        self._store.save_soon()
+        self._panel.close_panel()
 
     def set_window(self, window) -> None:
         """Adopt the main window a rebuild just created, so the next show
