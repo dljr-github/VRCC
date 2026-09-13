@@ -239,13 +239,14 @@ your voice reaching VRCC, VRChat turning up on the network, and a caption going
 out over OSC, plus an optional row for reading other people's speech that never
 blocks the rest. The VRChat row only proves its OSC service advertised itself
 over mDNS, not that anything reached the game, so a network that blocks mDNS
-can leave it amber while VRChat runs fine, and the way past that is to dismiss
-the panel. The caption row is evidence in the other direction. It proves a
-caption was sent, not that VRChat picked it up, because OSC never confirms that
-a message got through, and it drops out of what the panel requires whenever
-sending to VRChat is switched off. The panel stops opening on later launches
-once every row it still requires has passed. Closing it early only dismisses
-it for that session, and Settings, on the Simple page, brings it back.
+can leave the row unticked while VRChat runs fine, and the way past that is to
+dismiss the panel. The caption row is evidence in the other direction. It
+proves a caption was sent, not that VRChat picked it up, because OSC never
+confirms that a message got through, and it drops out of what the panel
+requires whenever sending to VRChat is switched off. The panel stops opening
+on later launches once every row it still requires has passed. Closing it
+early only dismisses it for that session, and Settings, on the Simple page,
+brings it back.
 
 ## Usage
 
