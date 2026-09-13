@@ -4,8 +4,8 @@ A separate top level, not a child of the main window's central column. That
 column's height and width are pinned by tests/test_caption_feed.py and
 tests/test_main_window_ui.py, so grafting rows onto it would move numbers
 those tests own. This widget holds no `SetupFacts` and runs none of the row
-logic itself; a later controller owns the facts and calls `apply()` with
-whatever `evaluate()` returns whenever the bus reports something new.
+logic itself; `setup_check.SetupCheck` owns the facts and calls `apply()`
+with whatever `evaluate()` returns whenever the bus reports something new.
 
 Built as a tool window, not a dialog: `Qt.WindowType.Tool` keeps it off the
 taskbar and floating above the app it reports on, and

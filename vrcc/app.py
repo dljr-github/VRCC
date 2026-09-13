@@ -459,8 +459,8 @@ def run(
     )
     loader.start()
 
-    # Passively watch for VRChat's OSCQuery service so the UI can tell the user
-    # whether the chatbox is actually reachable (OSC has no delivery ack).
+    # Passively watch for VRChat's OSCQuery service. All the UI can say from it
+    # is that VRChat advertised itself; OSC itself has no delivery ack at all.
     detector = VrchatDetector(bus)
     setup_check = start_setup_check(bus, store, window, detector)
     detector.start()

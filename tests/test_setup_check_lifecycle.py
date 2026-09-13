@@ -100,8 +100,8 @@ def test_completion_sets_and_persists_the_flag_exactly_once(qapp, tmp_path, monk
 
 
 def test_reset_flag_does_not_flip_back_while_facts_stay_passed(qapp, tmp_path, monkeypatch):
-    """A later task reopens the check from Settings by resetting
-    gui.setup_check_done to False, and the common case for doing that is
+    """Settings reopens the check by resetting gui.setup_check_done to
+    False alongside its request, and the common case for doing that is
     "already finished, I just want to see it again": the facts are still all
     passed. A level-triggered completion check (write whenever
     required_passed(facts) holds) would flip the flag straight back to True

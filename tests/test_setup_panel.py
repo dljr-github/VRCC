@@ -95,8 +95,8 @@ def test_apply_covers_every_state_a_row_can_reach(panel):
 
 
 def test_apply_treats_a_missing_row_as_pending(panel):
-    """A caller mid-migration handing a partial dict must get a panel that
-    still draws every row, not a KeyError."""
+    """A caller handing a partial dict must get a panel that still draws
+    every row, not a KeyError."""
     panel.apply({})
     for row_id in ROWS:
         _, detail = row_text(row_id, "pending")
