@@ -261,9 +261,30 @@ def test_module_imports_no_qt():
 # -- copy guard -----------------------------------------------------------
 
 _BANNED_DASH_CHARS = ("—", "–", "―")  # em dash, en dash, horizontal bar
-_BANNED_WORDS = re.compile(
-    r"\b(arrived|arrives|received|delivered|connected|confirmed)\b", re.IGNORECASE
+# Stems, not whole words. OSC is fire-and-forget UDP with no delivery ack and
+# an mDNS advert proves only that a service announced itself, so no row may
+# claim a caption got anywhere. A whole-word list let "reachable", "linked"
+# and every other inflection straight through; the leading \b stays so the
+# stem has to start a word ("recognition" and "picked" are not overclaims).
+_BANNED_STEMS = re.compile(
+    r"\b(arriv|connect|confirm|deliver|link|reach|receiv)", re.IGNORECASE
 )
+
+
+def test_the_copy_guard_catches_the_words_it_exists_for():
+    """The guard itself, since a pattern that matches nothing would let every
+    string below pass. Inflections, not just the bare stems."""
+    for overclaim in (
+        "It arrived in VRChat.",
+        "Connected to VRChat.",
+        "We confirmed VRChat got it.",
+        "Delivered to the chatbox.",
+        "Linked to VRChat.",
+        "VRChat is reachable.",
+        "VRChat reached us.",
+        "Received by VRChat.",
+    ):
+        assert _BANNED_STEMS.search(overclaim), overclaim
 
 
 def test_copy_guard_over_every_tr_noop_string():
@@ -272,4 +293,4 @@ def test_copy_guard_over_every_tr_noop_string():
     assert len(strings) >= 20, "expected the row labels and per-state detail strings"
     for text in strings:
         assert not any(ch in text for ch in _BANNED_DASH_CHARS), text
-        assert not _BANNED_WORDS.search(text), text
+        assert not _BANNED_STEMS.search(text), text
