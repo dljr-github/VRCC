@@ -243,9 +243,9 @@ can leave it amber while VRChat runs fine, and the way past that is to dismiss
 the panel. The caption row is evidence in the other direction. It proves a
 caption was sent, not that VRChat picked it up, because OSC never confirms that
 a message got through, and it drops out of what the panel requires whenever
-sending to VRChat is switched off. The panel stops appearing once every row it
-still requires has passed; closing it early only dismisses it for that session,
-and Settings, on the Simple page, brings it back.
+sending to VRChat is switched off. The panel stops opening on later launches
+once every row it still requires has passed. Closing it early only dismisses
+it for that session, and Settings, on the Simple page, brings it back.
 
 ## Usage
 
