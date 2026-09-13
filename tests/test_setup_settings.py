@@ -12,9 +12,12 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtWidgets import QApplication
 
+import vrcc.gui.settings_simple
 from vrcc.core.config import ConfigStore, default_paths
 from vrcc.gui.settings import SettingsDialog
 
@@ -71,13 +74,31 @@ def test_every_press_records_a_fresh_request(qapp, tmp_path, monkeypatch):
         dlg.deleteLater()
 
 
-def test_button_does_not_import_or_touch_the_panel_controller():
-    # The design is deliberately a flag flip, not a wired-through reopen call:
-    # settings_simple must not know the setup check module exists.
-    import vrcc.gui.settings_simple as mod
+def test_the_button_is_a_config_write_not_a_controller_call(qapp, tmp_path, monkeypatch):
+    """The design is deliberately a config write, not a wired-through reopen
+    call: settings_simple must not know the setup check modules exist. The
+    press still has to land with nothing whatsoever listening, which is the
+    half an "these two names are absent from the module" assertion could not
+    see (an empty module passes that)."""
+    import ast
 
-    assert "setup_check" not in vars(mod)
-    assert "setup_panel" not in vars(mod)
+    dlg, store = _dlg(tmp_path)
+    monkeypatch.setattr(store, "save_soon", lambda: None)
+    try:
+        dlg._show_setup_btn.click()
+        assert store.config.gui.setup_check_requests == 1
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+    source = Path(vrcc.gui.settings_simple.__file__).read_text(encoding="utf-8")
+    imported = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imported += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            imported += [(node.module or "")] + [alias.name for alias in node.names]
+    assert not [name for name in imported if "setup_check" in name or "setup_panel" in name]
 
 
 def test_button_label_and_tooltip_are_set(qapp, tmp_path):

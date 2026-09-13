@@ -37,10 +37,10 @@ _GAP = 8
 
 class SetupPanel(QWidget):
     """Six rows, each showing `row_text`'s headline and detail for whatever
-    state `apply()` last gave it. `close_panel()` is the real teardown;
-    `close()` only forwards to it, because `QWidget.close()` already carries
-    its own meaning and a caller holding either this panel or a BootPanel
-    needs to call close() without knowing which one it has."""
+    state `apply()` last gave it. `close_panel()` is the teardown callers
+    use; `QWidget.close()` is left alone, since nothing here holds this
+    panel and a BootPanel interchangeably (boot.py's reporter does, which is
+    why BootPanel carries a close() override and this does not)."""
 
     def __init__(self, theme: str = "dark", parent=None) -> None:
         super().__init__(parent, Qt.WindowType.Tool)
@@ -158,6 +158,3 @@ class SetupPanel(QWidget):
     def close_panel(self) -> None:
         """Hide the panel. Safe to call twice."""
         self.hide()
-
-    def close(self) -> None:
-        self.close_panel()

@@ -1,4 +1,4 @@
-"""The setup check evaluator: every row in every reachable state, four traps
+"""The setup check evaluator: every row in every reachable state, the traps
 in the bus events that back it, and a copy guard over every tr_noop string
 the module defines.
 """
@@ -86,14 +86,11 @@ def test_model_failed_is_attention():
 # -- voice --------------------------------------------------------------
 
 
-def test_voice_row_is_not_satisfied_by_typed_text():
-    """Typed text publishes PhraseRecognized with a negative utterance_id,
-    bypassing captioning and mute gating. Without the filter a user passes this
-    row by typing into the compose box without ever speaking. captioning=True
-    puts the ladder past its first branch so this actually reaches the
-    mic_seen check the test is named for, rather than returning early."""
-    facts = SetupFacts(captioning=True, mic_seen=True, spoken_utterance=False)
-    assert evaluate(facts)["voice"] != "pass"
+# The typed-text filter the voice row depends on is not in this module: the
+# evaluator only ever sees spoken_utterance, and the utterance_id > 0 check
+# that sets it lives in setup_check._on_event. Its test lives there too
+# (test_setup_check.test_typed_send_does_not_satisfy_voice_or_chatbox_rows),
+# where removing the check actually fails something.
 
 
 def test_voice_pending_before_captioning_is_even_on():

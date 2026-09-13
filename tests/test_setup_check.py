@@ -145,7 +145,7 @@ def test_panel_stays_hidden_when_already_done(qapp, tmp_path):
 # -- per-row evidence, and its traps -------------------------------------
 
 
-def test_mic_level_only_ticks_on_real_sound(qapp, tmp_path):
+def test_mic_level_at_zero_rms_does_not_tick_the_row(qapp, tmp_path):
     store = _store(tmp_path)
     bus = EventBus()
     pipeline = _FakePipeline()
@@ -168,8 +168,11 @@ def test_mic_level_only_ticks_on_real_sound(qapp, tmp_path):
 
 
 def test_typed_send_does_not_satisfy_voice_or_chatbox_rows(qapp, tmp_path):
-    # pipeline_typed.py gives a typed Send a NEGATIVE utterance id; a user
-    # must not complete the check by typing rather than speaking.
+    # The home of the typed-text filter: _on_event's utterance_id > 0 check,
+    # not the evaluator, which only ever sees the already-filtered fields.
+    # pipeline_typed.py gives a typed Send a NEGATIVE utterance id, and a
+    # user must not complete the check by typing rather than speaking, so
+    # dropping that check flips both facts below to True.
     store = _store(tmp_path)
     bus = EventBus()
     pipeline = _FakePipeline()

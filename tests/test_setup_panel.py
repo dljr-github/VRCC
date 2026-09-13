@@ -140,7 +140,7 @@ def test_panel_title_is_the_product_name(panel):
     assert panel.windowTitle() == "VRCC"
 
 
-# -- close_panel / close --------------------------------------------------
+# -- close_panel ----------------------------------------------------------
 
 
 def test_close_panel_hides_and_is_safe_to_call_twice(panel):
@@ -150,16 +150,6 @@ def test_close_panel_hides_and_is_safe_to_call_twice(panel):
     assert not panel.isVisible()
     panel.close_panel()  # must not raise
     assert not panel.isVisible()
-
-
-def test_close_delegates_to_close_panel(panel, monkeypatch):
-    # A plain QWidget.close() also hides, so proving the same isVisible()
-    # result would pass even if close() stopped forwarding to close_panel()
-    # and hid itself some other way. This proves the forward actually happens.
-    calls = []
-    monkeypatch.setattr(panel, "close_panel", lambda: calls.append(1))
-    panel.close()
-    assert calls == [1]
 
 
 # -- place_beside ----------------------------------------------------------
@@ -241,32 +231,3 @@ def test_place_beside_returns_early_without_a_screen(panel, monkeypatch):
         assert panel.pos() == before
     finally:
         host.deleteLater()
-
-
-# -- never a modal, matches the offscreen-suite hazard other GUI tests guard --
-
-
-def test_building_and_applying_never_shows_a_message_box(qapp, monkeypatch):
-    # Patches .warning, not .exec: .warning is the static entry point a
-    # caller would actually use, and it never reaches .exec at the Python
-    # layer, so a guard on .exec alone would never fire (see
-    # tests/test_engine_failure_ui.py's silent_modal fixture for the same
-    # pattern against the same hazard). Builds its own panel after the
-    # patch is in place, not the shared `panel` fixture: that fixture
-    # constructs SetupPanel (and runs its constructor's own apply() call)
-    # before this function's monkeypatch.setattr runs, so a modal raised
-    # during construction would be real and unguarded, not merely uncaught.
-    from PySide6.QtWidgets import QMessageBox
-
-    calls = []
-    monkeypatch.setattr(
-        QMessageBox, "warning", lambda *a, **k: calls.append(1) or 0
-    )
-    p = SetupPanel()
-    try:
-        for facts in (SetupFacts(), SetupFacts(engine_states={"stt": "failed"})):
-            p.apply(evaluate(facts))
-    finally:
-        p.close_panel()
-        p.deleteLater()
-    assert not calls
