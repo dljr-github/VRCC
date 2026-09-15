@@ -145,6 +145,14 @@ def _build_my_captions(dlg: "SettingsDialog", form: QFormLayout) -> None:
     dlg._translate_check.toggled.connect(dlg._on_translate_toggled)
     form.addRow(dlg._translate_check)
 
+    dlg._pinyin_check = QCheckBox(tr("Add pinyin to Chinese translations"))
+    dlg._pinyin_check.setChecked(dlg._cfg.translate.pinyin)
+    dlg._pinyin_check.setToolTip(
+        tr("Show a pinyin reading line under each Chinese translation.")
+    )
+    dlg._bind_checkbox(dlg._pinyin_check, dlg._cfg.translate, "pinyin")
+    form.addRow(dlg._pinyin_check)
+
     dlg._include_original_check = QCheckBox(tr("Show my original words in the chatbox"))
     dlg._include_original_check.setChecked(dlg._cfg.osc.include_original)
     dlg._include_original_check.setToolTip(

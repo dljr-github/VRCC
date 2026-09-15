@@ -56,6 +56,7 @@ from vrcc.core.languages import LANGUAGES, get  # noqa: E402
 from vrcc.download.manager import DownloadManager  # noqa: E402
 from vrcc.osc.chatbox import ChatboxSender, format_message  # noqa: E402
 from vrcc.stt.engine import SttEngine  # noqa: E402
+from vrcc.translate import pinyin  # noqa: E402
 from vrcc.translate.engine import TranslateEngine  # noqa: E402
 from vrcc.translate.registry import MT_MODELS  # noqa: E402
 
@@ -296,6 +297,9 @@ def run_smoke(
                 [target_lang],
             )
             mt_s = time.perf_counter() - t0
+            if mt_cfg.pinyin:
+                # Same annotation step the pipeline applies before publishing.
+                translations = pinyin.annotate(translations)
             for name, text in translations:
                 print(f"[utt {final.utterance_id}] mt {mt_s:.2f}s -> {name}: {text!r}")
 
