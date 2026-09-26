@@ -28,6 +28,7 @@ from vrcc.core.languages import LANGUAGES
 from vrcc.gui import (
     model_prompts,
     settings_audio,
+    settings_language_bias,
     settings_reset,
 )
 from vrcc.gui.model_labels import mt_display_name, whisper_display_name
@@ -111,6 +112,7 @@ def build_voice_page(dlg: "SettingsDialog") -> QWidget:
     dlg._source_combo.currentIndexChanged.connect(on_source)
 
     form.addRow(tr("Spoken language"), dlg._source_combo)
+    settings_language_bias.build_controls(dlg, form)
 
     # Energy gate.
     gate = QCheckBox(tr("Ignore quiet background noise"))

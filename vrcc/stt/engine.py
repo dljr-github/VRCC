@@ -19,6 +19,7 @@ from vrcc.core.config import SttConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.core.hardware import resolve
 from vrcc.core.languages import get
+from vrcc.stt.language_bias import choose_language, preferred_codes
 
 logger = logging.getLogger("vrcc.stt.engine")
 
@@ -176,7 +177,8 @@ class SttEngine:
             # from, unless the user wrote the prompt themselves.
             if not self._cfg.initial_prompt:
                 kwargs["initial_prompt"] = None
-        segments, info = self._run_transcribe(samples, kwargs)
+        preferred = preferred_codes(self._cfg, detect_language)
+        segments, info = self._run_transcribe(samples, kwargs, preferred)
         return self._build_result(segments, info)
 
     # -- internals -------------------------------------------------------------
@@ -245,7 +247,26 @@ class SttEngine:
             return None
         return _SCRIPT_SEED_PROMPTS.get(source.nllb.rpartition("_")[2])
 
-    def _run_transcribe(self, samples: np.ndarray, kwargs: dict):
+    def _transcribe_once(self, samples: np.ndarray, kwargs: dict, preferred: set[str]):
+        segments, info = self._model.transcribe(samples, **kwargs)
+        if preferred and kwargs["language"] is None and not kwargs.get("multilingual"):
+            probabilities = info.all_language_probs
+            # Multi-segment detection can report a majority vote alongside only
+            # the final segment's scores. Those cannot reweight the majority.
+            consistent = (
+                probabilities
+                and max(probabilities, key=lambda p: p[1])[0] == info.language
+            )
+            language = choose_language(probabilities, preferred) if consistent else None
+            if language is not None and language != info.language:
+                # Whisper returns detection info before the lazy segment decode.
+                # Discard that generator so only the chosen language is decoded.
+                segments, info = self._model.transcribe(
+                    samples, **dict(kwargs, language=language)
+                )
+        return list(segments), info
+
+    def _run_transcribe(self, samples: np.ndarray, kwargs: dict, preferred: set[str]):
         """Call ``model.transcribe``, falling back to CPU int8 once when CUDA
         is unusable.
 
@@ -254,14 +275,12 @@ class SttEngine:
         propagates without a ready event.
         """
         try:
-            segments_gen, info = self._model.transcribe(samples, **kwargs)
-            return list(segments_gen), info
+            return self._transcribe_once(samples, kwargs, preferred)
         except RuntimeError as exc:
             if not _is_cuda_unusable(exc):
                 raise
             self._fallback_to_cpu(str(exc))
-            segments_gen, info = self._model.transcribe(samples, **kwargs)
-            segments = list(segments_gen)
+            segments, info = self._transcribe_once(samples, kwargs, preferred)
             self._bus.publish(
                 EngineStateChanged(
                     "stt", "ready", f"{self._device}:{self._compute_type}"

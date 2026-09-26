@@ -62,11 +62,12 @@ class _RowToggleList(QListWidget):
         super().mousePressEvent(event)
 
 
-def build_picker(scale: float, cfg, on_change) -> QListWidget:
+def build_picker(scale: float, cfg, on_change, *, selected_languages=None) -> QListWidget:
     """The checkable language list, pre-ticked from ``cfg``.
 
     The ``itemChanged`` hookup happens *after* pre-ticking, so ``on_change``
     only ever fires on a real user edit and needs no loading guard.
+    ``selected_languages`` overrides config defaults, including an empty list.
     """
     picker = _RowToggleList()
     picker.setSelectionMode(QListWidget.SelectionMode.NoSelection)
@@ -77,7 +78,14 @@ def build_picker(scale: float, cfg, on_change) -> QListWidget:
         item.setCheckState(Qt.CheckState.Unchecked)
         picker.addItem(item)
 
-    _preselect(picker, cfg)
+    if selected_languages is None:
+        _preselect(picker, cfg)
+    else:
+        wanted = set(selected_languages)
+        for i in range(picker.count()):
+            item = picker.item(i)
+            if item.text() in wanted:
+                item.setCheckState(Qt.CheckState.Checked)
     _scroll_to_first_checked(picker)
     picker.itemChanged.connect(lambda _item: on_change())
     return picker
