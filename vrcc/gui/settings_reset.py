@@ -63,7 +63,7 @@ _RESET_FIELDS = {
     "vad": (
         "threshold", "silence_threshold", "speculative_silence_ms",
         "finalize_silence_ms", "min_utterance_ms", "pre_roll_ms",
-        "max_utterance_s", "relative_silence_ratio",
+        "max_utterance_s", "relative_silence_ratio", "speech_start_ms",
     ),
     "audio": (
         "energy_gate_enabled", "energy_threshold",

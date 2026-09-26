@@ -149,7 +149,7 @@ class GuiConfig(BaseModel):
 # Bumped when a stored config needs rewriting rather than just loading.
 # 2: the Speed/Quality mode stopped writing translate.beam_size (see
 # _migrate_profile_written_mt_beam).
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 class AppConfig(BaseModel):

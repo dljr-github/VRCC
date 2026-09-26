@@ -32,7 +32,7 @@ def test_schema_1_profile_written_mt_beam_migrates_to_default(tmp_path, stored):
     )
 
     assert store.config.translate.beam_size == TranslateConfig().beam_size
-    assert store.config.schema_version == 3
+    assert store.config.schema_version == 4
 
 
 def test_schema_1_hand_picked_mt_beam_is_kept(tmp_path):
@@ -108,7 +108,7 @@ def test_schema_2_default_overflow_migrates_to_auto(tmp_path):
 
     assert store.config.osc.overflow == "auto"
     assert store.config.osc.overflow == OscConfig().overflow
-    assert store.config.schema_version == 3
+    assert store.config.schema_version == 4
 
 
 @pytest.mark.parametrize("stored", ["truncate", "send"])

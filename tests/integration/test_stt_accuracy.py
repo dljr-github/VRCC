@@ -48,3 +48,10 @@ def test_onset_first_word_survives(stt):
     assert texts[0].strip().lower().startswith("hello"), (
         f"onset clipped: first finalized transcript is {texts[0]!r}"
     )
+
+
+@pytest.mark.parametrize("gain", [1.0, 0.1, 0.01])
+def test_short_reply_survives_lower_input_gain(stt, gain):
+    texts = finals_text(load_fixture("no.wav") * gain, stt)
+    assert len(texts) == 1
+    assert texts[0].strip().lower().rstrip(".!?") == "no"

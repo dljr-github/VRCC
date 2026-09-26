@@ -51,7 +51,7 @@ class TestMinUtteranceRejection:
         # with the default min_utterance_ms (16 frames) so the finalize
         # threshold is reached long before the utterance is "long enough",
         # isolating the min-utterance guard in behavior 5.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             speculative_silence_ms=32,   # 1 frame
             finalize_silence_ms=64,      # 2 frames
             min_utterance_ms=500,        # 16 frames
@@ -76,7 +76,7 @@ class TestMinUtteranceRejection:
         assert starts4[0].utterance_id == 2
 
     def test_long_enough_utterance_does_emit_final(self):
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             speculative_silence_ms=32,
             finalize_silence_ms=64,
             min_utterance_ms=32,  # 1 frame -- trivially satisfied
@@ -98,7 +98,7 @@ class TestMinUtteranceRejection:
         # threshold while still too short: no SegFinal may fire, but the
         # in-flight speculative MUST be resolved with a SegDiscard so the
         # downstream STT worker drops the job.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             min_utterance_ms=1000,
             finalize_silence_ms=400,
             speculative_silence_ms=350,
@@ -127,7 +127,7 @@ class TestMaxUtteranceForceFinal:
         # max_utterance_s tuned small (11 frames) with continuous speech
         # (no silence at all) so the only possible trigger is the max-
         # duration guard, not the silence-based finalize path.
-        cfg = VadConfig(pre_roll_ms=0, max_utterance_s=11 * 32 / 1000)
+        cfg = VadConfig(speech_start_ms=0, pre_roll_ms=0, max_utterance_s=11 * 32 / 1000)
         vad = ScriptedVad([0.9] * 11)
         seg = Segmenter(cfg, vad)
 
@@ -140,7 +140,7 @@ class TestMaxUtteranceForceFinal:
         assert finals[0].samples.shape[0] == 11 * FRAME
 
     def test_no_force_final_one_frame_before_max(self):
-        cfg = VadConfig(pre_roll_ms=0, max_utterance_s=11 * 32 / 1000)
+        cfg = VadConfig(speech_start_ms=0, pre_roll_ms=0, max_utterance_s=11 * 32 / 1000)
         vad = ScriptedVad([0.9] * 10)
         seg = Segmenter(cfg, vad)
         finals = []
@@ -155,7 +155,7 @@ class TestMaxUtteranceForceFinal:
         # the very IDLE->ACTIVE transition frame, so behavior 6 must force
         # SegFinal in the SAME process() call as SegSpeechStart -- not one
         # frame later (which would overshoot the configured cap).
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             pre_roll_ms=192,                 # 6 frames
             max_utterance_s=5 * 32 / 1000,   # 5 frames
         )
@@ -179,7 +179,7 @@ class TestMaxUtteranceForceFinal:
         # NOT speech) pad the buffer to the max; no speech frame occurred
         # between speculative and final, so the forced SegFinal must reuse the
         # speculative array by identity.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             pre_roll_ms=0,
             speculative_silence_ms=32,   # 1 frame
             finalize_silence_ms=64_000,  # unreachably large
@@ -210,7 +210,7 @@ class TestFrameCopySafety:
         # capture loops reuse one buffer in place. The segmenter must copy
         # each frame it stores, so mutating the caller's buffer after
         # process() returns must not change previously buffered audio.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             pre_roll_ms=0,
             # speculative disabled (unreachably large) so SegFinal is built
             # from the full buffer, not an earlier speculative snapshot.
@@ -243,7 +243,7 @@ class TestFrameCopySafety:
         # idle frames, then speech/silence frames with distinct values; the
         # final buffer must be exactly [idle1, idle2, speech..., silence...]
         # in order.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             pre_roll_ms=64,               # 2 frames
             speculative_silence_ms=64_000,  # disabled: final = full buffer
             finalize_silence_ms=64,       # 2 frames
@@ -268,7 +268,7 @@ class TestFrameCopySafety:
 
 class TestHysteresisDeadBand:
     def test_dead_band_frames_do_not_move_silence_run_while_active(self):
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
         # speech start, 5 silence frames, 3 dead-band frames (between the
         # silence bar and the speech threshold), then 6 more silence frames ->
@@ -296,7 +296,7 @@ class TestHysteresisDeadBand:
         assert spec_at == 2  # 3rd of these frames (0-based index 2)
 
     def test_dead_band_frames_do_not_trigger_speech_start_while_idle(self):
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         db = (min(cfg.silence_threshold, cfg.threshold - MIN_GAP) + cfg.threshold) / 2
         vad = ScriptedVad([db] * 4)
         seg = Segmenter(cfg, vad)
@@ -308,7 +308,7 @@ class TestHysteresisDeadBand:
     def test_vad_exactly_at_threshold_is_speech(self):
         # Boundary: speech is `vad >= threshold`, inclusive. 0.5 is exactly
         # representable in binary floating point, so this is a stable check.
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         vad = ScriptedVad([cfg.threshold])
         seg = Segmenter(cfg, vad)
         events = seg.process(_frame())
@@ -319,7 +319,7 @@ class TestHysteresisDeadBand:
         # min(silence_threshold, threshold - MIN_GAP). Feed the exact same
         # float expression the implementation computes, so the comparison
         # is x < x == False regardless of float representation.
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         boundary = min(cfg.silence_threshold, cfg.threshold - MIN_GAP)
         vad = ScriptedVad([0.9, boundary, boundary, boundary - 1e-6])
         seg = Segmenter(cfg, vad)
@@ -333,10 +333,10 @@ class TestHysteresisDeadBand:
 
 class TestConfigFrameCounts:
     def test_default_config_frame_counts_match_spec(self):
-        seg = Segmenter(VadConfig(), ScriptedVad([]))
+        seg = Segmenter(VadConfig(speech_start_ms=0), ScriptedVad([]))
         assert seg._speculative_frames == 8
         assert seg._finalize_frames == 19
-        assert seg._min_utterance_frames == 16
+        assert seg._min_utterance_frames == 3
         assert seg._preroll_frames == 5
         assert seg._max_utterance_frames == 875
 
@@ -346,7 +346,7 @@ class TestPrerollBound:
         # pre_roll 400ms (13 frames) > speculative_silence 250ms (8 frames):
         # the idle ring must hold the full pre-roll the user asked for so a
         # fresh onset is not clipped.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             pre_roll_ms=400, speculative_silence_ms=250, finalize_silence_ms=800
         )
         seg = Segmenter(cfg, ScriptedVad([]))
@@ -356,20 +356,20 @@ class TestPrerollBound:
         assert seg._preroll.maxlen == 13
 
     def test_preroll_shorter_than_speculative(self):
-        cfg = VadConfig(pre_roll_ms=150, speculative_silence_ms=250)
+        cfg = VadConfig(speech_start_ms=0, pre_roll_ms=150, speculative_silence_ms=250)
         seg = Segmenter(cfg, ScriptedVad([]))
         assert seg._preroll_frames == 5
 
     def test_reconfigure_uses_full_preroll_length(self):
-        seg = Segmenter(VadConfig(), ScriptedVad([]))
-        seg.reconfigure(VadConfig(pre_roll_ms=400, speculative_silence_ms=250))
+        seg = Segmenter(VadConfig(speech_start_ms=0), ScriptedVad([]))
+        seg.reconfigure(VadConfig(speech_start_ms=0, pre_roll_ms=400, speculative_silence_ms=250))
         assert seg._preroll_frames == 13
         assert seg._preroll.maxlen == 13
 
     def test_idle_onset_seed_uses_full_preroll(self):
         # With pre_roll 400ms (13 frames) the idle->speech buffer seed must use
         # up to the full 13 pre-roll frames, not the speculative-window clamp.
-        cfg = VadConfig(pre_roll_ms=400, speculative_silence_ms=250)
+        cfg = VadConfig(speech_start_ms=0, pre_roll_ms=400, speculative_silence_ms=250)
         vad = ScriptedVad([0.1] * 13 + [0.9])
         seg = Segmenter(cfg, vad)
         for _ in range(13):
@@ -392,8 +392,8 @@ class TestReconfigure:
     )
 
     def test_reconfigure_recomputes_every_frame_count(self):
-        seg = Segmenter(VadConfig(), ScriptedVad([]))
-        seg.reconfigure(VadConfig(**self._NEW))
+        seg = Segmenter(VadConfig(speech_start_ms=0), ScriptedVad([]))
+        seg.reconfigure(VadConfig(speech_start_ms=0, **self._NEW))
         assert seg._speculative_frames == 3
         assert seg._finalize_frames == 5
         assert seg._min_utterance_frames == 3
@@ -402,18 +402,18 @@ class TestReconfigure:
 
     def test_reconfigure_updates_cfg_so_threshold_applies(self):
         # Idle before/after; the new (higher) threshold must gate a start.
-        seg = Segmenter(VadConfig(threshold=0.5), ScriptedVad([0.6, 0.9]))
-        seg.reconfigure(VadConfig(threshold=0.8))
+        seg = Segmenter(VadConfig(speech_start_ms=0, threshold=0.5), ScriptedVad([0.6, 0.9]))
+        seg.reconfigure(VadConfig(speech_start_ms=0, threshold=0.8))
         assert seg.cfg.threshold == 0.8
         assert _by_type(seg.process(_frame()), SegSpeechStart) == []  # 0.6 < 0.8
         assert len(_by_type(seg.process(_frame()), SegSpeechStart)) == 1  # 0.9
 
     def test_reconfigure_does_not_disturb_in_flight_utterance(self):
-        seg = Segmenter(VadConfig(pre_roll_ms=0), ScriptedVad([0.9, 0.9]))
+        seg = Segmenter(VadConfig(speech_start_ms=0, pre_roll_ms=0), ScriptedVad([0.9, 0.9]))
         seg.process(_frame())  # speech start: ACTIVE, utterance 1
         seg.process(_frame())  # still speaking
         assert seg._active is True
-        seg.reconfigure(VadConfig(**self._NEW))
+        seg.reconfigure(VadConfig(speech_start_ms=0, **self._NEW))
         # In-flight state is untouched: same utterance, same buffered audio.
         assert seg._active is True
         assert seg._utterance_id == 1
@@ -421,22 +421,22 @@ class TestReconfigure:
         assert len(seg._buffer) == 2
 
     def test_reconfigure_resizes_preroll_ring_only_on_change(self):
-        seg = Segmenter(VadConfig(pre_roll_ms=150), ScriptedVad([]))
+        seg = Segmenter(VadConfig(speech_start_ms=0, pre_roll_ms=150), ScriptedVad([]))
         assert seg._preroll.maxlen == 5
         ring = seg._preroll
         # Same pre_roll_ms: ring object is preserved (accumulated frames kept).
-        seg.reconfigure(VadConfig(pre_roll_ms=150, finalize_silence_ms=800))
+        seg.reconfigure(VadConfig(speech_start_ms=0, pre_roll_ms=150, finalize_silence_ms=800))
         assert seg._preroll is ring
         # Changed pre_roll_ms: ring resized to the new maxlen.
-        seg.reconfigure(VadConfig(pre_roll_ms=96))
+        seg.reconfigure(VadConfig(speech_start_ms=0, pre_roll_ms=96))
         assert seg._preroll.maxlen == 3
 
     def test_reconfigured_timings_take_effect_next_utterance(self):
         # Default finalize is 19 frames; drop it to 2 so one speech + two
         # silence frames finalizes, proving the new timing is live.
-        seg = Segmenter(VadConfig(pre_roll_ms=0), ScriptedVad([0.9, 0.1, 0.1]))
+        seg = Segmenter(VadConfig(speech_start_ms=0, pre_roll_ms=0), ScriptedVad([0.9, 0.1, 0.1]))
         seg.reconfigure(
-            VadConfig(
+            VadConfig(speech_start_ms=0,
                 pre_roll_ms=0,
                 speculative_silence_ms=32,
                 finalize_silence_ms=64,

@@ -28,7 +28,7 @@ def _wait_until(predicate, timeout=2.0, interval=0.01):
 
 def test_app_config_defaults_match_spec():
     cfg = AppConfig()
-    assert cfg.schema_version == 3
+    assert cfg.schema_version == 4
     assert cfg.audio == AudioConfig()
     assert cfg.vad == VadConfig()
     assert cfg.stt == SttConfig()

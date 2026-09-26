@@ -49,9 +49,12 @@ class VadConfig(BaseModel):
     # (lowering the speech threshold) never raises the silence bar and chops
     # words mid-utterance. Clamped below the speech threshold at use.
     silence_threshold: float = 0.25
+    # Consecutive speech evidence before announcing an onset. Audio is kept
+    # from the first candidate frame, independently of pre-roll or mic gain.
+    speech_start_ms: int = Field(default=64, ge=0, le=1000)
     speculative_silence_ms: int = 250
     finalize_silence_ms: int = 600
-    min_utterance_ms: int = 500
+    min_utterance_ms: int = 96
     pre_roll_ms: int = 150
     max_utterance_s: float = 28.0
     # Silero reads speech STRUCTURE, not level: a loud room (six-speaker

@@ -47,7 +47,7 @@ def _by_type(events: list[object], cls: type) -> list[object]:
 class TestSegLevel:
     def test_emitted_every_frame(self):
         vad = ScriptedVad([0.1, 0.2, 0.9, 0.1, 0.05])
-        seg = Segmenter(VadConfig(), vad)
+        seg = Segmenter(VadConfig(speech_start_ms=0), vad)
         all_events = []
         for _ in range(5):
             all_events.append(seg.process(_frame()))
@@ -57,7 +57,7 @@ class TestSegLevel:
 
     def test_rms_and_vad_prob_values(self):
         vad = ScriptedVad([0.42])
-        seg = Segmenter(VadConfig(), vad)
+        seg = Segmenter(VadConfig(speech_start_ms=0), vad)
         events = seg.process(_frame(0.1))
         level = events[0]
         assert isinstance(level, SegLevel)
@@ -66,7 +66,7 @@ class TestSegLevel:
 
     def test_level_is_first_event_even_when_others_fire(self):
         vad = ScriptedVad([0.9])
-        seg = Segmenter(VadConfig(), vad)
+        seg = Segmenter(VadConfig(speech_start_ms=0), vad)
         events = seg.process(_frame())
         assert isinstance(events[0], SegLevel)
         assert isinstance(events[1], SegSpeechStart)
@@ -74,7 +74,7 @@ class TestSegLevel:
 
 class TestSpeechStartAndPreroll:
     def test_speech_start_fires_on_first_speech_frame(self):
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         vad = ScriptedVad([0.1, 0.1, 0.1, 0.9])
         seg = Segmenter(cfg, vad)
         e1 = seg.process(_frame())
@@ -92,7 +92,7 @@ class TestSpeechStartAndPreroll:
         # pre_roll_ms=150 -> 5 frames. Feed 5 silent IDLE frames to fill the
         # ring, then a speech frame; the buffer should start life holding
         # the 5 preroll frames plus the triggering frame itself (6 total).
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         vad = ScriptedVad([0.1] * 5 + [0.9])
         seg = Segmenter(cfg, vad)
         for _ in range(5):
@@ -104,7 +104,7 @@ class TestSpeechStartAndPreroll:
     def test_preroll_ring_caps_at_configured_frames(self):
         # Feed far more than 5 silent frames before speech starts; only the
         # most recent 5 should seed the buffer.
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         vad = ScriptedVad([0.1] * 20 + [0.9])
         seg = Segmenter(cfg, vad)
         for _ in range(20):
@@ -114,7 +114,7 @@ class TestSpeechStartAndPreroll:
 
     def test_no_speech_start_while_never_crossing_threshold(self):
         vad = ScriptedVad([0.1] * 10)
-        seg = Segmenter(VadConfig(), vad)
+        seg = Segmenter(VadConfig(speech_start_ms=0), vad)
         for _ in range(10):
             events = seg.process(_frame())
             assert not _by_type(events, SegSpeechStart)
@@ -124,7 +124,7 @@ class TestSpeechStartAndPreroll:
         # utterance starting right after a finalize is seeded with the
         # trailing frames of the FIRST utterance (real recent audio), not
         # stale pre-first-utterance frames or an empty ring.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             pre_roll_ms=64,                 # 2 frames
             speculative_silence_ms=64_000,  # disabled
             finalize_silence_ms=64,         # 2 frames
@@ -157,7 +157,7 @@ class TestSpeechStartAndPreroll:
         # buffer for the idle frames and mutates it between calls; the
         # pre-roll audio seeded into the utterance must keep the values
         # each frame had AT process() time.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             pre_roll_ms=64,                 # 2 frames
             speculative_silence_ms=64_000,  # disabled
             finalize_silence_ms=64,         # 2 frames
@@ -190,7 +190,7 @@ class TestSpeculativeAndFinalWithIdentity:
     def test_speculative_fires_once_at_8_silence_frames(self):
         # Brief scenario: 20 speech frames, then 8 silence frames ->
         # Speculative at overall frame 28 (250ms ~= 8 frames).
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         probs = [0.9] * 20 + [0.1] * 8
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -218,7 +218,7 @@ class TestSpeculativeAndFinalWithIdentity:
         # Continue: after the speculative at 8 silence frames, 11 more
         # silence frames (total 19) should force SegFinal, reusing the
         # exact speculative array object (behavior 8).
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         probs = [0.9] * 20 + [0.1] * 19
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -248,7 +248,7 @@ class TestSpeculativeAndFinalWithIdentity:
         # (equal frame counts), a speculative would be pointless -- the
         # final is already here. Only SegFinal must be emitted, so the
         # every-speculative-is-resolved invariant holds trivially.
-        cfg = VadConfig(
+        cfg = VadConfig(speech_start_ms=0,
             speculative_silence_ms=64,  # 2 frames
             finalize_silence_ms=64,     # 2 frames
             min_utterance_ms=32,
@@ -268,7 +268,7 @@ class TestSpeculativeAndFinalWithIdentity:
         assert len(finals) == 1
 
     def test_utterance_id_increments_after_final(self):
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         probs = [0.9] * 20 + [0.1] * 19 + [0.9]
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -286,7 +286,7 @@ class TestDiscardOnResume:
         # Brief scenario: speech -> 12 silence (speculative fires at the
         # 8th, 9th-12th are just more silence) -> 5 speech frames -> Discard
         # on the FIRST of those 5 (not repeated).
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         probs = [0.9] * 5 + [0.1] * 12 + [0.9] * 5
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -309,7 +309,7 @@ class TestDiscardOnResume:
     def test_no_discard_if_speech_resumes_before_speculative_threshold(self):
         # Only 5 silence frames (< 8) then speech resumes: no speculative
         # was ever emitted, so no Discard should fire either.
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         probs = [0.9] * 5 + [0.1] * 5 + [0.9] * 5
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -326,7 +326,7 @@ class TestDiscardOnResume:
         # After a discard, a fresh silence run reaching the speculative
         # threshold must build a NEW array (not reuse the pre-discard one),
         # and a subsequent finalize reuses THAT new object.
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         probs = (
             [0.9] * 5      # speech start
             + [0.1] * 12   # speculative #1 at 8th, then more silence
@@ -376,7 +376,7 @@ class TestSilenceDecouple:
         # VadConfig default. At threshold 0.60 a coupled formula would call
         # 0.40 silence; the decoupled bar stays at 0.35, so 0.40 is dead band
         # and the utterance must not finalize even held for 30 frames.
-        cfg = VadConfig(threshold=0.60, silence_threshold=0.35, relative_silence_ratio=0.0)
+        cfg = VadConfig(speech_start_ms=0, threshold=0.60, silence_threshold=0.35, relative_silence_ratio=0.0)
         probs = [0.9] + [0.40] * 30
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -391,7 +391,7 @@ class TestSilenceDecouple:
         # silence_threshold (0.35). A 0.28 probe sits in the dead band under
         # the clamp; without the clamp it would count as silence and finalize.
         # relative_silence_ratio=0.0 pinned explicitly, same reason as above.
-        cfg = VadConfig(threshold=0.30, silence_threshold=0.35, relative_silence_ratio=0.0)
+        cfg = VadConfig(speech_start_ms=0, threshold=0.30, silence_threshold=0.35, relative_silence_ratio=0.0)
         probs = [0.9] + [0.28] * 30
         vad = ScriptedVad(probs)
         seg = Segmenter(cfg, vad)
@@ -406,7 +406,7 @@ class TestAbort:
         # Speech, then 11 silence frames -> speculative in flight. Abort must
         # return exactly the SegDiscard that resolves it, leave the segmenter
         # idle, and hand the next utterance a fresh id.
-        cfg = VadConfig()
+        cfg = VadConfig(speech_start_ms=0)
         vad = ScriptedVad([0.9] * 5 + [0.1] * 11 + [0.9])
         seg = Segmenter(cfg, vad)
         specs = []
@@ -426,7 +426,7 @@ class TestAbort:
         # No speculative in flight -> nothing to resolve, so abort returns [].
         # The buffered pre-abort audio (fill 0.25) must be gone: a fresh
         # utterance finalized afterwards carries only post-abort fill (0.5).
-        cfg = VadConfig(**_ABORT_CFG)
+        cfg = VadConfig(speech_start_ms=0, **_ABORT_CFG)
         vad = ScriptedVad([0.9] * 3 + [0.9, 0.2, 0.2])
         seg = Segmenter(cfg, vad)
         for _ in range(3):
@@ -447,7 +447,7 @@ class TestAbort:
     def test_abort_clears_preroll(self):
         # Idle (non-speech) frames only fill the pre-roll ring; abort must
         # empty it so the next utterance is not seeded with pre-abort audio.
-        cfg = VadConfig(**_ABORT_CFG)
+        cfg = VadConfig(speech_start_ms=0, **_ABORT_CFG)
         vad = ScriptedVad([0.1, 0.1] + [0.9, 0.2, 0.2])
         seg = Segmenter(cfg, vad)
         for _ in range(2):
@@ -464,7 +464,7 @@ class TestAbort:
         assert final.samples.shape[0] == 3 * FRAME
 
     def test_abort_while_idle_is_harmless(self):
-        cfg = VadConfig(**_ABORT_CFG)
+        cfg = VadConfig(speech_start_ms=0, **_ABORT_CFG)
         vad = ScriptedVad([0.9, 0.2, 0.2])
         seg = Segmenter(cfg, vad)
 
