@@ -77,6 +77,7 @@ def test_no_change_fires_nothing():
         (lambda c: setattr(c.mute_sync, "enabled", False), ("mute", False)),
         (lambda c: setattr(c.vad, "finalize_silence_ms", 999), ("vad", 999)),
         (lambda c: setattr(c.vad, "threshold", 0.42), ("vad", 600)),
+        (lambda c: setattr(c.vad, "speech_start_ms", 128), ("vad", 600)),
     ],
 )
 def test_each_field_routes_to_its_hook_once(mutate, expected):

@@ -126,9 +126,11 @@ class Segmenter:
 
         self._preroll: deque[np.ndarray] = deque(maxlen=self._preroll_frames)
         self._active = False
+        self._starting_frames = 0
         self._utterance_id = 1
         self._buffer: list[np.ndarray] = []
         self._frames_since_start = 0
+        self._last_speech_frame = 0
         self._silence_run = 0
         self._pending_spec_samples: np.ndarray | None = None
         self._peak_vad = 0.0
@@ -158,6 +160,7 @@ class Segmenter:
         self._speculative_frames = speculative
         self._finalize_frames = finalize
         self._min_utterance_frames = min_utterance
+        self._start_frames = max(1, math.ceil(cfg.speech_start_ms / frame_ms))
         self._preroll_frames = preroll
         self._max_utterance_frames = max_utterance
 
@@ -210,9 +213,12 @@ class Segmenter:
 
     @property
     def active(self) -> bool:
-        """Whether mid-utterance (ACTIVE). The energy pre-gate consults this so
-        it only blocks utterance *starts*, never frames already in flight."""
-        return self._active
+        """Whether audio is in flight, including an unconfirmed onset.
+
+        The optional energy gate must keep feeding a candidate so a quiet
+        following frame can confirm or cancel it instead of freezing it.
+        """
+        return self._active or self._starting_frames > 0
 
     def process(self, frame: np.ndarray) -> list[object]:
         events: list[object] = []
@@ -230,14 +236,21 @@ class Segmenter:
 
         if not self._active:
             if is_speech:
-                self._buffer = list(self._preroll)
+                if not self._starting_frames:
+                    self._buffer = list(self._preroll)
+                    self._peak_vad = 0.0
                 self._preroll.append(frame_copy)
                 self._buffer.append(frame_copy)
+                self._starting_frames += 1
+                self._peak_vad = max(self._peak_vad, vad_prob)
+                if self._starting_frames < self._start_frames:
+                    return events
                 self._active = True
-                self._frames_since_start = 1
+                self._frames_since_start = self._starting_frames
+                self._last_speech_frame = self._starting_frames
+                self._starting_frames = 0
                 self._silence_run = 0
                 self._pending_spec_samples = None
-                self._peak_vad = vad_prob
                 events.append(SegSpeechStart(utterance_id=self._utterance_id))
                 # Degenerate configs (pre-roll >= max cap) can hit the cap on
                 # this very transition frame; force the final here, not late.
@@ -250,6 +263,9 @@ class Segmenter:
                     )
                     self._reset_to_idle()
             else:
+                self._starting_frames = 0
+                self._buffer = []
+                self._peak_vad = 0.0
                 self._preroll.append(frame_copy)
             return events
 
@@ -283,6 +299,7 @@ class Segmenter:
         )
 
         if is_speech and not is_drop:
+            self._last_speech_frame = self._frames_since_start
             self._silence_run = 0
             if self._pending_spec_samples is not None:
                 self._pending_spec_samples = None
@@ -322,7 +339,9 @@ class Segmenter:
             )
 
         if self._silence_run >= self._finalize_frames:
-            if self._frames_since_start >= self._min_utterance_frames:
+            # Silence and uncertain frames after speech are padding. Pauses
+            # inside speech count only when genuine speech resumes after them.
+            if self._last_speech_frame >= self._min_utterance_frames:
                 samples = (
                     self._pending_spec_samples
                     if self._pending_spec_samples is not None
@@ -341,8 +360,10 @@ class Segmenter:
 
     def _reset_to_idle(self) -> None:
         self._active = False
+        self._starting_frames = 0
         self._buffer = []
         self._frames_since_start = 0
+        self._last_speech_frame = 0
         self._silence_run = 0
         self._pending_spec_samples = None
         self._peak_vad = 0.0

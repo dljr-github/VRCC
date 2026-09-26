@@ -22,7 +22,7 @@ _OSC_FIELDS = ("ip", "port", "min_interval_s", "burst")
 # VAD threshold + timings (apply_vad recomputes the segmenter's frame counts).
 _VAD_FIELDS = (
     "threshold", "speculative_silence_ms", "finalize_silence_ms",
-    "min_utterance_ms", "pre_roll_ms", "max_utterance_s",
+    "min_utterance_ms", "pre_roll_ms", "max_utterance_s", "speech_start_ms",
 )
 
 Spec = tuple[str, tuple, Callable[[], None]]

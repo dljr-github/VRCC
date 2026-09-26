@@ -62,3 +62,8 @@ def apply_migrations(config: "AppConfig", stored_version: int) -> None:
     """Run every schema migration against `config`, oldest first."""
     _migrate_profile_written_mt_beam(config, stored_version)
     _migrate_default_overflow(config, stored_version)
+    # Stored defaults otherwise keep existing installs rejecting short replies.
+    # As with MT beam migration, an explicitly chosen 500 is indistinguishable
+    # from the old default. Other durations survive; choosing 500 again sticks.
+    if stored_version < 4 and config.vad.min_utterance_ms == 500:
+        config.vad.min_utterance_ms = type(config.vad)().min_utterance_ms
