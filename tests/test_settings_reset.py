@@ -442,6 +442,7 @@ _NOT_TUNING = {
     "stt": {
         "model", "device", "device_index", "compute_type", "cpu_threads",
         "num_workers", "source_language", "spoken_languages",
+        "language_bias_mode", "language_bias_languages",
         "without_timestamps", "initial_prompt", "extra_transcribe_kwargs",
     },
     "translate": {

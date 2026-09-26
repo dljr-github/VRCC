@@ -46,6 +46,7 @@ from vrcc.core.hardware import resolve
 from vrcc.core.languages import get
 from vrcc.stt.engine import SttResult
 from vrcc.stt.fbank import apply_cmvn, apply_lfr, fbank
+from vrcc.stt.language_bias import preferred_codes, sensevoice_override
 from vrcc.stt.registry import WhisperSpec
 
 logger = logging.getLogger("vrcc.stt.sensevoice")
@@ -126,6 +127,7 @@ class SenseVoiceEngine:
         self._auto_language_id = 0
         # Whisper code -> the model's own language slot, from its metadata.
         self._language_ids: dict[str, int] = {}
+        self._language_tokens: dict[int, tuple[str, int]] = {}
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -173,6 +175,13 @@ class SenseVoiceEngine:
 
             self._read_metadata()
             self._tokens = _read_vocab(vocab_path)
+            meta = self._session.get_modelmeta().custom_metadata_map
+            self._language_tokens = {
+                i: (_TAG_TO_WHISPER[piece[2:-2]], int(meta[f"lang_{piece[2:-2]}"]))
+                for i, piece in enumerate(self._tokens)
+                if piece.startswith("<|") and piece.endswith("|>")
+                and piece[2:-2] in _TAG_TO_WHISPER and f"lang_{piece[2:-2]}" in meta
+            }
 
             self._bus.publish(
                 EngineStateChanged(
@@ -230,18 +239,19 @@ class SenseVoiceEngine:
         if features.shape[0] == 0:
             return None
 
-        logits = self._session.run(
-            ["logits"],
-            {
-                "x": features[None, :, :],
-                "x_length": np.array([features.shape[0]], dtype=np.int32),
-                "language": np.array(
-                    [self._language_id(detect_language)], dtype=np.int32
-                ),
-                "text_norm": np.array([self._text_norm_id], dtype=np.int32),
-            },
-        )[0]
-
+        feeds = {
+            "x": features[None, :, :],
+            "x_length": np.array([features.shape[0]], dtype=np.int32),
+            "language": np.array([self._language_id(detect_language)], dtype=np.int32),
+            "text_norm": np.array([self._text_norm_id], dtype=np.int32),
+        }
+        logits = self._session.run(["logits"], feeds)[0]
+        slot = sensevoice_override(
+            logits[0], self._language_tokens, preferred_codes(self._cfg, detect_language),
+        )
+        if slot is not None:
+            feeds = dict(feeds, language=np.array([slot], dtype=np.int32))
+            logits = self._session.run(["logits"], feeds)[0]
         logits0 = np.asarray(logits[0])
         ids = logits0.argmax(axis=-1)
         raw = self._decode(ids)
