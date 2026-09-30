@@ -20,6 +20,7 @@ from vrcc.audio.segmenter import (
     SegDiscard, SegFinal, SegLevel, SegSpeculative, SegSpeechStart,
 )
 from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source, pipeline_typed
+from vrcc.core import inference_observations
 from vrcc.core.engine_slot import EngineSlot
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
@@ -107,6 +108,7 @@ class Pipeline:
         self._skipped_speculatives = 0
         self._stale_speculatives = 0
         self._stats = SttCallStats()
+        self._observations = inference_observations.InferenceObservations()
         # What the mic delivered (self._input) and the finalize-to-submit
         # clock (self._latency) this run, folded into the same summary.
         self._input = InputStats()
@@ -129,6 +131,10 @@ class Pipeline:
         self._resume_pending = False
 
     # -- lifecycle ---------------------------------------------------------
+
+    def observation_report(self) -> dict:
+        """Numeric diagnostics for the current configuration, without model calls."""
+        return inference_observations.report(self)
 
     def start(self) -> None:
         """Start workers and begin capture; no-op if running. If the source
@@ -154,6 +160,7 @@ class Pipeline:
             self._segmenter.reset()
             self._frame_gated = False
             begin_run(self)
+            self._observations.reset()
 
             # Each worker is bound to THIS run's queue + stop event via thread
             # args (never re-read from self), so a worker abandoned by a
@@ -220,6 +227,7 @@ class Pipeline:
             self._seg_thread = self._stt_thread = self._mt_thread = None
 
             log_summary(self, restarting=restarting)
+            inference_observations.log_report(self)
 
         # Best-effort: drop the typing indicator we may have left on.
         self._set_typing(False)

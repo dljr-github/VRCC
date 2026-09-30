@@ -97,6 +97,55 @@ Speed vs Quality table. If you want to add yours,
 To benchmark the STT models on your hardware (and contribute the numbers),
 see [benchmarks/README.md](benchmarks/README.md).
 
+## Runtime observations on your own PC
+
+Run VRCC alongside your normal VRChat session, speak several phrases, and
+close VRCC normally. The current log contains a separate INFO line beginning
+`Inference observations:` followed by JSON. Copy just that JSON when sharing
+timing evidence: this report contains numeric aggregates and allowlisted
+model/device/settings metadata, not audio, captions, translations, prompts,
+custom model paths, or arbitrary advanced settings. Other existing log lines
+may contain caption text; this does not make the entire log content-free.
+
+These are **runtime observations, not controlled benchmarks or measured
+accuracy**. They do not modify the recommender, models, thread settings, or
+decoding parameters. The inexpensive first-run GEMM estimate is unchanged.
+
+- `service_s` is time inside the actual inference call
+- `lock_wait_s` is time waiting to borrow the shared engine
+- `dispatch_wait_s` is time from job creation to attempting that borrow,
+  including queue residence and producer backpressure
+- STT `audio_s` and `real_time_factor` describe audio actually passed to
+  fresh final calls; the latter is service time divided by audio duration
+- MT `input_chars` and `target_count` identify the size of the work;
+  the latter counts returned target entries after model-family deduplication,
+  alongside `requested_target_count`. The script-preserving source language
+  code and microphone/typed request kind are kept separate
+- `count`, median (`p50`), `p95`, and maximum cover at most the latest 128
+  calls for the current configuration of each stage
+
+Warm-up, speculative calls, finals reusing a speculative result, failures,
+stopped calls, and absent engines are excluded. A completed STT call returning
+no caption through its quality gate still consumed inference time and is
+included. A call spanning a configuration/device change is excluded rather
+than assigned to the wrong configuration. Observation windows reset on pipeline restart,
+engine/configuration change, or a different MT source/target count/request
+kind. Unavailable observations are `null`; unknown engine metadata is
+`unknown`, not the requested device. `requested_*` settings describe the
+configuration, and are not proof a live engine has already been rebuilt.
+
+The report excludes VAD endpointing and chatbox throttling, and is not an
+end-to-end caption latency or VR frame-time measurement. Short utterances,
+language, other speakers, VRChat/world load, and discarded speculative work
+all affect interpretation. Small sample counts make percentiles unstable.
+Compare like workloads and retain the existing STT session summary for
+speculative work, dropped frames, and finalize-to-submit latency.
+
+For an idle baseline, repeat the same phrases without VRChat running. A
+controlled cross-model comparison still requires a fixed test corpus and
+accuracy evaluation; these observations are deliberately not used to infer
+that another model would be faster on this PC.
+
 ## End-to-end smoke test
 
 `scripts/smoke_e2e.py` runs the real VAD → STT → MT → chatbox pipeline over
