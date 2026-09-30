@@ -261,3 +261,16 @@ def test_disabled_toggle_never_offers(monkeypatch):
     _final(env, 1, s)
     assert len(env.mt.calls) == 1
     assert env.pipeline._pretranslate.offered == 0
+
+
+def test_prefetch_and_hit_are_not_observed_as_fresh_mt_calls():
+    env = _env()
+    s = _speculative(env)
+    _drain_mt(env)
+    _final(env, 1, s)
+    assert env.pipeline._pretranslate.hit == 1
+    assert env.pipeline.observation_report()["mt"] is None
+
+    plain = _env()
+    _final(plain, 1, sample())
+    assert plain.pipeline.observation_report()["mt"]["count"] == 1
