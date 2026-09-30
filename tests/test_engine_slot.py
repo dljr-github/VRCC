@@ -91,3 +91,28 @@ def test_swap_waits_for_an_in_flight_borrow_to_finish():
     assert old == "old"
     assert slot.current == "new"
     assert elapsed >= hold_s * 0.5, "swap did not wait for the in-flight borrow"
+
+
+def test_nonblocking_borrow_yields_none_while_slot_is_busy():
+    slot = EngineSlot("engine")
+    with slot.borrow():
+        assert slot.busy is True
+        with slot.borrow(blocking=False) as engine:
+            assert engine is None
+        assert slot.busy is True  # failed borrow must not release the owner
+    assert slot.busy is False
+    with slot.borrow(blocking=False) as engine:
+        assert engine == "engine"
+        assert slot.busy is True
+    assert slot.busy is False
+
+
+def test_nonblocking_borrow_releases_slot_when_body_raises():
+    import pytest
+
+    slot = EngineSlot("engine")
+    with pytest.raises(ValueError, match="decode failed"):
+        with slot.borrow(blocking=False):
+            raise ValueError("decode failed")
+    assert slot.busy is False
+    assert slot.swap("replacement") == "engine"

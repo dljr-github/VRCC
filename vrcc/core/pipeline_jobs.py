@@ -36,8 +36,8 @@ if TYPE_CHECKING:
 # Same logger as the orchestrator: one operational stream for the pipeline.
 logger = logging.getLogger("vrcc.core.pipeline")
 
-# Distinguishes "engine is being swapped out (None)" from a legitimate None
-# transcription result (quality-gated): a job that sees _NO_ENGINE is dropped.
+# Distinguishes an unavailable engine (absent, or busy for optional work)
+# from a legitimate None transcription result (quality-gated).
 _NO_ENGINE = object()
 
 # Blocked-enqueue poll: re-check the stop flag so stop() can't deadlock.
@@ -112,13 +112,17 @@ def _submit(p: "Pipeline", original: str, translations: list, utterance_id: int)
 
 
 def handle_speculative(p: "Pipeline", event: "SegSpeculative") -> None:
-    """Enqueue a speculative non-blocking: a full queue means the engine is
-    behind real time, and blocking here would stall the segmenter thread that
-    is the only consumer draining the frame queue upstream. The final
-    re-transcribes the same audio regardless, so a skip costs an early
-    caption, never a caption -- unlike the blocking backpressure below, which
-    real audio depends on."""
+    """Admit optional work only while STT has no backlog or active caller.
+
+    A skipped speculative's final still transcribes normally. These advisory
+    checks keep optional work out of the foreground queue; the worker also
+    borrows nonblocking in case another stream takes the engine meanwhile.
+    """
     if not p._should_caption():
+        return
+    if not p._stt_queue.empty() or p.stt_slot.busy:
+        p._skipped_speculatives += 1
+        logger.debug("STT busy; skipped speculative for utterance %s", event.utterance_id)
         return
     samples_id = id(event.samples)
     # Noted before the put: the worker can dequeue the job the moment it
@@ -178,12 +182,12 @@ def _call_engine(
     before ``engine`` is used) rather than the engine call itself
     (``call_s``, timed only around ``engine.transcribe``).
 
-    Nothing is recorded for ``_NO_ENGINE``, which means ``engine.transcribe``
-    was never invoked (swapped out mid-flight), nor once ``stop`` is set: a
-    call that outlasted stop()'s join returns into the next run, whose
-    counters it must not touch."""
+    Speculative calls borrow nonblocking; a busy/absent engine records only
+    a skip, never an inference timing. Finals still wait for the engine.
+    Nothing is recorded once ``stop`` is set: a call that outlasted its
+    join must not touch the next run's counters."""
     wait_start = time.monotonic()
-    with p.stt_slot.borrow() as engine:
+    with p.stt_slot.borrow(blocking=not speculative) as engine:
         wait_s = time.monotonic() - wait_start
         if engine is None:
             result, call_s = _NO_ENGINE, 0.0
@@ -191,7 +195,11 @@ def _call_engine(
             call_start = time.monotonic()
             result = engine.transcribe(samples)
             call_s = time.monotonic() - call_start
-    if result is _NO_ENGINE or stop.is_set():
+    if stop.is_set():
+        return result
+    if result is _NO_ENGINE:
+        if speculative:
+            p._stats.record_skipped_speculative()
         return result
     audio_s = len(samples) / SAMPLE_RATE
     p._stats.record_call(speculative, audio_s, wait_s, call_s)
@@ -220,7 +228,10 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
             return
         result = _call_engine(p, job.samples, stop, speculative=True)
         if result is _NO_ENGINE:
-            return  # engine swapped out mid-flight: drop the job
+            if not stop.is_set():
+                p._spec.forget_speculative(*key)
+                p._spec.consume_stale(key)
+            return  # unavailable/busy: the final can still transcribe fresh
         if stop.is_set():
             # Stopped (maybe restarted) mid-transcribe: this result belongs
             # to an abandoned run, must not touch a new run's shared state.

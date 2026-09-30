@@ -33,6 +33,7 @@ _ZERO_CALL_COUNTS = {
     "speculative_calls": 0,
     "final_calls": 0,
     "reuse_count": 0,
+    "skipped_speculative_calls": 0,
     "total_wall_s": 0.0,
     "max_wall_s": 0.0,
     "total_wait_s": 0.0,
@@ -176,8 +177,8 @@ def test_summary_line_reports_the_call_split_per_call_speed_and_keep_up_ratio(
         "10.0s run time (0.20x). Average 1.00s per call, slowest 1.00s; "
         "0.00s of that was spent waiting for the engine lock (0%), slowest "
         "wait 0.00s. 1 finals reused a speculative. Dropped 5 frames, about "
-        "0.2s of audio. Skipped 2 speculatives on a full queue "
-        "(backpressure) and 1 more because the speaker kept talking "
+        "0.2s of audio. Skipped 2 speculatives for STT contention "
+        "(queued work or unavailable engine) and 1 more because the speaker kept talking "
         "(normal, costs nothing). Input level (frame RMS): n/a. n/a of "
         "frames clipped. 0 finals suppressed by the quality gate. "
         "Finalize-to-chatbox latency: n/a."
@@ -202,8 +203,8 @@ def test_summary_line_reports_na_when_the_run_made_no_calls(caplog, monkeypatch)
         "run time (n/a). Average 0.00s per call, slowest 0.00s; 0.00s of "
         "that was spent waiting for the engine lock (n/a), slowest wait "
         "0.00s. 0 finals reused a speculative. Dropped 0 frames, about "
-        "0.0s of audio. Skipped 0 speculatives on a full queue "
-        "(backpressure) and 0 more because the speaker kept talking "
+        "0.0s of audio. Skipped 0 speculatives for STT contention "
+        "(queued work or unavailable engine) and 0 more because the speaker kept talking "
         "(normal, costs nothing). Input level (frame RMS): n/a. n/a of "
         "frames clipped. 0 finals suppressed by the quality gate. "
         "Finalize-to-chatbox latency: n/a."

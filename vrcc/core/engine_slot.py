@@ -31,11 +31,26 @@ class EngineSlot(Generic[_T]):
             return old
 
     @contextlib.contextmanager
-    def borrow(self) -> Iterator["_T | None"]:
+    def borrow(self, *, blocking: bool = True) -> Iterator["_T | None"]:
         """Yield the current engine with the lock held for the caller's
-        whole call, so a concurrent swap waits for it to return."""
-        with self._lock:
+        whole call, so a concurrent swap waits for it to return.
+
+        Optional work may use ``blocking=False``: an occupied slot yields
+        None immediately, just like an absent engine, without releasing the
+        owner's lock. Foreground callers keep the blocking default.
+        """
+        if not self._lock.acquire(blocking=blocking):
+            yield None
+            return
+        try:
             yield self._engine
+        finally:
+            self._lock.release()
+
+    @property
+    def busy(self) -> bool:
+        """Advisory admission check; nonblocking borrow closes the race."""
+        return self._lock.locked()
 
     @property
     def current(self) -> "_T | None":
