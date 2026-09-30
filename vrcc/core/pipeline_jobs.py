@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 import queue
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from vrcc.audio.frames import SAMPLE_RATE
-from vrcc.core import languages
+from vrcc.core import languages, inference_observations
 from vrcc.core.events import (
     AppError,
     PhraseRecognized,
@@ -50,6 +50,7 @@ class _SttJob:
     samples: "np.ndarray"
     speculative: bool
     samples_id: int
+    created_at: float = field(default_factory=lambda: time.monotonic())
 
 
 @dataclass
@@ -58,6 +59,7 @@ class _MtJob:
     text: str
     src: "Language"
     manage_typing: bool
+    created_at: float = field(default_factory=lambda: time.monotonic())
 
 
 # -- shared-state helpers (queues/caches live on Pipeline; only the logic
@@ -167,7 +169,8 @@ def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
 
 
 def _call_engine(
-    p: "Pipeline", samples: "np.ndarray", stop: "threading.Event", *, speculative: bool
+    p: "Pipeline", samples: "np.ndarray", stop: "threading.Event", *, speculative: bool,
+    created_at: float | None = None,
 ) -> "SttResult | None | object":
     """Transcribe via the STT slot, timing the lock wait and the engine call
     as two separate spans.
@@ -188,6 +191,7 @@ def _call_engine(
         if engine is None:
             result, call_s = _NO_ENGINE, 0.0
         else:
+            token = None if speculative else inference_observations.prepare(p, engine, "stt")
             call_start = time.monotonic()
             result = engine.transcribe(samples)
             call_s = time.monotonic() - call_start
@@ -195,6 +199,10 @@ def _call_engine(
         return result
     audio_s = len(samples) / SAMPLE_RATE
     p._stats.record_call(speculative, audio_s, wait_s, call_s)
+    inference_observations.finish(
+        p, "stt", token, stop, service_s=call_s, lock_wait_s=wait_s, audio_s=audio_s,
+        dispatch_wait_s=None if created_at is None else wait_start - created_at,
+    )
     logger.debug(
         "stt call (%s): %.2fs audio, %.3fs wait + %.3fs call",
         "speculative" if speculative else "final",
@@ -233,7 +241,7 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     # nested inside the STT slot's lock), preserving lock ordering.
     result = p._spec.pop_result(key)
     if result is _MISSING:
-        result = _call_engine(p, job.samples, stop, speculative=False)
+        result = _call_engine(p, job.samples, stop, speculative=False, created_at=job.created_at)
         if result is _NO_ENGINE:
             _finalize_dropped(p, job.utterance_id)  # engine swapped out mid-flight
             return
@@ -404,6 +412,7 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
         # Call the engine with the slot's lock held so a concurrent detach_mt
         # waits before unloading; a None engine (disabled/swapped-out) ->
         # send original. Only that lock held here (no lock-order cycle).
+        wait_start = time.monotonic()
         with p.mt_slot.borrow() as engine:
             if engine is None:
                 translations = None
@@ -413,7 +422,9 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
                 # original still reaches the chatbox.
                 translations = []
             else:
-                translations = engine.translate(job.text, job.src, targets)
+                translations = inference_observations.translate(
+                    p, engine, job, targets, stop, wait_start,
+                )
     except Exception as exc:  # noqa: BLE001 -- translation must not drop the caption
         if stop.is_set():
             return  # abandoned mid-call: discard, publish nothing
