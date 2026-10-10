@@ -33,7 +33,7 @@ chatbox submission window. The bench swaps the tracker's clock for
 
 Median latency per repeat was 79.4, 78.9 and 77.2 ms (600M, off) and 162.7,
 160.0 and 157.9 ms (1.3B, off); every "on" repeat had a median of 0.1 ms.
-The mean MT call took 77 to 79 ms (600M) and 158 to 163 ms (1.3B) with the
+The median MT call took 77 to 79 ms (600M) and 158 to 163 ms (1.3B) with the
 feature off. The prefetch is only offered into an empty MT queue.
 
 ## What this shows
