@@ -25,7 +25,7 @@ A noisy run's filename and utterance-set fingerprint both carry the noise
 condition, so it never overwrites or gets exported alongside a clean run
 (point ``--out`` at its own directory, e.g. ``bench_results/babble10``).
 ``--max-seconds N`` keeps only utterances at or under N seconds, the lengths
-the app's VAD actually hands over (the default set averages ~7.5 s).
+the app's VAD actually hands over (much shorter than whole LibriSpeech clips).
 ``--gated`` leaves the app's default quality gates in place and scores a
 gated utterance as an empty hypothesis, which is what the user would see.
 Both change the utterance-set fingerprint and the filename, so short or
@@ -359,7 +359,7 @@ def main() -> int:
     parser.add_argument(
         "--max-seconds", type=float, default=None, metavar="N",
         help="keep only utterances of at most N seconds (the app's VAD "
-        "median is ~1.8 s; try 2.6); pair with a large --utterances to take "
+        "clips are far shorter than LibriSpeech's; try 2.6); pair with a large --utterances to take "
         "every short clip",
     )
     parser.add_argument(

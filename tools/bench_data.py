@@ -77,7 +77,7 @@ def load_utterances(
 
     ``max_seconds`` keeps only utterances at or under that length before
     spacing, so the short arm covers the clip lengths the app's VAD hands
-    over (median ~1.8 s) rather than LibriSpeech's ~7.5 s."""
+    over rather than whole LibriSpeech clips."""
     refs: dict[str, str] = {}
     for trans in sorted(root.rglob("*.trans.txt")):
         for line in trans.read_text(encoding="utf-8").splitlines():

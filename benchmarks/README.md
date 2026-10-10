@@ -74,8 +74,8 @@ logic and keeps under-measuring the model's error rate; re-run it with
 
 ## Short utterances and gated scoring
 
-The default set averages about 7.5 s per clip, while the app's VAD hands the
-engine clips with a median near 1.8 s. `--max-seconds N` keeps only
+The default set uses whole LibriSpeech clips, which run several times longer
+than the clips the app's VAD hands the engine. `--max-seconds N` keeps only
 utterances at or under N seconds, so the short arm measures the lengths the
 app feeds. Pass a large `--utterances` to take every clip that qualifies.
 
