@@ -183,8 +183,15 @@ class SttEngine:
                 kwargs["initial_prompt"] = None
         preferred = preferred_codes(self._cfg, detect_language)
         decision = Decision("whisper", audio_seconds(samples))
-        segments, info = self._run_transcribe(samples, kwargs, preferred, decision)
-        return self._build_result(segments, info, decision)
+        try:
+            segments, info = self._run_transcribe(samples, kwargs, preferred, decision)
+            result = self._gate(segments, info, decision)
+        except Exception:
+            decision.verdict = "error"
+            log_decision(logger, decision)
+            raise
+        log_decision(logger, decision)
+        return result
 
     # -- internals -------------------------------------------------------------
 
@@ -307,16 +314,10 @@ class SttEngine:
             )
             return segments, info
 
-    def _build_result(self, segments: list, info, decision: Decision) -> SttResult | None:
+    def _gate(self, segments: list, info, decision: Decision) -> SttResult | None:
         """Join segment texts and apply the length-weighted quality gates (avg
         logprob, no-speech, and a compression-ratio drop for runaway repetition
-        loops). Logs one decision record either way."""
-        try:
-            return self._gate(segments, info, decision)
-        finally:
-            log_decision(logger, decision)
-
-    def _gate(self, segments: list, info, decision: Decision) -> SttResult | None:
+        loops), recording the verdict on ``decision``."""
         text = " ".join(seg.text for seg in segments).strip()
         if not text:
             decision.verdict = "empty"

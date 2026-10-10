@@ -135,6 +135,22 @@ def test_decode_failure_records_error_not_accepted(model_dir, caplog, monkeypatc
     assert [r["verdict"] for r in records(caplog)] == ["error"]
 
 
+def test_whisper_decode_failure_records_error(caplog):
+    engine, model = engine_for([("en", 0.9), ("ja", 0.1)])
+
+    def boom(samples, **kw):
+        raise RuntimeError("decoder failed")
+
+    model.transcribe = boom
+    with caplog.at_level(logging.DEBUG, logger="vrcc.stt"):
+        try:
+            engine.transcribe(SECOND)
+        except RuntimeError:
+            pass
+    (row,) = records(caplog)
+    assert row["engine"] == "whisper" and row["verdict"] == "error"
+
+
 def test_fresh_final_logs_pass_marker_before_final_line(caplog):
     env = make_pipeline()
     s = sample()
