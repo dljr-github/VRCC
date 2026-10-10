@@ -72,6 +72,28 @@ not which gates were open. A result file measured before a gate fix in
 logic and keeps under-measuring the model's error rate; re-run it with
 `--force` after any change to the gates the harness opens.
 
+## Short utterances and gated scoring
+
+The default set uses whole LibriSpeech clips, which run several times longer
+than the clips the app's VAD hands the engine. `--max-seconds N` keeps only
+utterances at or under N seconds, so the short arm measures the lengths the
+app feeds. Pass a large `--utterances` to take every clip that qualifies.
+
+`--gated` leaves the app's default quality gates in place and scores a
+gated utterance as an empty hypothesis, which is what a user would see.
+Without it all gates are open, as in the default table. In a gated row
+`gated` is null and every dropped or empty result lands in `empty`.
+
+```
+python tools/bench_stt.py --device cuda --max-seconds 2.6 --gated --out bench_results/short
+```
+
+Both options change the utterance-set fingerprint and the result filename,
+so these rows never overwrite or export alongside the default table. Every
+row also records `compute_requested` and the resolved `compute`, plus
+per-utterance `hypotheses` and `latencies_s` for paired comparisons (the
+export drops those two).
+
 ## Contributing your machine
 
 1. Install from source with the benchmark extras

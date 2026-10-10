@@ -11,6 +11,7 @@ Run from the repo root:
     python tools/bench_stt.py --device cuda
     python tools/bench_stt.py --device cpu
     python tools/bench_stt.py --device cuda --noise babble --snr 10
+    python tools/bench_stt.py --device cuda --max-seconds 2.6 --gated --out bench_results/short
     python tools/bench_stt.py --export benchmarks/my-machine.json
 
 The first run downloads the dataset (~350 MB) into ``<user data>/bench`` and
@@ -23,41 +24,47 @@ at N dB SNR against that utterance's own level; see tools/bench_noise.py.
 A noisy run's filename and utterance-set fingerprint both carry the noise
 condition, so it never overwrites or gets exported alongside a clean run
 (point ``--out`` at its own directory, e.g. ``bench_results/babble10``).
+``--max-seconds N`` keeps only utterances at or under N seconds, the lengths
+the app's VAD actually hands over (much shorter than whole LibriSpeech clips).
+``--gated`` leaves the app's default quality gates in place and scores a
+gated utterance as an empty hypothesis, which is what the user would see.
+Both change the utterance-set fingerprint and the filename, so short or
+gated rows never mix with the default table in an export. Every row records
+the compute type the engine resolved, and its per-utterance hypotheses and
+latencies stay in the result file for later paired comparisons.
 ``--export`` bundles every result with the machine's hardware info into one
 shareable file -- see benchmarks/README.md for contributing yours. Dev tool
-only -- not packaged, no test coverage.
+only -- not packaged; tests/test_bench_stt.py covers it with a stub engine.
 """
 
 from __future__ import annotations
 
 import argparse
 import gc
-import hashlib
 import json
-import shutil
 import statistics
 import sys
-import tarfile
 import time
-import urllib.request
 from pathlib import Path
 
 import numpy as np
 import platformdirs
-import soundfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import bench_noise  # noqa: E402
+from bench_data import (  # noqa: E402
+    SAMPLE_RATE,
+    ensure_dataset,
+    load_utterances,
+    utterance_set_id,
+)
 from vrcc.core.bus import EventBus  # noqa: E402
 from vrcc.core.config import SttConfig  # noqa: E402
 from vrcc.core.events import EngineStateChanged  # noqa: E402
 from vrcc.download.manager import DownloadManager  # noqa: E402
 from vrcc.stt import create_stt_engine  # noqa: E402
 from vrcc.stt.registry import WHISPER_MODELS  # noqa: E402
-
-DATASET_URL = "https://www.openslr.org/resources/12/test-clean.tar.gz"
-SAMPLE_RATE = 16000
 
 # Untimed transcriptions of a real utterance after warm_up(), so first-call
 # kernel autotuning never lands in a timed measurement.
@@ -70,82 +77,6 @@ def _default_models_dir() -> Path:
 
 def _default_data_dir() -> Path:
     return Path(platformdirs.user_data_dir("VRCC")) / "bench"
-
-
-def ensure_dataset(data_dir: Path) -> Path:
-    """Download + extract LibriSpeech test-clean once; return its root.
-
-    Interruption-safe: the archive downloads to a .part file renamed only
-    when complete, extraction is trusted only once a sentinel exists, and a
-    corrupt archive is deleted with a retry hint instead of failing every
-    later run."""
-    root = data_dir / "LibriSpeech" / "test-clean"
-    sentinel = data_dir / "LibriSpeech" / ".extracted"
-    if root.is_dir() and sentinel.is_file():
-        return root
-    data_dir.mkdir(parents=True, exist_ok=True)
-    archive = data_dir / "test-clean.tar.gz"
-    if not archive.is_file():
-        partial = archive.parent / (archive.name + ".part")
-        print(f"downloading {DATASET_URL} ...", flush=True)
-        with urllib.request.urlopen(DATASET_URL) as resp, open(partial, "wb") as out:
-            done = 0
-            while chunk := resp.read(1 << 20):
-                out.write(chunk)
-                done += len(chunk)
-                if done % (50 << 20) < (1 << 20):
-                    print(f"  {done >> 20} MB", flush=True)
-        partial.replace(archive)
-    print("extracting ...", flush=True)
-    tree = data_dir / "LibriSpeech"
-    if tree.exists():
-        # No sentinel means the tree can't be trusted (interrupted extract, or
-        # one from before the sentinel existed). The tar's members are
-        # read-only, so restore writability or rmtree fails on Windows.
-        for path in tree.rglob("*"):
-            if path.is_file():
-                path.chmod(0o644)
-        shutil.rmtree(tree)
-    try:
-        with tarfile.open(archive) as tar:
-            try:
-                tar.extractall(data_dir, filter="data")
-            except TypeError:
-                # filter= needs 3.10.12+/3.11.4+/3.12; older interpreters in
-                # the supported >=3.10 range extract without it.
-                tar.extractall(data_dir)
-    except tarfile.ReadError as exc:
-        archive.unlink()
-        raise RuntimeError(
-            f"{archive} was corrupt (interrupted download?); deleted it, "
-            "run this command again"
-        ) from exc
-    sentinel.write_text("")
-    return root
-
-
-def load_utterances(root: Path, n: int) -> list[tuple[str, np.ndarray, str]]:
-    """N (id, mono float32 16 kHz audio, reference) tuples, evenly spaced
-    over the id-sorted corpus so every run picks the same speaker-diverse
-    set (a plain prefix would over-represent the first speakers)."""
-    refs: dict[str, str] = {}
-    for trans in sorted(root.rglob("*.trans.txt")):
-        for line in trans.read_text(encoding="utf-8").splitlines():
-            utt_id, _, text = line.partition(" ")
-            refs[utt_id] = text.strip()
-    ids = sorted(refs)
-    n = min(n, len(ids))
-    picked = [ids[i * len(ids) // n] for i in range(n)]
-
-    utts = []
-    for utt_id in picked:
-        spk, chap, _ = utt_id.split("-")
-        path = root / spk / chap / f"{utt_id}.flac"
-        audio, sr = soundfile.read(path, dtype="float32", always_2d=False)
-        if sr != SAMPLE_RATE:
-            raise RuntimeError(f"{path} has sample rate {sr}, expected {SAMPLE_RATE}")
-        utts.append((utt_id, audio, refs[utt_id]))
-    return utts
 
 
 def machine_info() -> dict:
@@ -175,12 +106,13 @@ def machine_info() -> dict:
 
 def export_results(results_dir: Path, target: Path) -> int:
     """Bundle every per-model result in ``results_dir`` plus fresh machine
-    info into one contribution-ready JSON at ``target`` (hypotheses dropped:
-    they're per-run debug data, not metrics)."""
+    info into one contribution-ready JSON at ``target`` (hypotheses and
+    per-utterance latencies dropped: they're per-run data, not metrics)."""
     records = []
     for path in sorted(results_dir.glob("*__*.json")):
         record = json.loads(path.read_text())
         record.pop("hypotheses", None)
+        record.pop("latencies_s", None)
         records.append(record)
     if not records:
         print(f"no results in {results_dir}; run a benchmark first")
@@ -202,6 +134,11 @@ def export_results(results_dir: Path, target: Path) -> int:
         iter({(r.get("noise_type"), r.get("noise_snr_db")) for r in records})
     )
     dataset = "LibriSpeech test-clean"
+    bound = next(iter({r.get("max_seconds") for r in records}))
+    if bound is not None:
+        dataset += f" (utterances <= {bound:g} s)"
+    if {r.get("gates") for r in records} == {"app"}:
+        dataset += ", app quality gates applied"
     if noise_type:
         dataset += f" + {noise_type} noise @ {noise_snr_db:g} dB SNR"
 
@@ -235,20 +172,6 @@ def export_results(results_dir: Path, target: Path) -> int:
     return 0
 
 
-def _utterance_set_id(
-    utts: list[tuple[str, np.ndarray, str]],
-    noise: tuple[str, float] | None = None,
-) -> str:
-    """Short fingerprint of exactly which utterances a record measured, so
-    skip/export logic can refuse to mix runs whose sets differ (a sampling
-    change keeps the count at N while changing the members; a noise
-    condition leaves the ids and count alone but changes every sample)."""
-    joined = "\n".join(utt_id for utt_id, _, _ in utts)
-    if noise is not None:
-        joined += f"\n__noise__{noise[0]}:{noise[1]:g}"
-    return hashlib.sha256(joined.encode()).hexdigest()[:12]
-
-
 def ensure_models(model_ids: list[str], models_dir: Path) -> None:
     dm = DownloadManager(models_dir, EventBus())
     for model_id in model_ids:
@@ -267,6 +190,8 @@ def bench_model(
     beam: int = 1,
     noise_type: str | None = None,
     noise_snr_db: float | None = None,
+    max_seconds: float | None = None,
+    gated_scoring: bool = False,
 ) -> dict:
     """Load one model on ``device``, transcribe every utterance, and return
     the timing/WER record. The engine is fed pre-segmented utterances exactly
@@ -274,12 +199,16 @@ def bench_model(
     caller applied it (via ``bench_noise.apply_noise``); ``noise_type`` and
     ``noise_snr_db`` are recorded here, not applied.
 
-    All five quality gates are opened (whisper's avg_logprob, no_speech and
+    Unless ``gated_scoring`` is set, all five quality gates are opened (whisper's avg_logprob, no_speech and
     compression_ratio; parakeet_avg_logprob and sensevoice_avg_logprob for
     those onnx-asr backends) so WER measures what the model recognized, not
     what a gate would suppress. Utterances the default gates *would* drop
     are counted in ``gated`` instead, against whichever threshold fits,
     except compression_ratio (no SttResult field): that drop is scored text only.
+
+    With ``gated_scoring`` the app's default gates stay in place and a
+    dropped utterance is an empty hypothesis; ``gated`` is then None because
+    drops are indistinguishable from empty results and all land in ``empty``.
     """
     import jiwer
     from whisper_normalizer.english import EnglishTextNormalizer
@@ -291,16 +220,14 @@ def bench_model(
     )
 
     defaults = SttConfig()
-    cfg = SttConfig(
-        model=model_id,
-        device=device,
-        beam_size=beam,
-        avg_logprob_gate=-1e9,
-        no_speech_gate=1.0,
-        compression_ratio_gate=1e9,
-        parakeet_avg_logprob_gate=-1e9,
-        sensevoice_avg_logprob_gate=-1e9,
-    )
+    open_gates = {} if gated_scoring else {
+        "avg_logprob_gate": -1e9,
+        "no_speech_gate": 1.0,
+        "compression_ratio_gate": 1e9,
+        "parakeet_avg_logprob_gate": -1e9,
+        "sensevoice_avg_logprob_gate": -1e9,
+    }
+    cfg = SttConfig(model=model_id, device=device, beam_size=beam, **open_gates)
     engine = create_stt_engine(cfg, models_dir / "whisper" / model_id, bus)
 
     t0 = time.perf_counter()
@@ -329,8 +256,8 @@ def bench_model(
         result = engine.transcribe(audio)
         latencies.append(time.perf_counter() - t0)
         if result is None:
-            empty += 1  # no text at all: the gates are open, so this is real
-        else:
+            empty += 1  # open gates: no text at all; gated scoring: or dropped
+        elif not gated_scoring:
             if (
                 result.avg_logprob < logprob_gate
                 or result.no_speech_prob > defaults.no_speech_gate
@@ -359,9 +286,15 @@ def bench_model(
         "device": device,
         "resolved_device": resolved_device,
         "compute": compute,
+        "compute_requested": cfg.compute_type,
         "beam": beam,
-        "utterance_set": _utterance_set_id(
-            utts, (noise_type, noise_snr_db) if noise_type else None
+        "gates": "app" if gated_scoring else "open",
+        "max_seconds": max_seconds,
+        "utterance_set": utterance_set_id(
+            utts,
+            (noise_type, noise_snr_db) if noise_type else None,
+            max_seconds,
+            gated_scoring,
         ),
         "noise_type": noise_type,
         "noise_snr_db": noise_snr_db,
@@ -380,12 +313,16 @@ def bench_model(
         # Utterances the app's default gates would suppress (no caption
         # shown), avg_logprob/no_speech only: compression_ratio isn't on
         # SttResult, so a dropped repetition loop lands in neither counter.
-        "gated": gated,
+        "gated": None if gated_scoring else gated,
         "empty": empty,
         "engine_events": [e for e in events if e[0] != "loading"],
         "hypotheses": dict(
             zip((utt_id for utt_id, _, _ in utts), hyps, strict=True)
         ),
+        "latencies_s": {
+            utt_id: round(lat, 4)
+            for (utt_id, _, _), lat in zip(utts, latencies, strict=True)
+        },
     }
 
 
@@ -420,6 +357,17 @@ def main() -> int:
         "corpus speakers overlaid; white: Gaussian); requires --snr",
     )
     parser.add_argument(
+        "--max-seconds", type=float, default=None, metavar="N",
+        help="keep only utterances of at most N seconds (the app's VAD "
+        "clips are far shorter than LibriSpeech's; try 2.6); pair with a large --utterances to take "
+        "every short clip",
+    )
+    parser.add_argument(
+        "--gated", action="store_true",
+        help="score with the app's default quality gates applied; a gated "
+        "utterance counts as an empty hypothesis",
+    )
+    parser.add_argument(
         "--snr", type=float, default=None,
         help="signal-to-noise ratio in dB for --noise, against each "
         "utterance's own level (e.g. 10)",
@@ -433,6 +381,8 @@ def main() -> int:
         parser.error("--utterances must be at least 1")
     if args.beam < 1:
         parser.error("--beam must be at least 1")
+    if args.max_seconds is not None and args.max_seconds <= 0:
+        parser.error("--max-seconds must be positive")
     if bool(args.noise) != (args.snr is not None):
         parser.error("--noise and --snr must be given together")
 
@@ -455,7 +405,9 @@ def main() -> int:
 
         hardware.setup_cuda_dlls()
 
-    utts = load_utterances(dataset_root, args.utterances)
+    utts = load_utterances(dataset_root, args.utterances, args.max_seconds)
+    if not utts:
+        parser.error("no utterances at or under --max-seconds")
     if args.noise:
         print(f"synthesizing {args.noise} noise at {args.snr:g} dB SNR ...", flush=True)
         utts = bench_noise.apply_noise(utts, dataset_root, args.noise, args.snr)
@@ -467,13 +419,16 @@ def main() -> int:
     noise_desc = (args.noise, args.snr) if args.noise else None
     suffix = "" if args.beam == 1 else f"__beam{args.beam}"
     suffix += "" if not args.noise else f"__{args.noise}{args.snr:g}"
+    suffix += "" if args.max_seconds is None else f"__max{args.max_seconds:g}s"
+    suffix += "__gated" if args.gated else ""
+    set_id = utterance_set_id(utts, noise_desc, args.max_seconds, args.gated)
     for model_id in model_ids:
         out_path = args.out / f"{model_id}__{args.device}{suffix}.json"
         if out_path.is_file() and not args.force:
             # A result from a different utterance set is stale, not done:
             # keeping it would let --export mix incomparable runs.
             existing = json.loads(out_path.read_text())
-            if existing.get("utterance_set") == _utterance_set_id(utts, noise_desc):
+            if existing.get("utterance_set") == set_id:
                 print(f"{model_id} [{args.device}]: exists, skipping", flush=True)
                 continue
             print(
@@ -485,10 +440,11 @@ def main() -> int:
         result = bench_model(
             model_id, args.device, utts, args.models_dir, beam=args.beam,
             noise_type=args.noise, noise_snr_db=args.snr,
+            max_seconds=args.max_seconds, gated_scoring=args.gated,
         )
         out_path.write_text(json.dumps(result, indent=2))
         print(
-            f"  wer={result['wer']:.3f} rtf={result['rtf']:.3f} "
+            f"  n={result['n_utterances']} wer={result['wer']:.3f} rtf={result['rtf']:.3f} "
             f"median={result['latency_median_s']:.3f}s load={result['load_s']:.1f}s "
             f"on {result['resolved_device']}:{result['compute']}",
             flush=True,

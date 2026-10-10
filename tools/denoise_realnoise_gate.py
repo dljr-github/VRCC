@@ -19,7 +19,7 @@ as a standalone dev tool instead of a CI-gated test.
 Usage:
     python tools/denoise_realnoise_gate.py --noise-dir path/to/real_noise
     python tools/denoise_realnoise_gate.py --noise-dir path/to/real_noise \\
-        --snr -5,0,5,10 --strength 0.5
+        --snr -5,0,5,10 --strength 0.25
 
 ``--noise-dir`` holds one or more real recorded noise WAVs (any sample
 rate, resampled to 16 kHz mono; 16-bit PCM, the same constraint every other
@@ -30,8 +30,8 @@ mixed with every clean speech fixture found directly under
 already mixed with synthetic noise for a different test, and is skipped)
 at every ``--snr`` value, scaled so the ratio of the noise RMS to the
 speech's active RMS gives the target SNR. Each mix is transcribed raw and
-after the shipped ``Denoiser.process`` at ``--strength`` (default 0.5, the
-shipped default), fed in 512-sample frames exactly as ``MicSource`` feeds
+after the shipped ``Denoiser.process`` at ``--strength`` (default: the shipped
+AudioConfig value), fed in 512-sample frames exactly as ``MicSource`` feeds
 capture frames.
 
 Exit codes: 0 the gentle denoise held (PASS); 2 it regressed on real noise
@@ -63,9 +63,11 @@ from tests.integration._harness import (  # noqa: E402
 from vrcc.audio.denoise import Denoiser  # noqa: E402
 from vrcc.core.bus import EventBus  # noqa: E402
 from vrcc.core.config import SttConfig  # noqa: E402
+from vrcc.core.vad_config import AudioConfig  # noqa: E402
 
 _SPEECH_DIR = _REPO_ROOT / "tests" / "integration" / "audio"
 _ACTIVE_FRAME = 320  # 20 ms at 16 kHz
+_SHIPPED_STRENGTH = AudioConfig().denoise_strength
 
 
 def _active_rms(signal: np.ndarray, frame_len: int = _ACTIVE_FRAME) -> float:
@@ -344,8 +346,9 @@ def main() -> int:
         help="comma-separated target SNRs in dB (default: 0,5,10)",
     )
     parser.add_argument(
-        "--strength", type=float, default=0.5,
-        help="denoiser dry/wet strength, 0..1 (default: 0.5, the shipped default)",
+        "--strength", type=float, default=_SHIPPED_STRENGTH,
+        help="denoiser dry/wet strength, 0..1 (default: the shipped "
+        f"AudioConfig.denoise_strength, {_SHIPPED_STRENGTH:g})",
     )
     parser.add_argument(
         "--seed", type=int, default=0,
