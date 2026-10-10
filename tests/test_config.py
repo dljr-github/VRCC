@@ -28,7 +28,7 @@ def _wait_until(predicate, timeout=2.0, interval=0.01):
 
 def test_app_config_defaults_match_spec():
     cfg = AppConfig()
-    assert cfg.schema_version == 4
+    assert cfg.schema_version == 5
     assert cfg.audio == AudioConfig()
     assert cfg.vad == VadConfig()
     assert cfg.stt == SttConfig()
@@ -42,9 +42,9 @@ def test_app_config_defaults_match_spec():
     assert cfg.translate.extra_translate_kwargs == {}
 
 
-def test_translate_repetition_guards_default_on():
+def test_translate_repetition_guard_defaults():
     cfg = TranslateConfig()
-    assert cfg.repetition_penalty == 1.1
+    assert cfg.repetition_penalty == 1.0
     assert cfg.no_repeat_ngram_size == 3
 
 

@@ -288,13 +288,13 @@ def test_translate_batch_kwargs_merge_extra_overrides_beam_size(model_dir: Path)
     assert kwargs["no_repeat_ngram_size"] == 3
 
 
-def test_default_repetition_guards_passed_to_translate_batch(model_dir: Path):
+def test_default_ngram_guard_passed_and_penalty_left_off(model_dir: Path):
     factory = _RecordingFactory()
     eng = TranslateEngine(_spec("nllb"), model_dir, _cfg(), EventBus(), translator_factory=factory)
     eng.load()
     eng.translate("hello world", get("English"), [get("Japanese")])
     kwargs = factory.built[0].batch_calls[0].kwargs
-    assert kwargs["repetition_penalty"] == 1.1
+    assert "repetition_penalty" not in kwargs
     assert kwargs["no_repeat_ngram_size"] == 3
 
 
@@ -433,3 +433,36 @@ def test_translate_after_failed_load_raises(model_dir: Path):
 
 
 # --------------------------------------------------------------------------
+
+
+def _dashed_engine(model_dir: Path, monkeypatch, raw: str) -> TranslateEngine:
+    eng = TranslateEngine(
+        _spec("nllb"), model_dir, _cfg(), EventBus(), translator_factory=_RecordingFactory()
+    )
+    eng.load()
+    monkeypatch.setattr(eng._tokenizer, "decode", lambda tokens: raw)
+    return eng
+
+
+def test_translate_strips_a_dash_the_source_did_not_have(model_dir: Path, monkeypatch):
+    eng = _dashed_engine(model_dir, monkeypatch, "- Thank you")
+
+    out = eng.translate("hello world", get("English"), [get("Japanese")])
+
+    assert out[0][1] == "Thank you"
+
+
+def test_translate_keeps_a_dash_the_source_opened_with(model_dir: Path, monkeypatch):
+    eng = _dashed_engine(model_dir, monkeypatch, "- Thank you")
+
+    out = eng.translate("  - hello world", get("English"), [get("Japanese")])
+
+    assert out[0][1] == "- Thank you"
+
+
+def test_translate_keeps_a_dash_with_no_space_after_it(model_dir: Path, monkeypatch):
+    eng = _dashed_engine(model_dir, monkeypatch, "-5 degrees")
+
+    out = eng.translate("hello world", get("English"), [get("Japanese")])
+
+    assert out[0][1] == "-5 degrees"

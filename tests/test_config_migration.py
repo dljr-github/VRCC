@@ -32,7 +32,7 @@ def test_schema_1_profile_written_mt_beam_migrates_to_default(tmp_path, stored):
     )
 
     assert store.config.translate.beam_size == TranslateConfig().beam_size
-    assert store.config.schema_version == 4
+    assert store.config.schema_version == 5
 
 
 def test_schema_1_hand_picked_mt_beam_is_kept(tmp_path):
@@ -87,15 +87,15 @@ def test_a_newer_schema_version_is_not_written_backwards(tmp_path):
     # migration over data it has already migrated.
     store = _stored(
         tmp_path / "config.json",
-        {"schema_version": 5, "translate": {"beam_size": 7}},
+        {"schema_version": 6, "translate": {"beam_size": 7}},
     )
 
-    assert store.config.schema_version == 5
+    assert store.config.schema_version == 6
     assert store.config.translate.beam_size == 7
 
     store.save_now()
     written = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
-    assert written["schema_version"] == 5
+    assert written["schema_version"] == 6
 
 
 def test_schema_2_default_overflow_migrates_to_auto(tmp_path):
@@ -108,7 +108,7 @@ def test_schema_2_default_overflow_migrates_to_auto(tmp_path):
 
     assert store.config.osc.overflow == "auto"
     assert store.config.osc.overflow == OscConfig().overflow
-    assert store.config.schema_version == 4
+    assert store.config.schema_version == 5
 
 
 @pytest.mark.parametrize("stored", ["truncate", "send"])
@@ -130,3 +130,36 @@ def test_schema_3_overflow_is_never_migrated(tmp_path):
     )
 
     assert store.config.osc.overflow == "split"
+
+
+def test_translate_repetition_penalty_defaults_to_one():
+    assert TranslateConfig().repetition_penalty == 1.0
+
+
+def test_schema_4_default_repetition_penalty_migrates(tmp_path):
+    store = _stored(
+        tmp_path / "config.json",
+        {"schema_version": 4, "translate": {"repetition_penalty": 1.1}},
+    )
+
+    assert store.config.translate.repetition_penalty == 1.0
+    assert store.config.schema_version == 5
+
+
+def test_schema_4_hand_picked_repetition_penalty_is_kept(tmp_path):
+    store = _stored(
+        tmp_path / "config.json",
+        {"schema_version": 4, "translate": {"repetition_penalty": 1.3}},
+    )
+
+    assert store.config.translate.repetition_penalty == 1.3
+
+
+def test_schema_5_repetition_penalty_is_never_migrated(tmp_path):
+    # Choosing 1.1 again from the Advanced page has to stick.
+    store = _stored(
+        tmp_path / "config.json",
+        {"schema_version": 5, "translate": {"repetition_penalty": 1.1}},
+    )
+
+    assert store.config.translate.repetition_penalty == 1.1

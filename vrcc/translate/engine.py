@@ -9,6 +9,7 @@ its runtime libraries) -> CPU int8 once. Zero Qt.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from vrcc.core.bus import EventBus
@@ -21,6 +22,10 @@ from vrcc.translate.registry import MtModelSpec, distinct_targets
 from vrcc.translate.tokenizers import MtTokenizer
 
 logger = logging.getLogger("vrcc.translate.engine")
+
+# NLLB opens one-to-three word fragments with "- " as if they were dialogue
+# lines (11% of fragments on the 600M model, tools/bench_mt.py).
+_LEADING_DASH = re.compile(r"^-\s+")
 
 # Case-insensitive substrings marking CUDA as unusable (one-shot CPU fallback):
 # out of VRAM, or missing runtime libraries. The last entry is the ctranslate2
@@ -194,10 +199,14 @@ class TranslateEngine:
         kwargs.update(self._cfg.extra_translate_kwargs)  # user wins, last word
 
         results = self._run_batch(source, target_prefix, kwargs)
-        return [
-            (t.display, normalize(tok.decode(list(r.hypotheses[0])), t))
-            for t, r in zip(targets, results)
-        ]
+        keep_dash = text.lstrip().startswith("-")
+        out = []
+        for t, r in zip(targets, results):
+            decoded = tok.decode(list(r.hypotheses[0]))
+            if not keep_dash:
+                decoded = _LEADING_DASH.sub("", decoded)
+            out.append((t.display, normalize(decoded, t)))
+        return out
 
     # -- internals ---------------------------------------------------------
 

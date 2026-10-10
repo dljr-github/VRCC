@@ -28,11 +28,12 @@ def test_default_decoding_is_not_greedy():
     )
 
 
-def test_default_anti_repetition_guards_are_on():
+def test_default_anti_repetition_guard_is_on():
     # A translator that loops fills all three chatbox lines with one phrase.
+    # The penalty is off: 1.1 dropped spoken numbers and no loop appeared at 1.0.
     cfg = TranslateConfig()
 
-    assert cfg.repetition_penalty > 1.0
+    assert cfg.repetition_penalty == 1.0
     assert cfg.no_repeat_ngram_size > 0
 
 
