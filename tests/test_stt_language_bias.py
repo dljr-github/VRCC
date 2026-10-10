@@ -93,6 +93,21 @@ def test_preferences_are_read_again_for_each_utterance():
     assert engine.transcribe(np.zeros(1600)).language == "fr"
 
 
+def test_spoken_only_restricts_even_a_clear_outside_match():
+    engine, model = engine_for(
+        [("fr", 0.90), ("en", 0.06), ("ja", 0.04)],
+        language_bias_mode="spoken_only", language_bias_languages=["French"],
+    )
+    result = engine.transcribe(np.zeros(1600))
+    assert result.language == "en"
+    assert model.decoded == ["en"]
+    assert engine.transcribe(np.zeros(1600), detect_language=True).language == "fr"
+    engine._cfg.spoken_languages = ["Japanese"]
+    assert engine.transcribe(np.zeros(1600)).language == "ja"
+    engine._cfg.spoken_languages = []
+    assert engine.transcribe(np.zeros(1600)).language == "fr"
+
+
 def test_chinese_scripts_do_not_double_the_bias():
     engine, _ = engine_for(
         [("fr", 0.70), ("zh", 0.30)],

@@ -13,6 +13,7 @@ def build_controls(dlg, form) -> None:
     combo = dlg._language_bias_combo = no_wheel(QComboBox())
     combo.addItem(tr("Wizard languages"), "wizard")
     combo.addItem(tr("Custom languages"), "custom")
+    combo.addItem(tr("Only chosen spoken languages"), "spoken_only")
     combo.addItem(tr("Off"), "off")
     set_combo_value(combo, cfg.language_bias_mode)
     form.addRow(tr("Auto-detection bias"), combo)
@@ -29,7 +30,8 @@ def build_controls(dlg, form) -> None:
     form.addRow("", picker)
     hint = QLabel(tr(
         "Used only with Auto (detect) on Whisper and SenseVoice. "
-        "An empty custom list applies no bias."
+        "Only chosen spoken languages restricts detection to your spoken languages "
+        "selected in Models. An empty language list applies no restriction."
     ))
     hint.setWordWrap(True)
     hint.setStyleSheet(dlg._muted_style)

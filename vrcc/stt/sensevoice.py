@@ -268,6 +268,7 @@ class SenseVoiceEngine:
             )
         slot = sensevoice_override(
             logits[0], self._language_tokens, preferred_codes(self._cfg, detect_language),
+            restrict=self._cfg.language_bias_mode == "spoken_only",
         )
         if slot is not None:
             feeds = dict(feeds, language=np.array([slot], dtype=np.int32))

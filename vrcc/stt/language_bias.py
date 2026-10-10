@@ -1,4 +1,4 @@
-"""Soft language priors for microphone auto detection."""
+"""Language preferences and restrictions for microphone auto detection."""
 
 import math
 
@@ -26,12 +26,18 @@ def preferred_codes(cfg: SttConfig, detect_language: bool) -> set[str]:
     }
 
 
-def choose_language(probabilities, preferred: set[str]) -> str | None:
-    """Reweight all candidates without restricting the model's language set."""
+def choose_language(probabilities, preferred: set[str], restrict: bool = False) -> str | None:
+    """Prefer selected candidates, or restrict detection to them when requested."""
     if not probabilities or not preferred:
         return None
+    candidates = (
+        [item for item in probabilities if item[0] in preferred]
+        if restrict else probabilities
+    )
+    if not candidates:
+        return None
     return max(
-        probabilities,
+        candidates,
         key=lambda item: item[1] * (_PREFERRED_WEIGHT if item[0] in preferred else 1),
     )[0]
 
@@ -39,6 +45,7 @@ def choose_language(probabilities, preferred: set[str]) -> str | None:
 def sensevoice_override(
     logits: np.ndarray, language_tokens: dict[int, tuple[str, int]],
     preferred: set[str],
+    restrict: bool = False,
 ) -> int | None:
     """Return a conditioning slot only when the prior changes the LID winner.
 
@@ -58,7 +65,13 @@ def sensevoice_override(
         code, _slot = language_tokens[token]
         return float(frame[token]) + (math.log(_PREFERRED_WEIGHT) if code in preferred else 0)
 
-    winner = max(language_tokens, key=score)
-    if winner == original or score(winner) <= score(original):
+    candidates = (
+        [token for token, (code, _slot) in language_tokens.items() if code in preferred]
+        if restrict else list(language_tokens)
+    )
+    if not candidates:
+        return None
+    winner = max(candidates, key=score)
+    if winner == original or (not restrict and score(winner) <= score(original)):
         return None
     return language_tokens[winner][1]

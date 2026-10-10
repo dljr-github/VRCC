@@ -39,7 +39,7 @@ class SttConfig(BaseModel):
     # preference in microphone Auto detection (Whisper and SenseVoice).
     # Empty leaves detection unbiased; recommendations fall back to source_language.
     spoken_languages: list[str] = Field(default_factory=list)
-    language_bias_mode: Literal["wizard", "custom", "off"] = "wizard"
+    language_bias_mode: Literal["wizard", "custom", "spoken_only", "off"] = "wizard"
     # Kept separate so an override never changes model recommendations.
     # An empty custom list intentionally applies no bias.
     language_bias_languages: list[str] = Field(default_factory=list)

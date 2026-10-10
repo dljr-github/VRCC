@@ -56,6 +56,16 @@ def test_clear_outside_language_does_not_rerun(model_dir):
     assert len(session.runs) == 1
 
 
+def test_spoken_only_restricts_clear_outside_language(model_dir):
+    session = LanguageSession(gap=4)
+    engine = make_engine(model_dir, session, language_bias_mode="spoken_only")
+    result = engine.transcribe(_speech())
+    assert result.language == "en"
+    assert result.text == "world"
+    assert [run["language"][0] for run in session.runs] == [0, 4]
+    assert engine.transcribe(_speech(), detect_language=True).language == "ja"
+
+
 @pytest.mark.parametrize(
     "overrides, detect",
     [
