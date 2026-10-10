@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 
 import numpy as np
@@ -44,10 +45,14 @@ from vrcc.core.config import SttConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.core.hardware import resolve
 from vrcc.core.languages import get
+from vrcc.stt.decision_log import (
+    Decision, audio_seconds, log_decision, sensevoice_language_probs, with_detection,
+)
 from vrcc.stt.engine import SttResult
 from vrcc.stt.fbank import apply_cmvn, apply_lfr, fbank
 from vrcc.stt.language_bias import preferred_codes, sensevoice_override
 from vrcc.stt.registry import WhisperSpec
+from vrcc.stt.sensevoice_decode import BLANK_ID, mean_nonblank_logprob, read_vocab
 
 logger = logging.getLogger("vrcc.stt.sensevoice")
 
@@ -57,10 +62,6 @@ _SAMPLE_RATE = 16000
 
 # warm_up() transcribes this much silence (0.5s at 16kHz).
 _WARM_UP_SAMPLES = 8000
-
-# CTC blank. The export's vocab puts it at 0 ("<unk>"), matching what
-# sherpa-onnx's own decoder assumes for this model family.
-_BLANK_ID = 0
 
 # The decode is prefixed with <|language|><|emotion|><|event|><|itn|> markers.
 _TAG_RE = re.compile(r"<\|([^|]*)\|>")
@@ -174,7 +175,7 @@ class SenseVoiceEngine:
                     self._check_cuda_session()
 
             self._read_metadata()
-            self._tokens = _read_vocab(vocab_path)
+            self._tokens = read_vocab(vocab_path)
             meta = self._session.get_modelmeta().custom_metadata_map
             self._language_tokens = {
                 i: (_TAG_TO_WHISPER[piece[2:-2]], int(meta[f"lang_{piece[2:-2]}"]))
@@ -235,42 +236,62 @@ class SenseVoiceEngine:
                 "call load() first."
             )
 
+        decision = Decision("sensevoice", audio_seconds(samples))
+        try:
+            result = self._decode_samples(samples, detect_language, decision)
+        except Exception:
+            decision.verdict = "error"
+            log_decision(logger, decision)
+            raise
+        log_decision(logger, decision)
+        return result
+
+    def _decode_samples(
+        self, samples: np.ndarray, detect_language: bool, decision: Decision
+    ) -> SttResult | None:
         features = self._features(np.ascontiguousarray(samples, dtype=np.float32))
         if features.shape[0] == 0:
+            decision.verdict = "too_short"
             return None
 
+        language_id = self._language_id(detect_language)
         feeds = {
             "x": features[None, :, :],
             "x_length": np.array([features.shape[0]], dtype=np.int32),
-            "language": np.array([self._language_id(detect_language)], dtype=np.int32),
+            "language": np.array([language_id], dtype=np.int32),
             "text_norm": np.array([self._text_norm_id], dtype=np.int32),
         }
         logits = self._session.run(["logits"], feeds)[0]
+        if language_id == self._auto_language_id:
+            with_detection(
+                decision, sensevoice_language_probs(logits[0], self._language_tokens)
+            )
         slot = sensevoice_override(
             logits[0], self._language_tokens, preferred_codes(self._cfg, detect_language),
         )
         if slot is not None:
             feeds = dict(feeds, language=np.array([slot], dtype=np.int32))
+            started = time.perf_counter()
             logits = self._session.run(["logits"], feeds)[0]
+            decision.redecode_s = time.perf_counter() - started
         logits0 = np.asarray(logits[0])
         ids = logits0.argmax(axis=-1)
         raw = self._decode(ids)
         text, language = self._split_tags(raw)
+        decision.used_language = language
         if not text:
+            decision.verdict = "empty"
             return None
+        decision.chars = len(text)
 
         # Non-empty text (checked above) decoded at least one non-blank token,
         # so None is unreachable; handled as a drop rather than an assert,
         # which -O strips and which would otherwise leave avg_logprob=None on
         # an SttResult field typed float.
-        avg_logprob = _mean_nonblank_logprob(logits0, ids)
+        avg_logprob = mean_nonblank_logprob(logits0, ids)
+        decision.avg_logprob = avg_logprob
         if avg_logprob is None or avg_logprob < self._cfg.sensevoice_avg_logprob_gate:
-            logger.debug(
-                "%s gated by avg_logprob: %s < %.3f",
-                self._spec.id,
-                "None" if avg_logprob is None else f"{avg_logprob:.3f}",
-                self._cfg.sensevoice_avg_logprob_gate,
-            )
+            decision.verdict = "gated_avg_logprob"
             return None
 
         # No no-speech signal (blank ratio was measured and rejected, see
@@ -349,7 +370,7 @@ class SenseVoiceEngine:
         turn SentencePiece's word marker back into a space."""
         pieces, previous = [], -1
         for token_id in ids.tolist():
-            if token_id != previous and token_id != _BLANK_ID:
+            if token_id != previous and token_id != BLANK_ID:
                 pieces.append(self._tokens[token_id])
             previous = token_id
         return "".join(pieces).replace("▁", " ").strip()
@@ -450,35 +471,3 @@ class SenseVoiceEngine:
             options.intra_op_num_threads = self._cfg.cpu_threads
         factory = self._session_factory or onnxruntime.InferenceSession
         return factory(str(model_path), sess_options=options, providers=list(providers))
-
-
-def _mean_nonblank_logprob(logits: np.ndarray, ids: np.ndarray) -> float | None:
-    """Mean softmax logprob of each frame's chosen token, over frames whose
-    argmax is not the CTC blank. Averaging over every frame instead would be
-    dominated by blank frames (measured at 72-77% of frames regardless of
-    noise, see module docstring), which barely moves between clean and
-    degraded audio. ``None`` when every frame decoded blank."""
-    max_logit = logits.max(axis=-1)
-    logsumexp = np.log(np.exp(logits - max_logit[:, None]).sum(axis=-1)) + max_logit
-    token_logprob = max_logit - logsumexp
-    non_blank = ids != _BLANK_ID
-    if not non_blank.any():
-        return None
-    return float(token_logprob[non_blank].mean())
-
-
-def _read_vocab(path: Path) -> list[str]:
-    """Read a sherpa-style ``tokens.txt`` ("<piece> <id>" per line) into a list
-    indexed by id. ``rsplit`` on the last space so a piece that contains one
-    still parses."""
-    tokens: dict[int, str] = {}
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            piece, _, index = line.rpartition(" ")
-            tokens[int(index)] = piece
-    if not tokens:
-        raise RuntimeError(f"{path} contains no tokens")
-    return [tokens.get(i, "") for i in range(max(tokens) + 1)]
