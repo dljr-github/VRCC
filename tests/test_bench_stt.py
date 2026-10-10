@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-import soundfile
+
+soundfile = pytest.importorskip("soundfile")
 
 _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))

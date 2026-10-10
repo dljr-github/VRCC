@@ -34,7 +34,7 @@ the compute type the engine resolved, and its per-utterance hypotheses and
 latencies stay in the result file for later paired comparisons.
 ``--export`` bundles every result with the machine's hardware info into one
 shareable file -- see benchmarks/README.md for contributing yours. Dev tool
-only -- not packaged, no test coverage.
+only -- not packaged; tests/test_bench_stt.py covers it with a stub engine.
 """
 
 from __future__ import annotations
