@@ -325,7 +325,7 @@
   "Use the processor?": "プロセッサを使用しますか？",
   "Use the recommended setup?": "おすすめのセットアップを使いますか？",
   "Use your graphics card (faster) or the processor.": "グラフィックカード（高速）またはプロセッサを使用します。",
-  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. An empty language list applies no restriction.": "WhisperとSenseVoiceで「自動（検出）」を選んだ場合のみ使用します。「選んだ話す言語のみ」は、検出をモデルで選んだ話す言語に限定します。言語リストが空の場合、制限はありません。",
+  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. Speech in any other language is then captioned in the wrong language or dropped. An empty language list applies no restriction.": "WhisperとSenseVoiceで「自動（検出）」を選んだ場合のみ使用します。「選んだ話す言語のみ」は、検出をモデルで選んだ話す言語に限定します。他の言語の発話は、誤った言語で字幕化されるか、破棄されます。言語リストが空の場合、制限はありません。",
   "VRCC is up to date.": "VRCC は最新です。",
   "VRCC itself": "VRCC 本体",
   "VRCC uses two models: one to hear your speech and one to translate it. Download the ones you want here, then choose which to use in Settings.": "VRCC は 2 つのモデルを使用します。1 つは音声の聞き取り用、もう 1 つは翻訳用です。必要なモデルをここでダウンロードし、どのモデルを使うかは設定で選んでください。",

@@ -266,9 +266,10 @@ class SenseVoiceEngine:
             with_detection(
                 decision, sensevoice_language_probs(logits[0], self._language_tokens)
             )
+        preferred = preferred_codes(self._cfg, detect_language)
+        restrict = bool(preferred) and self._cfg.language_bias_mode == "spoken_only"
         slot = sensevoice_override(
-            logits[0], self._language_tokens, preferred_codes(self._cfg, detect_language),
-            restrict=self._cfg.language_bias_mode == "spoken_only",
+            logits[0], self._language_tokens, preferred, restrict=restrict,
         )
         if slot is not None:
             feeds = dict(feeds, language=np.array([slot], dtype=np.int32))
@@ -282,6 +283,12 @@ class SenseVoiceEngine:
         decision.used_language = language
         if not text:
             decision.verdict = "empty"
+            return None
+        # The forced input slot does not bind the emitted tag, and a blank
+        # first frame forces nothing, so the restriction is enforced here.
+        if restrict and language not in preferred:
+            logger.debug("%s dropped outside spoken languages: %s", self._spec.id, language)
+            decision.verdict = "outside_spoken"
             return None
         decision.chars = len(text)
 

@@ -325,7 +325,7 @@
   "Use the processor?": "ใช้โปรเซสเซอร์หรือไม่",
   "Use the recommended setup?": "ใช้การกำหนดค่าที่แนะนำหรือไม่?",
   "Use your graphics card (faster) or the processor.": "ใช้การ์ดจอ (เร็วกว่า) หรือโปรเซสเซอร์",
-  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. An empty language list applies no restriction.": "ใช้เฉพาะกับอัตโนมัติ (ตรวจจับ) บน Whisper และ SenseVoice ตัวเลือก “เฉพาะภาษาที่พูดที่เลือก” จะจำกัดการตรวจจับให้อยู่ในภาษาที่พูดซึ่งเลือกไว้ในโมเดล หากรายการภาษาว่าง จะไม่มีการจำกัด",
+  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. Speech in any other language is then captioned in the wrong language or dropped. An empty language list applies no restriction.": "ใช้เฉพาะกับอัตโนมัติ (ตรวจจับ) บน Whisper และ SenseVoice ตัวเลือก “เฉพาะภาษาที่พูดที่เลือก” จะจำกัดการตรวจจับให้อยู่ในภาษาที่พูดซึ่งเลือกไว้ในโมเดล เสียงพูดในภาษาอื่นจะถูกแสดงคำบรรยายเป็นภาษาที่ผิดหรือถูกทิ้ง หากรายการภาษาว่าง จะไม่มีการจำกัด",
   "VRCC is up to date.": "VRCC เป็นเวอร์ชันล่าสุดแล้ว",
   "VRCC itself": "ตัว VRCC เอง",
   "VRCC uses two models: one to hear your speech and one to translate it. Download the ones you want here, then choose which to use in Settings.": "VRCC ใช้โมเดลสองตัว: ตัวหนึ่งฟังเสียงพูดของคุณ อีกตัวหนึ่งแปลคำพูดนั้น ดาวน์โหลดโมเดลที่ต้องการได้ที่นี่ แล้วไปเลือกว่าจะใช้ตัวไหนในหน้าการตั้งค่า",

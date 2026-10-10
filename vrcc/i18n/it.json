@@ -325,7 +325,7 @@
   "Use the processor?": "Usare il processore?",
   "Use the recommended setup?": "Usare la configurazione consigliata?",
   "Use your graphics card (faster) or the processor.": "Usa la scheda video (più veloce) o il processore.",
-  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. An empty language list applies no restriction.": "Usato solo con Auto (rileva) su Whisper e SenseVoice. «Solo le lingue parlate scelte» limita il rilevamento alle lingue parlate selezionate in Modelli. Un elenco di lingue vuoto non applica alcuna restrizione.",
+  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. Speech in any other language is then captioned in the wrong language or dropped. An empty language list applies no restriction.": "Usato solo con Auto (rileva) su Whisper e SenseVoice. «Solo le lingue parlate scelte» limita il rilevamento alle lingue parlate selezionate in Modelli. Il parlato in altre lingue viene quindi sottotitolato in una lingua sbagliata o scartato. Un elenco di lingue vuoto non applica alcuna restrizione.",
   "VRCC is up to date.": "VRCC è aggiornato.",
   "VRCC itself": "VRCC stesso",
   "VRCC uses two models: one to hear your speech and one to translate it. Download the ones you want here, then choose which to use in Settings.": "VRCC usa due modelli: uno per ascoltare quello che dici e uno per tradurlo. Scarica qui quelli che vuoi, poi scegli quali usare nelle Impostazioni.",

@@ -325,7 +325,7 @@
   "Use the processor?": "De processor gebruiken?",
   "Use the recommended setup?": "Aanbevolen configuratie gebruiken?",
   "Use your graphics card (faster) or the processor.": "Gebruik je videokaart (sneller) of de processor.",
-  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. An empty language list applies no restriction.": "Alleen gebruikt met Auto (detecteren) in Whisper en SenseVoice. ‘Alleen gekozen gesproken talen’ beperkt de detectie tot de gesproken talen die je bij Modellen hebt gekozen. Een lege talenlijst legt geen beperking op.",
+  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. Speech in any other language is then captioned in the wrong language or dropped. An empty language list applies no restriction.": "Alleen gebruikt met Auto (detecteren) in Whisper en SenseVoice. ‘Alleen gekozen gesproken talen’ beperkt de detectie tot de gesproken talen die je bij Modellen hebt gekozen. Spraak in andere talen wordt dan in een verkeerde taal ondertiteld of weggegooid. Een lege talenlijst legt geen beperking op.",
   "VRCC is up to date.": "VRCC is up-to-date.",
   "VRCC itself": "VRCC zelf",
   "VRCC uses two models: one to hear your speech and one to translate it. Download the ones you want here, then choose which to use in Settings.": "VRCC gebruikt twee modellen: één om je spraak te horen en één om die te vertalen. Download hier de modellen die je wilt; in Instellingen kies je welke je gebruikt.",

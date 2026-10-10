@@ -325,7 +325,7 @@
   "Use the processor?": "İşlemci kullanılsın mı?",
   "Use the recommended setup?": "Önerilen yapılandırma kullanılsın mı?",
   "Use your graphics card (faster) or the processor.": "Ekran kartını (daha hızlı) veya işlemciyi kullan.",
-  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. An empty language list applies no restriction.": "Yalnızca Whisper ve SenseVoice ile Otomatik (algıla) seçildiğinde kullanılır. “Yalnızca seçilen konuşulan diller”, algılamayı Modeller bölümünde seçtiğin konuşulan dillerle sınırlar. Dil listesi boşsa herhangi bir kısıtlama uygulanmaz.",
+  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. Speech in any other language is then captioned in the wrong language or dropped. An empty language list applies no restriction.": "Yalnızca Whisper ve SenseVoice ile Otomatik (algıla) seçildiğinde kullanılır. “Yalnızca seçilen konuşulan diller”, algılamayı Modeller bölümünde seçtiğin konuşulan dillerle sınırlar. Diğer dillerdeki konuşma bu durumda yanlış dilde altyazılanır veya atılır. Dil listesi boşsa herhangi bir kısıtlama uygulanmaz.",
   "VRCC is up to date.": "VRCC güncel.",
   "VRCC itself": "VRCC'nin kendisi",
   "VRCC uses two models: one to hear your speech and one to translate it. Download the ones you want here, then choose which to use in Settings.": "VRCC iki model kullanır: biri konuşmanı duymak, diğeri çevirmek için. İstediklerini buradan indir, hangilerini kullanacağını Ayarlar'dan seç.",

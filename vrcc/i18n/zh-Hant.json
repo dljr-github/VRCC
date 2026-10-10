@@ -325,7 +325,7 @@
   "Use the processor?": "要使用處理器嗎？",
   "Use the recommended setup?": "要使用建議設定嗎？",
   "Use your graphics card (faster) or the processor.": "使用你的顯示卡（較快）或處理器。",
-  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. An empty language list applies no restriction.": "僅在 Whisper 和 SenseVoice 中選擇「自動（偵測）」時生效。「僅限所選的說話語言」會把偵測範圍限定在你在「模型」中選擇的說話語言內。語言清單為空時，不做任何限制。",
+  "Used only with Auto (detect) on Whisper and SenseVoice. Only chosen spoken languages restricts detection to your spoken languages selected in Models. Speech in any other language is then captioned in the wrong language or dropped. An empty language list applies no restriction.": "僅在 Whisper 和 SenseVoice 中選擇「自動（偵測）」時生效。「僅限所選的說話語言」會把偵測範圍限定在你在「模型」中選擇的說話語言內。其他語言的語音會以錯誤的語言產生字幕，或被丟棄。語言清單為空時，不做任何限制。",
   "VRCC is up to date.": "VRCC 已是最新版本。",
   "VRCC itself": "VRCC 本身",
   "VRCC uses two models: one to hear your speech and one to translate it. Download the ones you want here, then choose which to use in Settings.": "VRCC 使用兩種模型：一個負責聽你說話，另一個負責翻譯。在這裡下載你想要的模型，要使用哪一個請到「設定」中選擇。",

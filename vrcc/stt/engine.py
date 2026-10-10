@@ -283,6 +283,10 @@ class SttEngine:
                 if consistent or restrict else None
             )
             if language is not None and language != info.language:
+                logger.debug(
+                    "language bias (%s) moved %s to %s",
+                    self._cfg.language_bias_mode, info.language, language,
+                )
                 # Whisper returns detection info before the lazy segment decode.
                 # Discard that generator so only the chosen language is decoded.
                 started = time.perf_counter()

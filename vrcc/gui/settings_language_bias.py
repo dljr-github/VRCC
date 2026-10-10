@@ -31,7 +31,8 @@ def build_controls(dlg, form) -> None:
     hint = QLabel(tr(
         "Used only with Auto (detect) on Whisper and SenseVoice. "
         "Only chosen spoken languages restricts detection to your spoken languages "
-        "selected in Models. An empty language list applies no restriction."
+        "selected in Models. Speech in any other language is then captioned in the "
+        "wrong language or dropped. An empty language list applies no restriction."
     ))
     hint.setWordWrap(True)
     hint.setStyleSheet(dlg._muted_style)
