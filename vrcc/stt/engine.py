@@ -9,6 +9,7 @@ libraries) falls back to CPU int8 once. Zero Qt.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,9 @@ from vrcc.core.config import SttConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.core.hardware import resolve
 from vrcc.core.languages import get
+from vrcc.stt.decision_log import (
+    Decision, audio_seconds, log_decision, with_detection,
+)
 from vrcc.stt.language_bias import choose_language, preferred_codes
 
 logger = logging.getLogger("vrcc.stt.engine")
@@ -178,8 +182,9 @@ class SttEngine:
             if not self._cfg.initial_prompt:
                 kwargs["initial_prompt"] = None
         preferred = preferred_codes(self._cfg, detect_language)
-        segments, info = self._run_transcribe(samples, kwargs, preferred)
-        return self._build_result(segments, info)
+        decision = Decision("whisper", audio_seconds(samples))
+        segments, info = self._run_transcribe(samples, kwargs, preferred, decision)
+        return self._build_result(segments, info, decision)
 
     # -- internals -------------------------------------------------------------
 
@@ -247,10 +252,18 @@ class SttEngine:
             return None
         return _SCRIPT_SEED_PROMPTS.get(source.nllb.rpartition("_")[2])
 
-    def _transcribe_once(self, samples: np.ndarray, kwargs: dict, preferred: set[str]):
+    def _transcribe_once(
+        self, samples: np.ndarray, kwargs: dict, preferred: set[str], decision: Decision
+    ):
+        decision.redecode_s = None
         segments, info = self._model.transcribe(samples, **kwargs)
+        probabilities = getattr(info, "all_language_probs", None)
+        if kwargs["language"] is None:
+            with_detection(decision, probabilities)
+            decision.language = decision.language or info.language
+            if decision.language_prob is None:
+                decision.language_prob = getattr(info, "language_probability", None)
         if preferred and kwargs["language"] is None and not kwargs.get("multilingual"):
-            probabilities = info.all_language_probs
             # Multi-segment detection can report a majority vote alongside only
             # the final segment's scores. Those cannot reweight the majority.
             consistent = (
@@ -261,12 +274,18 @@ class SttEngine:
             if language is not None and language != info.language:
                 # Whisper returns detection info before the lazy segment decode.
                 # Discard that generator so only the chosen language is decoded.
+                started = time.perf_counter()
                 segments, info = self._model.transcribe(
                     samples, **dict(kwargs, language=language)
                 )
+                segments = list(segments)
+                decision.redecode_s = time.perf_counter() - started
+        decision.used_language = info.language
         return list(segments), info
 
-    def _run_transcribe(self, samples: np.ndarray, kwargs: dict, preferred: set[str]):
+    def _run_transcribe(
+        self, samples: np.ndarray, kwargs: dict, preferred: set[str], decision: Decision
+    ):
         """Call ``model.transcribe``, falling back to CPU int8 once when CUDA
         is unusable.
 
@@ -275,12 +294,12 @@ class SttEngine:
         propagates without a ready event.
         """
         try:
-            return self._transcribe_once(samples, kwargs, preferred)
+            return self._transcribe_once(samples, kwargs, preferred, decision)
         except RuntimeError as exc:
             if not _is_cuda_unusable(exc):
                 raise
             self._fallback_to_cpu(str(exc))
-            segments, info = self._transcribe_once(samples, kwargs, preferred)
+            segments, info = self._transcribe_once(samples, kwargs, preferred, decision)
             self._bus.publish(
                 EngineStateChanged(
                     "stt", "ready", f"{self._device}:{self._compute_type}"
@@ -288,13 +307,21 @@ class SttEngine:
             )
             return segments, info
 
-    def _build_result(self, segments: list, info) -> SttResult | None:
+    def _build_result(self, segments: list, info, decision: Decision) -> SttResult | None:
         """Join segment texts and apply the length-weighted quality gates (avg
         logprob, no-speech, and a compression-ratio drop for runaway repetition
-        loops)."""
+        loops). Logs one decision record either way."""
+        try:
+            return self._gate(segments, info, decision)
+        finally:
+            log_decision(logger, decision)
+
+    def _gate(self, segments: list, info, decision: Decision) -> SttResult | None:
         text = " ".join(seg.text for seg in segments).strip()
         if not text:
+            decision.verdict = "empty"
             return None
+        decision.chars = len(text)
 
         total_weight = 0.0
         weighted_sum = 0.0
@@ -308,24 +335,17 @@ class SttEngine:
             max_compression_ratio = max(max_compression_ratio, seg.compression_ratio)
 
         avg_logprob = weighted_sum / total_weight if total_weight > 0 else None
+        decision.avg_logprob = avg_logprob
+        decision.no_speech = max_no_speech_prob
+        decision.compression = max_compression_ratio
         if avg_logprob is None or avg_logprob < self._cfg.avg_logprob_gate:
-            logger.debug(
-                "gated by avg_logprob: %s < %.3f",
-                "None" if avg_logprob is None else f"{avg_logprob:.3f}",
-                self._cfg.avg_logprob_gate,
-            )
+            decision.verdict = "gated_avg_logprob"
             return None
         if max_no_speech_prob > self._cfg.no_speech_gate:
-            logger.debug(
-                "gated by no_speech_prob: %.3f > %.3f",
-                max_no_speech_prob, self._cfg.no_speech_gate,
-            )
+            decision.verdict = "gated_no_speech_prob"
             return None
         if max_compression_ratio > self._cfg.compression_ratio_gate:
-            logger.debug(
-                "gated by compression_ratio: %.3f > %.3f",
-                max_compression_ratio, self._cfg.compression_ratio_gate,
-            )
+            decision.verdict = "gated_compression_ratio"
             return None
 
         return SttResult(

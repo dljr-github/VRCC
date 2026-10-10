@@ -31,6 +31,7 @@ from vrcc.core.config import SttConfig
 from vrcc.core.events import EngineStateChanged
 from vrcc.core.hardware import resolve
 from vrcc.core.languages import get
+from vrcc.stt.decision_log import Decision, audio_seconds, log_decision
 from vrcc.stt.engine import SttResult
 from vrcc.stt.registry import WhisperSpec
 
@@ -186,23 +187,32 @@ class OnnxAsrEngine:
                 "call load() first."
             )
 
+        decision = Decision("parakeet", audio_seconds(samples))
+        try:
+            return self._recognize(samples, detect_language, decision)
+        finally:
+            log_decision(logger, decision)
+
+    def _recognize(
+        self, samples: np.ndarray, detect_language: bool, decision: Decision
+    ) -> SttResult | None:
         result = self._model_ts.recognize(
             np.ascontiguousarray(samples, dtype=np.float32),
             sample_rate=_SAMPLE_RATE,
         )
         text = (result.text or "").strip()
         if not text:
+            decision.verdict = "empty"
             return None
+        decision.chars = len(text)
 
         # Missing/empty logprobs (a future onnx_asr build changing its
         # contract) fall back to the neutral value rather than gating blind.
         logprobs = result.logprobs
         avg_logprob = sum(logprobs) / len(logprobs) if logprobs else 0.0
+        decision.avg_logprob = avg_logprob
         if logprobs and avg_logprob < self._cfg.parakeet_avg_logprob_gate:
-            logger.debug(
-                "%s gated by avg_logprob: %.3f < %.3f",
-                self._spec.id, avg_logprob, self._cfg.parakeet_avg_logprob_gate,
-            )
+            decision.verdict = "gated_avg_logprob"
             return None
 
         source = self._cfg.source_language

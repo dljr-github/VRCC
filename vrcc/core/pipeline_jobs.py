@@ -241,6 +241,7 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
         # Same guard _call_engine applies: a job that outlasted stop()'s join
         # returns into the next run, whose counters it must not touch.
         p._stats.record_reuse()
+        logger.debug("stt_decision reuse utterance=%s", job.utterance_id)
     if stop.is_set():
         _finalize_dropped(p, job.utterance_id)  # abandoned mid-call
         return

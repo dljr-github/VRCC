@@ -97,6 +97,24 @@ Speed vs Quality table. If you want to add yours,
 To benchmark the STT models on your hardware (and contribute the numbers),
 see [benchmarks/README.md](benchmarks/README.md).
 
+## Reading STT decisions from a log
+
+With debug logging on, every transcription writes one `stt_decision` line
+(whisper, SenseVoice and Parakeet), and every final that reuses its
+speculative result writes `stt_decision reuse utterance=N`. Caption text is
+never logged.
+
+```
+findstr stt_decision vrcc.log
+```
+
+Fields: `audio_s`, `lang`/`lang_p` (detected, before any bias), `alt`/`alt_p`
+(runner-up), `used` (language of the kept decode), `biased` and `redecode_s`
+(the language bias forced a second decode, and what it cost), `avg_logprob`,
+`no_speech`, `compression` (worst segment), `verdict` (`accepted`, `empty`,
+`too_short` or `gated_*`) and `chars`. A `-` means the backend has no such
+signal.
+
 ## End-to-end smoke test
 
 `scripts/smoke_e2e.py` runs the real VAD → STT → MT → chatbox pipeline over
