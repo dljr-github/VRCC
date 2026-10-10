@@ -1,0 +1,205 @@
+{
+  "en": {
+    "number": [
+      "My room number is 1121.", "Call me at 555 1212.", "It is 2:22 right now.",
+      "Meet me at 11:11 tonight.", "Join instance 4004.", "I am level 33 now.",
+      "I got 100 points, then 100 more.", "The code is 7 7 3 3.",
+      "Okay 1, 2, 3, 4, 5, 6, 7.", "Count down 3, 2, 1, go!",
+      "That costs 99 dollars, not 9.", "We have 2 cats and 2 dogs.",
+      "My birthday is 12/12.", "Version 2.2.0 is out.", "Turn to page 202.",
+      "The world has 16 players and 16 more waiting.", "Add 5 and 5, you get 10.",
+      "I was born in 1999.", "Port 9000 or 9001.", "Wait 10 minutes, then 10 more.",
+      "Score was 3 to 3.", "Pin 0000 is too easy.",
+      "I slept 8 hours, maybe 8 and a half.", "Room 303, floor 3.",
+      "Give me 5, no, 5 more seconds.", "I have 3 friends, 3 avatars and 3 worlds.",
+      "Is it 10 or 10 and a half?", "My number ends in 88 88.", "2 plus 2 is 4.",
+      "The year 2020 was hard, 2021 too.", "We need 12 people, we have 12.",
+      "Set the volume to 50, not 500.", "One more time, 1 2 3.",
+      "Chapter 7, verse 7.", "Hold on for 30 seconds, 30!",
+      "I paid 1000 yen, then 1000 again.", "My ID ends in 1001.",
+      "I will be back in 5 minutes."
+    ],
+    "repeat": [
+      "It's 4 4 4 in a row.", "It's 6 6 6, scary.", "4 4 4", "9 9 9 9 9",
+      "1 1 2 3 5 8", "2 2 2 2 and then 3 3 3 3.",
+      "Type 8 8 8 8 into the keypad."
+    ],
+    "spoken": [
+      "one one two three five eight", "four four four", "nine nine nine nine",
+      "Press one two three four.", "It was seven seven seven.", "Zero zero seven."
+    ],
+    "interjection": [
+      "No no no no no.", "Ha ha ha ha ha.", "Yeah yeah yeah yeah.",
+      "Go go go go!", "Hello? Hello? Hello? Hello?", "I I I think so.",
+      "Thank you. Thank you. Thank you.", "Wait, wait, wait, wait, wait.",
+      "Bye bye bye bye.", "Very very very very very good.",
+      "La la la la la la.", "Oh oh oh oh oh oh oh.", "Hmm hmm hmm hmm."
+    ],
+    "fragment": [
+      "Yeah.", "Okay.", "Hi!", "Hmm.", "Oh.", "Yes.", "No.", "Bye!", "Wait.",
+      "What?", "Thank you.", "Sure.", "Really?", "Nice.", "Cool.", "Right.",
+      "Sorry.", "Hello.", "Thanks.", "Good night.", "See you.", "Me too.",
+      "I know.", "Same.", "Wow.", "Nope.", "Alright.", "Got it.", "Uh huh.",
+      "Oh my god.", "lol", "Hey!", "Come here.", "Look at this."
+    ],
+    "sentence": [
+      "Hey, can you hear me okay?", "My microphone was muted, sorry about that.",
+      "Good morning, how are you doing today?",
+      "That world was really cool, thanks for showing me.",
+      "Do you want to go to the next world with us?",
+      "I think my avatar is broken again.", "Can you send me a friend request?",
+      "It's getting late, I should go to sleep soon.",
+      "Where did you get that avatar from?",
+      "Sorry, I was away from my keyboard for a second.",
+      "This is my first time in VRChat, so please be patient.",
+      "Let's meet at the fountain and then go to the club.",
+      "Can you hear the music, or is it too loud?",
+      "I love your shader, did you make it yourself?"
+    ]
+  },
+  "ja": {
+    "number": [
+      "部屋番号は1121です。", "5分で戻ります。", "今2時22分だよ。",
+      "今夜11時11分に会おう。", "インスタンス4004に来て。", "レベル33になった。",
+      "100ポイント取って、さらに100ポイント。", "暗証番号は7733です。",
+      "3、2、1、スタート!", "99ドルで、9ドルじゃないよ。",
+      "猫が2匹と犬が2匹いるよ。", "12月12日が誕生日です。", "202ページを開いて。",
+      "このワールドには16人いて、あと16人待ってる。", "5たす5は10。"
+    ],
+    "repeat": ["4 4 4", "7 7 7 7", "1 1 2 3 5 8"],
+    "interjection": [
+      "いやいやいやいや。", "はははははは。", "うんうんうんうん。",
+      "ありがとうありがとうありがとう。", "ちょっとちょっとちょっと。"
+    ],
+    "fragment": [
+      "うん。", "はい。", "え?", "ああ。", "ありがとう。", "ごめん。", "本当?",
+      "いいね。", "了解。", "またね。", "おはよう。", "待って。", "すごい。",
+      "なるほど。", "そうだね。", "おつかれ。"
+    ],
+    "sentence": [
+      "こんにちは、元気ですか?", "マイクがミュートになってた、ごめん。",
+      "このワールドすごく綺麗だね。", "今日は疲れた。", "何て言ったの?",
+      "次のワールドに一緒に行きませんか?", "そのアバターはどこで手に入れたの?",
+      "もうすぐ寝るね、おやすみ。"
+    ]
+  },
+  "zh": {
+    "number": [
+      "我的房间号是1121。", "5分钟后回来。", "现在是2点22分。", "今晚11点11分见。",
+      "来实例4004。", "我现在33级了。", "我拿了100分,然后又拿了100分。",
+      "密码是7733。", "倒数3、2、1,开始!", "是99块,不是9块。", "我有2只猫和2只狗。",
+      "我的生日是12月12号。", "翻到第202页。", "5加5等于10。"
+    ],
+    "repeat": ["4 4 4", "7 7 7 7", "1 1 2 3 5 8"],
+    "interjection": [
+      "不不不不不。", "哈哈哈哈哈哈。", "好好好好好。", "快快快快快!", "谢谢谢谢谢谢。"
+    ],
+    "fragment": [
+      "好。", "嗯。", "是的。", "哦。", "谢谢。", "对不起。", "真的吗?", "不错。",
+      "再见。", "等一下。", "早上好。", "我也是。", "没问题。", "太棒了。"
+    ],
+    "sentence": [
+      "你好,你听得到我说话吗?", "我的麦克风刚才静音了,抱歉。", "这个世界真漂亮。",
+      "我今天很累。", "你说什么?", "要不要跟我们去下一个世界?", "你的头像是在哪里弄的?"
+    ]
+  },
+  "ko": {
+    "number": [
+      "내 방 번호는 1121이야.", "5분 뒤에 돌아올게.", "지금 2시 22분이야.",
+      "오늘 밤 11시 11분에 만나.", "인스턴스 4004로 와.", "나 지금 33레벨이야.",
+      "100점 얻고 또 100점 얻었어.", "비밀번호는 7733이야.", "3, 2, 1, 시작!",
+      "99달러야, 9달러 아니고.", "고양이 2마리랑 강아지 2마리가 있어.",
+      "내 생일은 12월 12일이야.", "202페이지를 펴."
+    ],
+    "repeat": ["4 4 4", "7 7 7 7", "1 1 2 3 5 8"],
+    "interjection": [
+      "아니 아니 아니 아니.", "하하하하하하.", "응 응 응 응.", "고마워 고마워 고마워."
+    ],
+    "fragment": [
+      "응.", "네.", "어?", "아.", "고마워.", "미안.", "진짜?", "좋다.", "잘 가.",
+      "잠깐만.", "안녕.", "나도.", "알았어.", "대박."
+    ],
+    "sentence": [
+      "안녕하세요, 내 목소리 들려요?", "마이크가 음소거되어 있었어요, 미안해요.",
+      "이 월드 정말 예쁘다.", "오늘 너무 피곤해.", "다음 월드에 같이 갈래요?",
+      "그 아바타 어디서 구했어요?"
+    ]
+  },
+  "fr": {
+    "number": [
+      "Mon numéro de chambre est le 1121.", "Je reviens dans 5 minutes.",
+      "Il est 2 h 22.", "Rendez-vous à 23 h 11.", "Viens dans l'instance 4004.",
+      "Je suis niveau 33.", "J'ai eu 100 points, puis 100 de plus.",
+      "Le code est 7 7 3 3.", "Compte à rebours: 3, 2, 1, partez!",
+      "Ça coûte 99 euros, pas 9.", "On a 2 chats et 2 chiens.",
+      "Mon anniversaire est le 12 décembre.", "Ouvre la page 202.",
+      "5 plus 5 font 10."
+    ],
+    "repeat": ["4 4 4", "7 7 7 7", "1 1 2 3 5 8"],
+    "interjection": [
+      "Non non non non non.", "Ha ha ha ha ha.", "Oui oui oui oui.",
+      "Merci merci merci merci."
+    ],
+    "fragment": [
+      "Oui.", "Non.", "D'accord.", "Quoi?", "Merci.", "Salut!", "Désolé.",
+      "Vraiment?", "Super.", "Attends.", "Bonne nuit.", "Moi aussi.",
+      "Je sais.", "Waouh."
+    ],
+    "sentence": [
+      "Salut, tu m'entends bien?", "Mon micro était coupé, désolé.",
+      "Ce monde est vraiment magnifique.", "Je suis fatigué aujourd'hui.",
+      "Tu veux aller dans le prochain monde avec nous?",
+      "Où as-tu trouvé cet avatar?"
+    ]
+  },
+  "es": {
+    "number": [
+      "Mi número de habitación es el 1121.", "Vuelvo en 5 minutos.",
+      "Son las 2:22 ahora mismo.", "Nos vemos esta noche a las 11:11.",
+      "Entra a la instancia 4004.", "Ahora soy nivel 33.",
+      "Saqué 100 puntos y luego 100 más.", "El código es 7 7 3 3.",
+      "Cuenta atrás: 3, 2, 1, ya!", "Cuesta 99 dólares, no 9.",
+      "Tenemos 2 gatos y 2 perros.", "Mi cumpleaños es el 12 de diciembre.",
+      "Abre la página 202.", "5 más 5 son 10."
+    ],
+    "repeat": ["4 4 4", "7 7 7 7", "1 1 2 3 5 8"],
+    "interjection": [
+      "No no no no no.", "Ja ja ja ja ja.", "Sí sí sí sí.", "Gracias gracias gracias."
+    ],
+    "fragment": [
+      "Sí.", "No.", "Vale.", "Qué?", "Gracias.", "Hola!", "Perdón.", "En serio?",
+      "Genial.", "Espera.", "Buenas noches.", "Yo también.", "Ya lo sé.", "Guau."
+    ],
+    "sentence": [
+      "Hola, me escuchas bien?", "Mi micrófono estaba silenciado, perdón.",
+      "Este mundo es muy bonito.", "Hoy estoy cansado.",
+      "Quieres ir con nosotros al siguiente mundo?",
+      "De dónde sacaste ese avatar?"
+    ]
+  },
+  "de": {
+    "number": [
+      "Meine Zimmernummer ist 1121.", "Ich bin in 5 Minuten zurück.",
+      "Es ist gerade 2:22 Uhr.", "Wir treffen uns heute um 23:11 Uhr.",
+      "Komm in Instanz 4004.", "Ich bin jetzt Level 33.",
+      "Ich habe 100 Punkte bekommen und dann nochmal 100.",
+      "Der Code ist 7 7 3 3.", "Zähl runter: 3, 2, 1, los!",
+      "Das kostet 99 Euro, nicht 9.", "Wir haben 2 Katzen und 2 Hunde.",
+      "Schlag Seite 202 auf.", "5 plus 5 ist 10."
+    ],
+    "repeat": ["4 4 4", "7 7 7 7", "1 1 2 3 5 8"],
+    "interjection": [
+      "Nein nein nein nein nein.", "Ha ha ha ha ha.", "Ja ja ja ja.", "Danke danke danke."
+    ],
+    "fragment": [
+      "Ja.", "Nein.", "Okay.", "Was?", "Danke.", "Hallo!", "Entschuldigung.",
+      "Echt?", "Super.", "Warte.", "Gute Nacht.", "Ich auch.", "Ich weiß.", "Wow."
+    ],
+    "sentence": [
+      "Hallo, kannst du mich gut hören?", "Mein Mikrofon war stumm, tut mir leid.",
+      "Diese Welt ist wirklich wunderschön.", "Ich bin heute müde.",
+      "Willst du mit uns in die nächste Welt gehen?",
+      "Woher hast du diesen Avatar?"
+    ]
+  }
+}
