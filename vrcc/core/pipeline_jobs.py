@@ -406,7 +406,7 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
     if isinstance(job, _PrefetchJob):
         pretranslate.run(p, job, stop)
         return
-    if pretranslate.real_queue_full(p):
+    if p._mt_queue.full():
         # Shed at the consumer, oldest job first: a queue still full after a
         # dequeue means the engine is falling behind real time. Sending this
         # job untranslated keeps the STT worker's _enqueue from blocking on

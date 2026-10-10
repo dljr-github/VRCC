@@ -6,9 +6,11 @@ low-priority prefetch whose result is cached; the real job takes it from the
 cache when utterance, text, source, targets and engine all match.
 
 A prefetch is invisible to everything but this cache: it publishes no events,
-submits nothing and never touches the typing indicator. It also never costs a
-real job anything: it is only queued with spare room, dropped at dequeue if
-real work is waiting, and ignored by the MT worker's shed check.
+submits nothing and never touches the typing indicator. It is only queued
+into an empty MT queue, so it never takes a slot a real or typed job could
+use, and it is dropped at dequeue if real work has arrived since. One that is
+already running cannot be interrupted and can delay the next real job by at
+most one MT call.
 """
 
 from __future__ import annotations
@@ -55,7 +57,6 @@ class PretranslateCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._entries: "OrderedDict[int, tuple[_Key, weakref.ref, tuple]]" = OrderedDict()
-        self._queued = 0
         self.offered = 0
         self.hit = 0
         self.miss = 0
@@ -66,23 +67,10 @@ class PretranslateCache:
         with self._lock:
             self.wasted += len(self._entries)
             self._entries.clear()
-            self._queued = 0
 
-    def queued(self) -> int:
+    def note_offered(self) -> None:
         with self._lock:
-            return self._queued
-
-    def note_queued(self) -> None:
-        with self._lock:
-            self._queued += 1
             self.offered += 1
-
-    def note_dequeued(self, *, put_failed: bool = False) -> None:
-        with self._lock:
-            self._queued = max(0, self._queued - 1)
-            if put_failed:
-                self.offered -= 1
-                self.dropped += 1
 
     def note_dropped(self) -> None:
         with self._lock:
@@ -131,7 +119,7 @@ def offer(
     p: "Pipeline", utterance_id: int, result: "SttResult | None", stored: bool
 ) -> None:
     """Queue a prefetch for a freshly stored speculative result. Never
-    blocks the STT worker and never takes the last free MT queue slot."""
+    blocks the STT worker, and only queues into an empty MT queue."""
     if not (ENABLED and stored) or result is None or not result.text:
         return
     if not p._config.translate.enabled or p.mt_slot.current is None:
@@ -143,25 +131,18 @@ def offer(
     if src is None:
         return
     q = p._mt_queue
-    if q.qsize() >= q.maxsize - 1:
+    if q.qsize() > 0:
         return
-    p._pretranslate.note_queued()
     try:
         q.put_nowait(_PrefetchJob(utterance_id, result.text, src))
     except queue.Full:
-        p._pretranslate.note_dequeued(put_failed=True)
-
-
-def real_queue_full(p: "Pipeline") -> bool:
-    """MT queue fullness with queued prefetches not counted, so one can
-    never push a real job into the shed path."""
-    q = p._mt_queue
-    return q.qsize() - p._pretranslate.queued() >= q.maxsize
+        p._pretranslate.note_dropped()
+        return
+    p._pretranslate.note_offered()
 
 
 def run(p: "Pipeline", job: _PrefetchJob, stop: "threading.Event") -> None:
     cache = p._pretranslate
-    cache.note_dequeued()
     if stop.is_set() or p._mt_queue.qsize() > 0:
         cache.note_dropped()
         return

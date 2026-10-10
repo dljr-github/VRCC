@@ -171,27 +171,26 @@ def test_prefetch_dropped_when_real_work_is_queued():
     assert env.pipeline._pretranslate.dropped == 1
 
 
-def test_offer_does_not_cause_the_next_real_job_to_be_shed():
+def test_offer_is_refused_unless_the_queue_is_empty():
     env = _env()
     q = env.pipeline._mt_queue
     for i in range(JOB_QUEUE_MAX - 1):
         q.put_nowait(_real(10 + i, f"real {i}"))
     _speculative(env)
-    assert q.qsize() == JOB_QUEUE_MAX - 1  # offer refused, last slot kept
+    assert q.qsize() == JOB_QUEUE_MAX - 1  # typed text still has its slot
+    assert all(isinstance(j, _MtJob) for j in list(q.queue))
     q.put_nowait(_real(20, "last"))
     _drain_mt(env)
     expected = [f"real {i}" for i in range(JOB_QUEUE_MAX - 1)] + ["last"]
     assert [c[0] for c in env.mt.calls] == expected
 
 
-def test_queued_prefetch_is_not_counted_by_the_shed_check():
+def test_second_offer_does_not_stack_behind_a_queued_prefetch():
     env = _env()
-    q = env.pipeline._mt_queue
-    _speculative(env)
-    for i in range(JOB_QUEUE_MAX - 1):
-        q.put_nowait(_real(10 + i, f"real {i}"))
-    assert q.full()
-    assert not pretranslate.real_queue_full(env.pipeline)
+    _speculative(env, uid=1)
+    _speculative(env, uid=1)
+    assert env.pipeline._mt_queue.qsize() == 1
+    assert env.pipeline._pretranslate.offered == 1
 
 
 def test_stop_set_during_prefetch_writes_nothing():

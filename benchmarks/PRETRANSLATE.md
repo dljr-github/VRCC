@@ -26,14 +26,15 @@ chatbox submission window. The bench swaps the tracker's clock for
 
 | MT model | arm | finals | median ms | p90 ms | spec reuse | offered | hit | miss | wasted | MT calls/final |
 |---|---|---|---|---|---|---|---|---|---|---|
-| nllb-600M-int8 | off | 48 | 81.9 | 104.6 | 48/48 | 0 | 0 | 48 | 0 | 1.00 |
-| nllb-600M-int8 | on | 48 | 0.1 | 0.1 | 48/48 | 57 | 48 | 0 | 9 | 1.19 |
-| nllb-1.3B-int8 | off | 48 | 147.6 | 193.2 | 48/48 | 0 | 0 | 48 | 0 | 1.00 |
-| nllb-1.3B-int8 | on | 48 | 0.1 | 63.9 | 48/48 | 57 | 48 | 0 | 9 | 1.19 |
+| nllb-600M-int8 | off | 48 | 78.7 | 105.2 | 48/48 | 0 | 0 | 48 | 0 | 1.00 |
+| nllb-600M-int8 | on | 48 | 0.1 | 0.5 | 48/48 | 57 | 48 | 0 | 9 | 1.19 |
+| nllb-1.3B-int8 | off | 48 | 159.4 | 214.6 | 48/48 | 0 | 0 | 48 | 0 | 1.00 |
+| nllb-1.3B-int8 | on | 48 | 0.1 | 37.7 | 48/48 | 57 | 48 | 0 | 9 | 1.19 |
 
-Median latency per repeat was 82.2, 82.6 and 77.5 ms (600M, off) and 148.4,
-146.3 and 145.8 ms (1.3B, off); every "on" repeat had a median of 0.1 ms.
-The median MT call took 82 ms (600M) and 146 ms (1.3B) with the feature off.
+Median latency per repeat was 79.4, 78.9 and 77.2 ms (600M, off) and 162.7,
+160.0 and 157.9 ms (1.3B, off); every "on" repeat had a median of 0.1 ms.
+The mean MT call took 77 to 79 ms (600M) and 158 to 163 ms (1.3B) with the
+feature off. The prefetch is only offered into an empty MT queue.
 
 ## What this shows
 
@@ -42,13 +43,17 @@ The median MT call took 82 ms (600M) and 146 ms (1.3B) with the feature off.
   That is the best case: clean read speech, gaps of at least 0.6 s, no noise.
   Real chat will reuse less often, and the saving scales with that.
 - When the prefetch lands, the whole MT call leaves the post-finalize path:
-  about 82 ms with the 600M model and about 148 ms with the 1.3B model.
+  about 79 ms with the 600M model and about 160 ms with the 1.3B model.
 - The cost is extra MT work during speech. 9 of 57 prefetches were wasted
   (the speculative text changed before the final, so its translation was
   discarded), giving 1.19 MT calls per final instead of 1.00.
-- With the 1.3B model the "on" p90 is 63.9 ms and the maximum 169 ms, so a
-  few finals still waited. This run did not establish why. The likeliest
-  cause is the MT worker still busy with another utterance's job, but that
-  was not measured.
+- Some "on" finals still waited: the maximum was 62.6 ms (600M) and 150.1 ms
+  (1.3B), and the 1.3B p90 was 37.7 ms. This run did not establish why. Two
+  candidates. The MT worker may still be busy with another utterance's job.
+  Or a prefetch of the same or another utterance is still running when the
+  final arrives: a running MT call cannot be preempted, so the real job waits
+  for it and still counts as a hit, up to one MT call. A hit does not show
+  the prefetch had finished before finalize. The bench does not record
+  whether a prefetch was running when the real job was enqueued.
 - The figure is the caption pipeline only. It does not include VAD
   endpointing, the speculative STT call, or the chatbox rate limit.
