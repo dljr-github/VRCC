@@ -58,10 +58,24 @@ def _migrate_default_overflow(config: AppConfig, stored_version: int) -> None:
         config.osc.overflow = type(config.osc)().overflow
 
 
+def _migrate_default_repetition_penalty(config: AppConfig, stored_version: int) -> None:
+    """Adopt the current repetition penalty for a config holding the old 1.1.
+
+    1.1 was the shipping default, so a stored 1.1 records the default far more
+    often than a decision. Same trade as the MT beam above: whoever chose 1.1
+    by hand is migrated too, and choosing it again sticks. Other values survive.
+    """
+    if stored_version >= 5:
+        return
+    if config.translate.repetition_penalty == 1.1:
+        config.translate.repetition_penalty = type(config.translate)().repetition_penalty
+
+
 def apply_migrations(config: "AppConfig", stored_version: int) -> None:
     """Run every schema migration against `config`, oldest first."""
     _migrate_profile_written_mt_beam(config, stored_version)
     _migrate_default_overflow(config, stored_version)
+    _migrate_default_repetition_penalty(config, stored_version)
     # Stored defaults otherwise keep existing installs rejecting short replies.
     # As with MT beam migration, an explicitly chosen 500 is indistinguishable
     # from the old default. Other durations survive; choosing 500 again sticks.

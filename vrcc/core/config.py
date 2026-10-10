@@ -89,7 +89,10 @@ class TranslateConfig(BaseModel):
     # wider beam is about 40 ms per utterance on GPU, against a chatbox that
     # accepts a send every 1.3 s.
     beam_size: int = 4
-    repetition_penalty: float = 1.1
+    # 1.1 dropped more spoken numbers than 1.0 on every model in the corpus
+    # and added a leading dash to more NLLB fragments, with no loop flagged at
+    # 1.0 (tools/bench_mt.py, benchmarks/MT.md). no_repeat_ngram_size stays.
+    repetition_penalty: float = 1.0
     no_repeat_ngram_size: int = 3
     extra_translate_kwargs: dict = Field(default_factory=dict)
 
@@ -152,7 +155,9 @@ class GuiConfig(BaseModel):
 # Bumped when a stored config needs rewriting rather than just loading.
 # 2: the Speed/Quality mode stopped writing translate.beam_size (see
 # _migrate_profile_written_mt_beam).
-_SCHEMA_VERSION = 4
+# 5: translate.repetition_penalty default 1.1 -> 1.0 (see
+# _migrate_default_repetition_penalty).
+_SCHEMA_VERSION = 5
 
 
 class AppConfig(BaseModel):

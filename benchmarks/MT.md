@@ -21,7 +21,9 @@ Each arm is judged on the same counted failures.
 - ADDED: the output has a digit run the source did not.
 - dash frag / dash full: output opens with a dash the source did not
   have. "frag" is the one-to-three word fragments, "full" is the
-  complete sentences and the number-bearing sentences.
+  complete sentences and the number-bearing sentences. The bench builds
+  the engine with `strip_dash=False`, so this is the raw decoder output
+  before `TranslateEngine.translate` removes an added "- ".
 - loops: output where a four-character slice repeats four or more times
   in a row (`longest_run`, the check in
   `tests/integration/test_translate_quality.py`). This also fires on a

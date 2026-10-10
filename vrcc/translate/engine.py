@@ -9,6 +9,7 @@ its runtime libraries) -> CPU int8 once. Zero Qt.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from vrcc.core.bus import EventBus
@@ -21,6 +22,10 @@ from vrcc.translate.registry import MtModelSpec, distinct_targets
 from vrcc.translate.tokenizers import MtTokenizer
 
 logger = logging.getLogger("vrcc.translate.engine")
+
+# NLLB opens one-to-three word fragments with "- " as if they were dialogue
+# lines (11% of fragments on the 600M model, tools/bench_mt.py).
+_LEADING_DASH = re.compile(r"^-\s+")
 
 # Case-insensitive substrings marking CUDA as unusable (one-shot CPU fallback):
 # out of VRAM, or missing runtime libraries. The last entry is the ctranslate2
@@ -68,6 +73,7 @@ class TranslateEngine:
         cfg: TranslateConfig,
         bus: EventBus,
         translator_factory=None,
+        strip_dash: bool = True,
     ) -> None:
         self._spec = spec
         self._model_dir = Path(model_dir)
@@ -76,6 +82,9 @@ class TranslateEngine:
         # Defaults to ``ctranslate2.Translator``, resolved lazily in load() so
         # the native import stays out of module import time. Tests inject fakes.
         self._translator_factory = translator_factory
+        # tools/bench_mt.py turns this off: its dash columns count what the
+        # decoder emits, which the strip would hide.
+        self._strip_dash = strip_dash
 
         self._translator = None
         self._tokenizer: MtTokenizer | None = None
@@ -186,7 +195,7 @@ class TranslateEngine:
             target_prefix = [tok.target_prefix(t) for t in targets]
 
         kwargs = {"beam_size": self._cfg.beam_size, "return_scores": False}
-        # Anti-loop guards, on by default; penalty 1.0 or size 0 disables one.
+        # Anti-loop guards; penalty 1.0 (the default) or size 0 disables one.
         if self._cfg.repetition_penalty != 1.0:
             kwargs["repetition_penalty"] = self._cfg.repetition_penalty
         if self._cfg.no_repeat_ngram_size > 0:
@@ -194,10 +203,14 @@ class TranslateEngine:
         kwargs.update(self._cfg.extra_translate_kwargs)  # user wins, last word
 
         results = self._run_batch(source, target_prefix, kwargs)
-        return [
-            (t.display, normalize(tok.decode(list(r.hypotheses[0])), t))
-            for t, r in zip(targets, results)
-        ]
+        keep_dash = not self._strip_dash or text.lstrip().startswith("-")
+        out = []
+        for t, r in zip(targets, results):
+            decoded = tok.decode(list(r.hypotheses[0]))
+            if not keep_dash:
+                decoded = _LEADING_DASH.sub("", decoded)
+            out.append((t.display, normalize(decoded, t)))
+        return out
 
     # -- internals ---------------------------------------------------------
 
