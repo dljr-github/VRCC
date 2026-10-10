@@ -86,6 +86,12 @@ _KANJI = {"〇": 0, "零": 0, "一": 1, "二": 2, "两": 2, "兩": 2, "三": 3, 
           "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _KANJI_MULT = {"十": 10, "百": 100, "千": 1000}
 _KANJI_RUN = re.compile("[〇零一二两兩三四五六七八九十百千]+")
+# Words that contain a numeral character without counting anything. A short
+# list: an ideograph after a numeral is usually a counter (七章, 两只).
+_KANJI_WORDS = re.compile(
+    "十分|万一|萬一|不一|統一|统一|一起|一下|一样|一樣|一些|一直|一定|一般|一切"
+    "|一緒|一生|一致|一同|一方|一部|一応|一旦|唯一"
+)
 _SINO = {"영": "〇", "공": "〇", "일": "一", "이": "二", "삼": "三", "사": "四",
          "오": "五", "육": "六", "칠": "七", "팔": "八", "구": "九", "십": "十",
          "백": "百", "천": "千"}
@@ -94,6 +100,10 @@ _NATIVE = {"하나": 1, "한": 1, "둘": 2, "두": 2, "셋": 3, "세": 3, "넷":
            "열": 10, "스물": 20, "서른": 30, "마흔": 40, "쉰": 50}
 _COUNTERS = ("시간", "마리", "번째", "분", "시", "개", "명", "번", "초", "살",
              "달", "에", "를", "은", "는", "가", "도", "만", "씩")
+_PARTICLES = frozenset("에를은는가도만")
+# 네 "yes", 세 "three"/"tax", 두 "two", 한 "one"/"Korea" are everyday words.
+# They count as numbers only with a counter after them.
+_AMBIGUOUS = frozenset("네세두한")
 
 _LETTERS = re.compile(r"[^\W\d_]+")
 _HANGUL = re.compile(r"[가-힣]+")
@@ -132,12 +142,19 @@ def _native_value(stem: str) -> int | None:
     return None
 
 
-def _hangul_value(token: str) -> int | None:
+def _hangul_value(token: str, next_token: str = "", in_list: bool = False
+                  ) -> int | None:
+    if token in _AMBIGUOUS:
+        counters = tuple(c for c in _COUNTERS if c not in _PARTICLES)
+        counted = next_token.startswith(counters) or in_list
+        return _NATIVE[token] if counted else None
     if (value := _native_value(token)) is not None:
         return value
     for suffix in _COUNTERS:
         stem = token[: -len(suffix)]
         if token.endswith(suffix) and stem:
+            if stem in _AMBIGUOUS and suffix in _PARTICLES:
+                continue
             if (value := _native_value(stem)) is not None:
                 return value
             if all(c in _SINO for c in stem):
@@ -145,6 +162,24 @@ def _hangul_value(token: str) -> int | None:
     if len(token) > 1 and all(c in _SINO for c in token):
         return _kanji_value("".join(_SINO[c] for c in token))
     return None
+
+
+_LIST_GAP = re.compile(r"[\s,、]*")
+
+
+def _in_list(text: str, runs: list, plain: list[bool], k: int) -> bool:
+    """True when run k sits in a comma or space separated list that holds an
+    unambiguous Korean number ("세, 두, 하나"). A list of bare 네 does not."""
+    for step in (1, -1):
+        j = k
+        while 0 <= j + step < len(runs):
+            lo, hi = sorted((runs[j].end(), runs[j + step].start()))
+            if _LIST_GAP.fullmatch(text[lo:hi]) is None:
+                break
+            j += step
+            if plain[j]:
+                return True
+    return False
 
 
 def _latin_words(text: str, table: dict[str, int]) -> list[tuple[int, Num]]:
@@ -195,13 +230,21 @@ def numbers(text: str, lang: str = "en", words: bool = True) -> list[Num]:
         if lang in _WORDS:
             found += _latin_words(lowered, _WORDS[lang])
         if lang in ("ja", "zh"):
-            found += [
-                (m.start(), Num(None, _kanji_value(m.group())))
-                for m in _KANJI_RUN.finditer(text)
-            ]
+            words_at = [m.span() for m in _KANJI_WORDS.finditer(text)]
+            for m in _KANJI_RUN.finditer(text):
+                if any(a < m.end() and m.start() < b for a, b in words_at):
+                    continue
+                found.append((m.start(), Num(None, _kanji_value(m.group()))))
         if lang == "ko":
-            for m in _HANGUL.finditer(text):
-                value = _hangul_value(m.group())
+            runs = list(_HANGUL.finditer(text))
+            plain = [
+                _hangul_value(m.group(), runs[k + 1].group() if k + 1 < len(runs)
+                              else "") is not None
+                for k, m in enumerate(runs)
+            ]
+            for k, m in enumerate(runs):
+                nxt = runs[k + 1].group() if k + 1 < len(runs) else ""
+                value = _hangul_value(m.group(), nxt, _in_list(text, runs, plain, k))
                 if value is not None:
                     found.append((m.start(), Num(None, value)))
     return [num for _, num in sorted(found, key=lambda p: p[0])]

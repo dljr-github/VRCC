@@ -61,12 +61,12 @@ the shipped setting.
 
 | model | rep | ngram | digit/all pairs | KEPT | SPELLED | DROPPED | merged | ADDED | dash frag | dash full | loops | ms/call med | ms/call mean |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nllb-600M-int8 | 1.0 | 3 | 928/2224 | 682 | 109 | 128 | 24 | 9 | 83/734 (11.3%) | 0/1063 (0.0%) | 0 | 70 | 73 |
-| nllb-600M-int8 | 1.1 | 3 | 928/2224 | 658 | 104 | 159 | 31 | 7 | 99/734 (13.5%) | 0/1063 (0.0%) | 0 | 71 | 73 |
-| nllb-600M-int8 | 1.1 | 0 | 928/2224 | 683 | 104 | 134 | 24 | 7 | 99/734 (13.5%) | 0/1063 (0.0%) | 5 | 72 | 76 |
-| nllb-1.3B-int8 | 1.0 | 3 | 928/2224 | 629 | 128 | 165 | 45 | 6 | 43/734 (5.9%) | 0/1063 (0.0%) | 0 | 131 | 137 |
+| nllb-600M-int8 | 1.0 | 3 | 928/2224 | 682 | 108 | 129 | 24 | 9 | 83/734 (11.3%) | 0/1063 (0.0%) | 0 | 70 | 73 |
+| nllb-600M-int8 | 1.1 | 3 | 928/2224 | 658 | 103 | 160 | 31 | 7 | 99/734 (13.5%) | 0/1063 (0.0%) | 0 | 71 | 73 |
+| nllb-600M-int8 | 1.1 | 0 | 928/2224 | 683 | 103 | 135 | 24 | 7 | 99/734 (13.5%) | 0/1063 (0.0%) | 5 | 72 | 76 |
+| nllb-1.3B-int8 | 1.0 | 3 | 928/2224 | 629 | 127 | 166 | 45 | 6 | 43/734 (5.9%) | 0/1063 (0.0%) | 0 | 131 | 137 |
 | nllb-1.3B-int8 | 1.1 | 3 | 928/2224 | 604 | 117 | 200 | 52 | 7 | 57/734 (7.8%) | 0/1063 (0.0%) | 0 | 131 | 137 |
-| nllb-1.3B-int8 | 1.1 | 0 | 928/2224 | 629 | 118 | 173 | 48 | 8 | 57/734 (7.8%) | 0/1063 (0.0%) | 1 | 137 | 144 |
+| nllb-1.3B-int8 | 1.1 | 0 | 928/2224 | 629 | 117 | 174 | 48 | 8 | 57/734 (7.8%) | 0/1063 (0.0%) | 1 | 137 | 144 |
 | m2m100-418M-int8 | 1.0 | 3 | 928/2224 | 745 | 43 | 123 | 4 | 19 | 0/734 (0.0%) | 0/1063 (0.0%) | 0 | 68 | 72 |
 | m2m100-418M-int8 | 1.1 | 3 | 928/2224 | 742 | 44 | 128 | 4 | 16 | 0/734 (0.0%) | 0/1063 (0.0%) | 1 | 62 | 67 |
 | m2m100-418M-int8 | 1.1 | 0 | 928/2224 | 797 | 35 | 81 | 4 | 17 | 0/734 (0.0%) | 0/1063 (0.0%) | 18 | 65 | 70 |
@@ -81,9 +81,9 @@ ADDED on a pair whose source had no number (none to two per arm).
 ## Reading it
 
 - On both NLLB models, repetition_penalty 1.1 adds drops against 1.0 at
-  ngram 3 (600M 128 to 159, 1.3B 165 to 200) and adds dashed fragments
+  ngram 3 (600M 129 to 160, 1.3B 166 to 200) and adds dashed fragments
   (600M 11.3% to 13.5%, 1.3B 5.9% to 7.8%). Switching ngram off at 1.1
-  takes back part of the drops (134 and 173) and lets loops back in (5
+  takes back part of the drops (135 and 174) and lets loops back in (5
   and 1, every one a repeated-source interjection rendered faithfully).
 - m2m100 never prefixes a dash. Its drop count moves little with the
   penalty and falls with ngram 0 (123/128 to 81 on 418M), but ngram 0
@@ -94,6 +94,11 @@ ADDED on a pair whose source had no number (none to two per arm).
 
 Limits. The instrument cannot read number words outside its tables
 (for example Russian oblique forms), so some DROPPED are spelled
-numbers it cannot see. Digit pairs are weighted toward the sentence
+numbers it cannot see. The reverse error is bounded by rules:
+Korean 네, 세, 두, 한 count only before a counter or inside a list
+that holds an unambiguous number, and a CJK numeral does not count
+inside a listed word (一起, 十分). The first committed table scored five
+pairs ("4 4 4" to "네 네 네") as SPELLED; the rows above are that run
+re-scored with these rules, no model re-run. Digit pairs are weighted toward the sentence
 shapes in the corpus, which is mostly synthetic VRChat-style speech and
 not recorded captions. One pass, no confidence intervals.

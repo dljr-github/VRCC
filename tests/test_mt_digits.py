@@ -33,6 +33,12 @@ from tools.mt_digits import (
         ("Okay 1, 2, 3.", "好的", "en", "zh", DROPPED),
         ("hello", "Hi 5", "en", "en", ADDED),
         ("hello", "こんにちは", "en", "ja", KEPT),
+        ("4 4 4", "네 네 네", "ja", "ko", DROPPED),
+        ("I have 1 cat", "我们一起走吧", "en", "zh", DROPPED),
+        ("Wait 10 seconds", "十分に待って", "en", "ja", DROPPED),
+        ("Count down 3, 2, 1", "세, 두, 하나", "en", "ko", SPELLED),
+        ("I have 2 cats", "고양이가 두 마리 있어", "en", "ko", SPELLED),
+        ("Chapter 7", "第七章", "en", "zh", SPELLED),
     ],
 )
 def test_classify(src, out, src_lang, out_lang, expected):
