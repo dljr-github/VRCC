@@ -73,6 +73,7 @@ class TranslateEngine:
         cfg: TranslateConfig,
         bus: EventBus,
         translator_factory=None,
+        strip_dash: bool = True,
     ) -> None:
         self._spec = spec
         self._model_dir = Path(model_dir)
@@ -81,6 +82,9 @@ class TranslateEngine:
         # Defaults to ``ctranslate2.Translator``, resolved lazily in load() so
         # the native import stays out of module import time. Tests inject fakes.
         self._translator_factory = translator_factory
+        # tools/bench_mt.py turns this off: its dash columns count what the
+        # decoder emits, which the strip would hide.
+        self._strip_dash = strip_dash
 
         self._translator = None
         self._tokenizer: MtTokenizer | None = None
@@ -199,7 +203,7 @@ class TranslateEngine:
         kwargs.update(self._cfg.extra_translate_kwargs)  # user wins, last word
 
         results = self._run_batch(source, target_prefix, kwargs)
-        keep_dash = text.lstrip().startswith("-")
+        keep_dash = not self._strip_dash or text.lstrip().startswith("-")
         out = []
         for t, r in zip(targets, results):
             decoded = tok.decode(list(r.hypotheses[0]))

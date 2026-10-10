@@ -7,7 +7,8 @@ See benchmarks/MT.md for results and what the columns mean.
 This is a gate, not a ranking. Quality averaged over target languages would
 weight languages a given user may never use (see core/recommend_rank.py), so
 every arm is judged on the same counted failures: numbers dropped, a dash
-prefixed to a short fragment, and decoder loops. Never downloads a model.
+prefixed to a short fragment, and decoder loops. The engine's dash strip is
+off here so the dash columns count raw decoder output. Never downloads a model.
 """
 
 from __future__ import annotations
@@ -69,7 +70,7 @@ def run_arm(model: str, rep: float, ngram: int, beam: int, device: str,
                                 ).mt_model_dir(spec)
     cfg = TranslateConfig(model=model, device=device, beam_size=beam,
                           repetition_penalty=rep, no_repeat_ngram_size=ngram)
-    engine = TranslateEngine(spec, model_dir, cfg, bus)
+    engine = TranslateEngine(spec, model_dir, cfg, bus, strip_dash=False)
     engine.load()
     engine.warm_up()
     rows, call_ms = [], []

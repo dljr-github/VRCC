@@ -466,3 +466,16 @@ def test_translate_keeps_a_dash_with_no_space_after_it(model_dir: Path, monkeypa
     out = eng.translate("hello world", get("English"), [get("Japanese")])
 
     assert out[0][1] == "-5 degrees"
+
+
+def test_translate_keeps_the_dash_when_stripping_is_off(model_dir: Path, monkeypatch):
+    eng = TranslateEngine(
+        _spec("nllb"), model_dir, _cfg(), EventBus(),
+        translator_factory=_RecordingFactory(), strip_dash=False,
+    )
+    eng.load()
+    monkeypatch.setattr(eng._tokenizer, "decode", lambda tokens: "- Thank you")
+
+    out = eng.translate("hello world", get("English"), [get("Japanese")])
+
+    assert out[0][1] == "- Thank you"
