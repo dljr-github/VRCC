@@ -56,6 +56,46 @@ def test_clear_outside_language_does_not_rerun(model_dir):
     assert len(session.runs) == 1
 
 
+def test_spoken_only_restricts_clear_outside_language(model_dir):
+    session = LanguageSession(gap=4)
+    engine = make_engine(model_dir, session, language_bias_mode="spoken_only")
+    result = engine.transcribe(_speech())
+    assert result.language == "en"
+    assert result.text == "world"
+    assert [run["language"][0] for run in session.runs] == [0, 4]
+    assert engine.transcribe(_speech(), detect_language=True).language == "ja"
+
+
+class SlotIgnoringSession(LanguageSession):
+    """The real model can keep its own tag whatever slot it is fed."""
+
+    def run(self, outputs, feeds):
+        logits = super().run(outputs, dict(feeds, language=np.array([0], dtype=np.int32)))[0]
+        self.runs[-1] = feeds
+        return [logits]
+
+
+def test_spoken_only_drops_outside_tag_the_forced_slot_did_not_bind(model_dir):
+    session = SlotIgnoringSession(gap=4)
+    engine = make_engine(model_dir, session, language_bias_mode="spoken_only")
+    assert engine.transcribe(_speech()) is None
+    assert [run["language"][0] for run in session.runs] == [0, 4]
+
+
+def test_spoken_only_drops_outside_tag_after_blank_first_frame(model_dir):
+    class LateTagSession(LanguageSession):
+        def run(self, outputs, feeds):
+            logits = super().run(outputs, feeds)[0]
+            logits[0, 1] = 0
+            logits[0, 1, 1] = 12  # Japanese tag after a blank first frame.
+            return [logits]
+
+    session = LateTagSession(first_token=0)
+    assert make_engine(model_dir, session).transcribe(_speech()).language == "ja"
+    engine = make_engine(model_dir, session, language_bias_mode="spoken_only")
+    assert engine.transcribe(_speech()) is None
+
+
 @pytest.mark.parametrize(
     "overrides, detect",
     [

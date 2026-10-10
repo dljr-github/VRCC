@@ -298,12 +298,16 @@ no language known ahead of time, a European-only model cannot be trusted
 to cover it.
 
 In Auto mode, Whisper and SenseVoice favor the spoken languages you chose
-in the startup wizard when detection is uncertain. A clear match can still
-select another language. This preference applies to your microphone, not
-other people's audio. Parakeet does not expose language scores or a language
-input, so its automatic detection is unchanged.
+in the startup wizard when detection is uncertain. With the wizard or custom
+languages, a clear match can still select another language. This preference
+applies to your microphone, not other people's audio. Parakeet does not
+expose language scores or a language input, so its automatic detection is
+unchanged.
 In Settings, under Voice recognition, Auto-detection bias lets you use the
-wizard languages, choose a separate custom list, or turn the preference off.
+wizard languages, choose a separate custom list, restrict detection to the
+spoken languages chosen in Models, or turn the preference off. The
+restriction never lets another language through, so speech in any other
+language is captioned in the wrong language or dropped.
 Changes apply to the next utterance without reloading the model. An empty
 custom list applies no bias.
 

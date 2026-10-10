@@ -277,8 +277,16 @@ class SttEngine:
                 probabilities
                 and max(probabilities, key=lambda p: p[1])[0] == info.language
             )
-            language = choose_language(probabilities, preferred) if consistent else None
+            restrict = self._cfg.language_bias_mode == "spoken_only"
+            language = (
+                choose_language(probabilities, preferred, restrict=restrict)
+                if consistent or restrict else None
+            )
             if language is not None and language != info.language:
+                logger.debug(
+                    "language bias (%s) moved %s to %s",
+                    self._cfg.language_bias_mode, info.language, language,
+                )
                 # Whisper returns detection info before the lazy segment decode.
                 # Discard that generator so only the chosen language is decoded.
                 started = time.perf_counter()

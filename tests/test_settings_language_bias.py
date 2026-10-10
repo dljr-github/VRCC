@@ -101,6 +101,18 @@ def test_empty_custom_list_does_not_fall_back_to_wizard(dialog):
     assert dlg._language_bias_picker.isHidden()
 
 
+def test_spoken_only_setting_persists_and_uses_spoken_list(dialog):
+    dlg, store = dialog
+    set_combo_value(dlg._language_bias_combo, "spoken_only")
+    assert store.config.stt.language_bias_mode == "spoken_only"
+    assert preferred_codes(store.config.stt, False) == {"en", "ja"}
+    assert dlg._language_bias_picker.isHidden()
+    store.save_now()
+    reloaded = ConfigStore(store.path)
+    reloaded.load()
+    assert reloaded.config.stt.language_bias_mode == "spoken_only"
+
+
 def test_controls_follow_auto_language_and_supported_model(dialog):
     dlg, store = dialog
     set_combo_value(dlg._language_bias_combo, "custom")
