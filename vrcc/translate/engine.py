@@ -191,7 +191,7 @@ class TranslateEngine:
             target_prefix = [tok.target_prefix(t) for t in targets]
 
         kwargs = {"beam_size": self._cfg.beam_size, "return_scores": False}
-        # Anti-loop guards, on by default; penalty 1.0 or size 0 disables one.
+        # Anti-loop guards; penalty 1.0 (the default) or size 0 disables one.
         if self._cfg.repetition_penalty != 1.0:
             kwargs["repetition_penalty"] = self._cfg.repetition_penalty
         if self._cfg.no_repeat_ngram_size > 0:
