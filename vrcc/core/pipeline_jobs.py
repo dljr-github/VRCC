@@ -167,7 +167,12 @@ def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
 
 
 def _call_engine(
-    p: "Pipeline", samples: "np.ndarray", stop: "threading.Event", *, speculative: bool
+    p: "Pipeline",
+    samples: "np.ndarray",
+    stop: "threading.Event",
+    *,
+    speculative: bool,
+    utterance_id: int,
 ) -> "SttResult | None | object":
     """Transcribe via the STT slot, timing the lock wait and the engine call
     as two separate spans.
@@ -188,6 +193,13 @@ def _call_engine(
         if engine is None:
             result, call_s = _NO_ENGINE, 0.0
         else:
+            # The slot lock serializes calls, so the engine's decision record
+            # that follows belongs to this pass.
+            logger.debug(
+                "stt_decision pass=%s utterance=%s",
+                "spec" if speculative else "final",
+                utterance_id,
+            )
             call_start = time.monotonic()
             result = engine.transcribe(samples)
             call_s = time.monotonic() - call_start
@@ -218,7 +230,9 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
             if not stop.is_set():
                 p._stale_speculatives += 1
             return
-        result = _call_engine(p, job.samples, stop, speculative=True)
+        result = _call_engine(
+            p, job.samples, stop, speculative=True, utterance_id=job.utterance_id
+        )
         if result is _NO_ENGINE:
             return  # engine swapped out mid-flight: drop the job
         if stop.is_set():
@@ -232,8 +246,11 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
     # transcribe fresh. The spec lock is released before _call_engine (never
     # nested inside the STT slot's lock), preserving lock ordering.
     result = p._spec.pop_result(key)
+    reused = int(result is not _MISSING)
     if result is _MISSING:
-        result = _call_engine(p, job.samples, stop, speculative=False)
+        result = _call_engine(
+            p, job.samples, stop, speculative=False, utterance_id=job.utterance_id
+        )
         if result is _NO_ENGINE:
             _finalize_dropped(p, job.utterance_id)  # engine swapped out mid-flight
             return
@@ -241,7 +258,10 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
         # Same guard _call_engine applies: a job that outlasted stop()'s join
         # returns into the next run, whose counters it must not touch.
         p._stats.record_reuse()
-        logger.debug("stt_decision reuse utterance=%s", job.utterance_id)
+    if not stop.is_set():
+        logger.debug(
+            "stt_decision final utterance=%s reused=%d", job.utterance_id, reused
+        )
     if stop.is_set():
         _finalize_dropped(p, job.utterance_id)  # abandoned mid-call
         return

@@ -238,9 +238,13 @@ class SenseVoiceEngine:
 
         decision = Decision("sensevoice", audio_seconds(samples))
         try:
-            return self._decode_samples(samples, detect_language, decision)
-        finally:
+            result = self._decode_samples(samples, detect_language, decision)
+        except Exception:
+            decision.verdict = "error"
             log_decision(logger, decision)
+            raise
+        log_decision(logger, decision)
+        return result
 
     def _decode_samples(
         self, samples: np.ndarray, detect_language: bool, decision: Decision

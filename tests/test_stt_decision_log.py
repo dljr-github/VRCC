@@ -116,5 +116,33 @@ def test_final_reusing_a_speculative_logs_one_line_without_text(caplog):
     with caplog.at_level(logging.DEBUG, logger="vrcc.core.pipeline"):
         pipeline_jobs.process_stt_job(env.pipeline, job, threading.Event())
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith(TAG)]
-    assert lines == [f"{TAG} reuse utterance=3"]
+    assert lines == [f"{TAG} final utterance=3 reused=1"]
     assert result.text not in caplog.text
+
+
+def test_decode_failure_records_error_not_accepted(model_dir, caplog, monkeypatch):
+    engine, _ = _loaded_engine(model_dir, text="x")
+
+    def boom(*args):
+        raise RuntimeError("cuda gone")
+
+    monkeypatch.setattr(engine, "_recognize", boom)
+    with caplog.at_level(logging.DEBUG, logger="vrcc.stt"):
+        try:
+            engine.transcribe(SECOND)
+        except RuntimeError:
+            pass
+    assert [r["verdict"] for r in records(caplog)] == ["error"]
+
+
+def test_fresh_final_logs_pass_marker_before_final_line(caplog):
+    env = make_pipeline()
+    s = sample()
+    job = _SttJob(utterance_id=4, samples=s, speculative=False, samples_id=id(s))
+    with caplog.at_level(logging.DEBUG, logger="vrcc.core.pipeline"):
+        pipeline_jobs.process_stt_job(env.pipeline, job, threading.Event())
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith(TAG)]
+    assert lines == [
+        f"{TAG} pass=final utterance=4",
+        f"{TAG} final utterance=4 reused=0",
+    ]

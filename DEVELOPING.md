@@ -99,13 +99,16 @@ see [benchmarks/README.md](benchmarks/README.md).
 
 ## Reading STT decisions from a log
 
-With debug logging on, every transcription writes one `stt_decision` line
-(whisper, SenseVoice and Parakeet), and every final that reuses its
-speculative result writes `stt_decision reuse utterance=N`. Caption text is
-never logged.
+The per-run log file (`vrcc-YYYYMMDD-HHMMSS.log` in the logs folder) always
+carries DEBUG records. Every transcription writes one `stt_decision` line
+(whisper, SenseVoice and Parakeet). Just before each engine call the
+pipeline writes `stt_decision pass=spec|final utterance=N`, so the engine
+line that follows belongs to that pass. Each final then writes
+`stt_decision final utterance=N reused=0|1`, the denominator for the reuse
+rate. Caption text is never logged.
 
 ```
-findstr stt_decision vrcc.log
+findstr stt_decision vrcc-*.log
 ```
 
 Fields: `audio_s`, `lang`/`lang_p` (detected, before any bias), `alt`/`alt_p`

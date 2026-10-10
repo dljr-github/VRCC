@@ -189,9 +189,13 @@ class OnnxAsrEngine:
 
         decision = Decision("parakeet", audio_seconds(samples))
         try:
-            return self._recognize(samples, detect_language, decision)
-        finally:
+            result = self._recognize(samples, detect_language, decision)
+        except Exception:
+            decision.verdict = "error"
             log_decision(logger, decision)
+            raise
+        log_decision(logger, decision)
+        return result
 
     def _recognize(
         self, samples: np.ndarray, detect_language: bool, decision: Decision
