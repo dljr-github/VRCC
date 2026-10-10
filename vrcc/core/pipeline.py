@@ -23,6 +23,7 @@ from vrcc.core import pipeline_frames, pipeline_jobs, pipeline_source, pipeline_
 from vrcc.core.engine_slot import EngineSlot
 from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
+from vrcc.core.pretranslate import PretranslateCache
 from vrcc.core.pipeline_stats import (
     InputStats, LatencyTracker, SessionStats, SttCallStats, begin_run,
     log_summary, note_dropped_frame,
@@ -102,6 +103,7 @@ class Pipeline:
         # Speculative-reuse and typing bookkeeping (each guards its own lock).
         self._spec = SpecCache()
         self._typing = TypingTracker()
+        self._pretranslate = PretranslateCache()
 
         self._dropped_frames = 0
         self._skipped_speculatives = 0
@@ -150,6 +152,7 @@ class Pipeline:
             self._stt_queue = queue.Queue(maxsize=JOB_QUEUE_MAX)
             self._mt_queue = queue.Queue(maxsize=JOB_QUEUE_MAX)
             self._spec.reset()
+            self._pretranslate.reset()
             self._typing.reset()
             self._segmenter.reset()
             self._frame_gated = False

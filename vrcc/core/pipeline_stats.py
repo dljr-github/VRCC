@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from vrcc.audio.frames import FRAME_LEN, SAMPLE_RATE
+from vrcc.core import pretranslate
 
 if TYPE_CHECKING:
     from vrcc.core.pipeline import Pipeline
@@ -372,6 +373,7 @@ def log_summary(p: "Pipeline", *, restarting: bool = False) -> None:
         if restarting:
             return
         _emit(p._session)
+        pretranslate.log_summary(p)
     except Exception:  # noqa: BLE001 -- a stats failure must not break stop()
         logger.debug("STT run summary failed", exc_info=True)
 

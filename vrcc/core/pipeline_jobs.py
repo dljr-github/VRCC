@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vrcc.audio.frames import SAMPLE_RATE
-from vrcc.core import languages
+from vrcc.core import languages, pretranslate
 from vrcc.core.events import (
     AppError,
     PhraseRecognized,
@@ -22,6 +22,7 @@ from vrcc.core.events import (
 )
 from vrcc.core.pipeline_send import safe_submit
 from vrcc.core.pipeline_state import _MISSING
+from vrcc.core.pretranslate import _PrefetchJob
 
 if TYPE_CHECKING:
     import threading
@@ -160,6 +161,7 @@ def handle_final(p: "Pipeline", event: "SegFinal") -> None:
 
 def handle_discard(p: "Pipeline", event: "SegDiscard") -> None:
     p._spec.drop_discarded(event.utterance_id)
+    p._pretranslate.forget(event.utterance_id)
     p._resolve_typing(event.utterance_id)
 
 
@@ -239,7 +241,8 @@ def process_stt_job(p: "Pipeline", job: _SttJob, stop: "threading.Event") -> Non
             # Stopped (maybe restarted) mid-transcribe: this result belongs
             # to an abandoned run, must not touch a new run's shared state.
             return
-        p._spec.store_result(key, result)
+        stored = p._spec.store_result(key, result)
+        pretranslate.offer(p, job.utterance_id, result, stored)
         return
 
     # Reuse the speculative's cached result on identical samples, else
@@ -400,6 +403,9 @@ def send_untranslated(p: "Pipeline", job: _MtJob) -> None:
 
 
 def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
+    if isinstance(job, _PrefetchJob):
+        pretranslate.run(p, job, stop)
+        return
     if p._mt_queue.full():
         # Shed at the consumer, oldest job first: a queue still full after a
         # dequeue means the engine is falling behind real time. Sending this
@@ -434,7 +440,9 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
                 # original still reaches the chatbox.
                 translations = []
             else:
-                translations = engine.translate(job.text, job.src, targets)
+                translations = pretranslate.take(p, job, targets, engine)
+                if translations is None:
+                    translations = engine.translate(job.text, job.src, targets)
     except Exception as exc:  # noqa: BLE001 -- translation must not drop the caption
         if stop.is_set():
             return  # abandoned mid-call: discard, publish nothing
