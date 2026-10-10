@@ -258,28 +258,47 @@ def _same(a: Num, b: Num) -> str | None:
     return None
 
 
+def _align(want: list[Num], have: list[Num]) -> list[list[tuple]]:
+    """best[i][j] = (matched, kept, step) for want[i:] against have[j:]."""
+    n, m = len(want), len(have)
+    best = [[(0, 0, "drop")] * (m + 1) for _ in range(n + 1)]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            opts = [best[i + 1][j][:2] + ("drop",), best[i][j + 1][:2] + ("skip_out",)]
+            verdict = _same(want[i], have[j])
+            if verdict:
+                a, k, _ = best[i + 1][j + 1]
+                opts.append((a + 1, k + (verdict == KEPT), "match"))
+            best[i][j] = max(opts, key=lambda o: o[:2])
+    return best
+
+
 def compare(
     src: str, out: str, src_lang: str = "en", out_lang: str = "en",
     spoken_source: bool = False,
 ) -> dict[str, int]:
-    """Per-number tallies. Each source number is searched for, in order, in
-    what is left of the output; a hit consumes everything up to it, so a
-    reordering shows up as DROPPED plus ADDED."""
+    """Per-number tallies. Source numbers are matched to output numbers in
+    order, so a reordering shows up as DROPPED plus ADDED. The alignment
+    keeps the most numbers and, among those, the most digits as digits: a
+    first-come match would let an article ("Una vez", "ein") take the
+    source 1 and leave the real digit to count as ADDED."""
     want = numbers(src, src_lang, words=spoken_source)
     have = numbers(out, out_lang)
     tally = {KEPT: 0, SPELLED: 0, DROPPED: 0, ADDED: 0}
-    pos = 0
     used: set[int] = set()
-    for num in want:
-        for j in range(pos, len(have)):
-            verdict = _same(num, have[j])
-            if verdict:
-                tally[verdict] += 1
-                used.add(j)
-                pos = j + 1
-                break
+    i = j = 0
+    best = _align(want, have)
+    while i < len(want):
+        step = best[i][j][2]
+        if step == "match":
+            tally[_same(want[i], have[j])] += 1
+            used.add(j)
+            i, j = i + 1, j + 1
+        elif step == "skip_out":
+            j += 1
         else:
             tally[DROPPED] += 1
+            i += 1
     tally[ADDED] = sum(
         1 for j, h in enumerate(have) if h.digits is not None and j not in used
     )
