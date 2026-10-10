@@ -26,9 +26,9 @@ chatbox submission window. The bench swaps the tracker's clock for
 
 | MT model | arm | finals | median ms | p90 ms | spec reuse | offered | hit | miss | wasted | MT calls/final |
 |---|---|---|---|---|---|---|---|---|---|---|
-| nllb-600M-int8 | off | 48 | 78.7 | 105.2 | 48/48 | 0 | 0 | 48 | 0 | 1.00 |
+| nllb-600M-int8 | off | 48 | 78.7 | 105.2 | 48/48 | 0 | 0 | 0 | 0 | 1.00 |
 | nllb-600M-int8 | on | 48 | 0.1 | 0.5 | 48/48 | 57 | 48 | 0 | 9 | 1.19 |
-| nllb-1.3B-int8 | off | 48 | 159.4 | 214.6 | 48/48 | 0 | 0 | 48 | 0 | 1.00 |
+| nllb-1.3B-int8 | off | 48 | 159.4 | 214.6 | 48/48 | 0 | 0 | 0 | 0 | 1.00 |
 | nllb-1.3B-int8 | on | 48 | 0.1 | 37.7 | 48/48 | 57 | 48 | 0 | 9 | 1.19 |
 
 Median latency per repeat was 79.4, 78.9 and 77.2 ms (600M, off) and 162.7,

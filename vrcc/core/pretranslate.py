@@ -93,7 +93,7 @@ class PretranslateCache:
 
     def take(self, key: _Key, engine) -> "list | None":
         """Pop the utterance's entry. Usable only on an exact key and engine
-        match; anything else counts as wasted work and a miss."""
+        match; a stored entry that does not match counts as wasted work and a miss."""
         with self._lock:
             entry = self._entries.pop(key[0], None)
             if entry is not None and entry[0] == key and entry[1]() is engine:
@@ -101,7 +101,7 @@ class PretranslateCache:
                 return list(entry[2])
             if entry is not None:
                 self.wasted += 1
-            self.miss += 1
+                self.miss += 1
             return None
 
     def forget(self, utterance_id: int) -> None:

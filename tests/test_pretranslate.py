@@ -97,6 +97,13 @@ def test_changed_targets_is_a_miss():
     assert env.pipeline._pretranslate.miss == 1
 
 
+def test_real_job_without_an_entry_is_not_a_miss():
+    env = _env()
+    process_mt_job(env.pipeline, _real(1, "hello"), env.stop)
+    assert len(env.mt.calls) == 1
+    assert env.pipeline._pretranslate.miss == 0
+
+
 def test_swapped_engine_is_a_miss():
     env = _env()
     s = _speculative(env)
