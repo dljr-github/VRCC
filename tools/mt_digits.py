@@ -333,7 +333,7 @@ def longest_run(text: str, unit: int = 4) -> int:
     return best
 
 
-_DASH = re.compile(r"^\s*[-‐-―]")
+_DASH = re.compile("^\\s*[-\u2010-\u2015]")
 
 
 def leading_dash(src: str, out: str) -> bool:
