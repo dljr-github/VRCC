@@ -33,7 +33,7 @@ _ZERO_CALL_COUNTS = {
     "speculative_calls": 0,
     "final_calls": 0,
     "reuse_count": 0,
-    "skipped_speculative_calls": 0,
+    "busy_skips": 0,
     "total_wall_s": 0.0,
     "max_wall_s": 0.0,
     "total_wait_s": 0.0,

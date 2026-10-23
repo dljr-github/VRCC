@@ -62,7 +62,7 @@ class SttCallStats:
         self.speculative_calls = 0
         self.final_calls = 0
         self.reuse_count = 0
-        self.skipped_speculative_calls = 0
+        self.busy_skips = 0
         self.total_wall_s = 0.0
         self.max_wall_s = 0.0
         self.total_wait_s = 0.0
@@ -106,7 +106,7 @@ class SttCallStats:
     def record_skipped_speculative(self) -> None:
         """Optional work found no idle engine after it was already queued."""
         with self._lock:
-            self.skipped_speculative_calls += 1
+            self.busy_skips += 1
 
     def record_latency(self, elapsed_s: float) -> None:
         """One utterance's finalize-to-chatbox-submission time (see
@@ -123,7 +123,7 @@ class SttCallStats:
                 "speculative_calls": self.speculative_calls,
                 "final_calls": self.final_calls,
                 "reuse_count": self.reuse_count,
-                "skipped_speculative_calls": self.skipped_speculative_calls,
+                "busy_skips": self.busy_skips,
                 "total_wall_s": self.total_wall_s,
                 "max_wall_s": self.max_wall_s,
                 "total_wait_s": self.total_wait_s,
@@ -334,7 +334,7 @@ class SessionStats:
         self.latency_samples.extend(call_snap["latency_samples"])
         self.elapsed_s += elapsed_s
         self.dropped_frames += dropped_frames
-        self.skipped_speculatives += skipped_speculatives
+        self.skipped_speculatives += skipped_speculatives + call_snap["busy_skips"]
         self.stale_speculatives += stale_speculatives
         self.rms_samples.extend(input_snap["rms_samples"])
         self.frame_count += input_snap["frame_count"]
@@ -381,8 +381,8 @@ def log_summary(p: "Pipeline", *, restarting: bool = False) -> None:
     the average and slowest call, and how much of that was spent waiting for
     the STT slot's lock rather than transcribing; how many finals reused a
     speculative instead of an engine call; dropped frames; speculatives shed
-    under STT contention (queued work or an unavailable engine) versus ones
-    dropped for the ordinary, costless reason that the speaker kept talking past them; the
+    under STT contention (queued work or a busy engine) versus ones dropped
+    for the ordinary, costless reason that the speaker kept talking; the
     input level distribution and clipped-frame fraction, with a count of any
     non-finite readings excluded from that distribution; how many finals the
     quality gate suppressed; and the finalize-to-chatbox-submission latency.
@@ -396,9 +396,7 @@ def log_summary(p: "Pipeline", *, restarting: bool = False) -> None:
         elapsed_s = max(0.0, time.monotonic() - snap["run_start"])
         p._session.fold_in(
             snap, input_snap, elapsed_s,
-            p._dropped_frames,
-            p._skipped_speculatives + snap["skipped_speculative_calls"],
-            p._stale_speculatives,
+            p._dropped_frames, p._skipped_speculatives, p._stale_speculatives,
         )
         if restarting:
             return
@@ -457,9 +455,8 @@ def _emit(s: SessionStats) -> None:
         "%.2fs. %d finals reused a speculative. Dropped %d frames, about "
         "%.1fs of audio. Skipped %d speculatives for STT contention "
         "(queued work or unavailable engine) and %d more because the speaker "
-        "kept talking "
-        "(normal, costs nothing). Input level (frame RMS): %s. %s of frames "
-        "clipped. %d finals suppressed by the quality gate. "
+        "kept talking (normal, costs nothing). Input level (frame RMS): %s. "
+        "%s of frames clipped. %d finals suppressed by the quality gate. "
         "Finalize-to-chatbox latency: %s.",
         total_calls, s.speculative_calls, s.final_calls,
         s.total_wall_s, s.total_audio_s, per_call_text,

@@ -70,7 +70,7 @@ def test_busy_engine_after_admission_skips_speculation_but_final_runs_once():
     assert not worker.is_alive()
     assert p._spec._pending == {}
     assert p._spec._cache == {}
-    assert p._stats.snapshot()["skipped_speculative_calls"] == 1
+    assert p._stats.snapshot()["busy_skips"] == 1
     assert recognized == []
 
     p._on_seg_event(SegFinal(1, samples))
@@ -155,4 +155,4 @@ def test_skipped_call_stats_reset_and_fold_into_session_summary(caplog):
     assert "Skipped 3 speculatives" in caplog.text
     assert "0 calls (0 speculative, 0 final)" in caplog.text
     p._stats.reset()
-    assert p._stats.snapshot()["skipped_speculative_calls"] == 0
+    assert p._stats.snapshot()["busy_skips"] == 0
