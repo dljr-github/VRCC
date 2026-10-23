@@ -25,8 +25,8 @@ from vrcc.core.events import AppError, MicLevel, SpeechStarted
 from vrcc.core.pipeline_state import SpecCache, TypingTracker
 from vrcc.core.pretranslate import PretranslateCache
 from vrcc.core.pipeline_stats import (
-    InputStats, LatencyTracker, SessionStats, SttCallStats, begin_run,
-    log_summary, note_dropped_frame,
+    InputStats, LatencyTracker, MtCallStats, SessionStats, SttCallStats,
+    begin_run, log_summary, note_dropped_frame,
 )
 
 if TYPE_CHECKING:
@@ -117,6 +117,7 @@ class Pipeline:
         # this Pipeline's life, so a mid-session device swap never fragments
         # or zeroes the picture the final summary shows (see pipeline_stats).
         self._session = SessionStats()
+        self._mt_stats = MtCallStats()  # session-cumulative, like _session
         self._lifecycle_lock = threading.Lock()
         # Survives start()/stop() so a restart never reissues a still-live id.
         self._message_seq = 0

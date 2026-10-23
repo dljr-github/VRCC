@@ -431,6 +431,7 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
         # Call the engine with the slot's lock held so a concurrent detach_mt
         # waits before unloading; a None engine (disabled/swapped-out) ->
         # send original. Only that lock held here (no lock-order cycle).
+        wait_start = time.monotonic()
         with p.mt_slot.borrow() as engine:
             if engine is None:
                 translations = None
@@ -442,7 +443,11 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
             else:
                 translations = pretranslate.take(p, job, targets, engine)
                 if translations is None:
+                    call_start = time.monotonic()
                     translations = engine.translate(job.text, job.src, targets)
+                    p._mt_stats.record_call(
+                        call_start - wait_start, time.monotonic() - call_start
+                    )
     except Exception as exc:  # noqa: BLE001 -- translation must not drop the caption
         if stop.is_set():
             return  # abandoned mid-call: discard, publish nothing
