@@ -35,6 +35,11 @@ def _is_chinese(display_name: str) -> bool:
     return lang is not None and lang.whisper == "zh"
 
 
+def applies_to(targets: list[str]) -> bool:
+    """Whether any of `targets` (display names) would get a reading line."""
+    return any(_is_chinese(name) for name in targets)
+
+
 def _reading(text: str) -> str | None:
     """Tone-marked pinyin for `text` ("nǐ hǎo"), or None without pypinyin.
     Non-hanzi runs (latin, punctuation) pass through as their own tokens."""

@@ -255,7 +255,7 @@
   "Settings": "Ustawienia",
   "Shorten to fit": "Skracaj, aby się zmieściła",
   "Shortest caption (ms)": "Najkrótszy napis (ms)",
-  "Show a pinyin reading line under each Chinese translation.": "Pokazuje linię z zapisem pinyin pod każdym tłumaczeniem na chiński.",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "Pokazuje linię z zapisem pinyin pod każdym tłumaczeniem na chiński. Czat VRChat dostaje ją tylko wtedy, gdy cała wiadomość nadal się mieści.",
   "Show it in": "Pokaż w języku",
   "Show my original words in the chatbox": "Pokazuj moje oryginalne słowa w chatboxie",
   "Show your captions in the VRChat chatbox.": "Wyświetla twoje napisy w chatboxie VRChat.",

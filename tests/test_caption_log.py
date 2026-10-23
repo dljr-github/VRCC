@@ -301,6 +301,18 @@ def test_translation_line_label_is_escaped():
     assert "&lt;b&gt;Lang&lt;/b&gt;" in html
 
 
+def test_pinyin_reading_renders_on_its_own_line():
+    # Rich text folds a bare newline into a space, which ran the reading on
+    # after the hanzi it reads.
+    m = _model()
+    m.recognized(1, "hello", translate_enabled=True, send_enabled=True)
+    m.translated(1, [("Chinese Simplified", "你好\nnǐ hǎo <x>")], send_enabled=True)
+    html = render_rows_html(m.rows())
+    assert "你好<br/><span" in html
+    assert "nǐ hǎo &lt;x&gt;</span>" in html
+    assert "\n" not in html
+
+
 def test_status_markup_colors_distinct():
     m = _model()
     m.recognized(1, "x", translate_enabled=True, send_enabled=True)

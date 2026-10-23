@@ -23,6 +23,7 @@ from vrcc.gui import settings_audio, settings_heard, settings_mode, settings_res
 from vrcc.gui.style import PALETTE, resolve_theme
 from vrcc.gui.widgets import SegmentedControl, no_wheel
 from vrcc.i18n import UI_LANGUAGES, tr, tr_noop
+from vrcc.translate import pinyin
 
 if TYPE_CHECKING:
     from vrcc.gui.settings import SettingsDialog
@@ -148,10 +149,20 @@ def _build_my_captions(dlg: "SettingsDialog", form: QFormLayout) -> None:
     dlg._pinyin_check = QCheckBox(tr("Add pinyin to Chinese translations"))
     dlg._pinyin_check.setChecked(dlg._cfg.translate.pinyin)
     dlg._pinyin_check.setToolTip(
-        tr("Show a pinyin reading line under each Chinese translation.")
+        tr(
+            "Show a pinyin reading line under each Chinese translation. The "
+            "VRChat chatbox gets it only when the whole message still fits."
+        )
     )
     dlg._bind_checkbox(dlg._pinyin_check, dlg._cfg.translate, "pinyin")
+    # Targets are picked on the main window, which this modal dialog blocks,
+    # so whether one is Chinese cannot change while it is open: offer the
+    # option only to the people it can do something for.
+    dlg._pinyin_check.setEnabled(dlg._cfg.translate.enabled)
     form.addRow(dlg._pinyin_check)
+    form.setRowVisible(
+        dlg._pinyin_check, pinyin.applies_to(dlg._cfg.translate.targets)
+    )
 
     dlg._include_original_check = QCheckBox(tr("Show my original words in the chatbox"))
     dlg._include_original_check.setChecked(dlg._cfg.osc.include_original)

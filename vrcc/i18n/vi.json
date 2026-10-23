@@ -255,7 +255,7 @@
   "Settings": "Cài đặt",
   "Shorten to fit": "Rút gọn cho vừa",
   "Shortest caption (ms)": "Phụ đề ngắn nhất (ms)",
-  "Show a pinyin reading line under each Chinese translation.": "Hiển thị dòng phiên âm bính âm dưới mỗi bản dịch tiếng Trung.",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "Hiển thị dòng phiên âm bính âm dưới mỗi bản dịch tiếng Trung. Hộp chat VRChat chỉ nhận dòng này khi toàn bộ tin nhắn vẫn còn vừa.",
   "Show it in": "Hiển thị bằng",
   "Show my original words in the chatbox": "Hiển thị lời gốc của tôi trong chatbox",
   "Show your captions in the VRChat chatbox.": "Hiển thị phụ đề của bạn trong chatbox VRChat.",

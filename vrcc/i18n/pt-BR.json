@@ -255,7 +255,7 @@
   "Settings": "Configurações",
   "Shorten to fit": "Encurtar para caber",
   "Shortest caption (ms)": "Legenda mais curta (ms)",
-  "Show a pinyin reading line under each Chinese translation.": "Mostra uma linha de leitura em pinyin abaixo de cada tradução em chinês.",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "Mostra uma linha de leitura em pinyin abaixo de cada tradução em chinês. O chatbox do VRChat só a recebe quando a mensagem inteira ainda cabe.",
   "Show it in": "Mostrar em",
   "Show my original words in the chatbox": "Mostrar minhas palavras originais na chatbox",
   "Show your captions in the VRChat chatbox.": "Mostra suas legendas na chatbox do VRChat.",

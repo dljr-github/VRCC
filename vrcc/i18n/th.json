@@ -255,7 +255,7 @@
   "Settings": "การตั้งค่า",
   "Shorten to fit": "ย่อให้พอดี",
   "Shortest caption (ms)": "คำบรรยายสั้นสุด (มิลลิวินาที)",
-  "Show a pinyin reading line under each Chinese translation.": "แสดงบรรทัดคำอ่านพินอินใต้คำแปลภาษาจีนแต่ละรายการ",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "แสดงบรรทัดคำอ่านพินอินใต้คำแปลภาษาจีนแต่ละรายการ กล่องแชท VRChat จะได้รับบรรทัดนี้เฉพาะเมื่อข้อความทั้งหมดยังพอดี",
   "Show it in": "แสดงเป็นภาษา",
   "Show my original words in the chatbox": "แสดงคำพูดต้นฉบับของฉันในกล่องแชท",
   "Show your captions in the VRChat chatbox.": "แสดงคำบรรยายของคุณในกล่องแชทของ VRChat",

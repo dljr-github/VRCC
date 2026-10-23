@@ -255,7 +255,7 @@
   "Settings": "Pengaturan",
   "Shorten to fit": "Pendekkan agar muat",
   "Shortest caption (ms)": "Takarir terpendek (milidetik)",
-  "Show a pinyin reading line under each Chinese translation.": "Menampilkan baris bacaan pinyin di bawah setiap terjemahan bahasa Mandarin.",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "Menampilkan baris bacaan pinyin di bawah setiap terjemahan bahasa Mandarin. Chatbox VRChat hanya menerimanya jika seluruh pesan masih muat.",
   "Show it in": "Tampilkan dalam",
   "Show my original words in the chatbox": "Tampilkan kata asliku di chatbox",
   "Show your captions in the VRChat chatbox.": "Tampilkan takarirmu di chatbox VRChat.",

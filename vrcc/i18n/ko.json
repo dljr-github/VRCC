@@ -255,7 +255,7 @@
   "Settings": "설정",
   "Shorten to fit": "길이에 맞게 줄이기",
   "Shortest caption (ms)": "최소 자막 길이(ms)",
-  "Show a pinyin reading line under each Chinese translation.": "각 중국어 번역 아래에 병음 읽기 줄을 표시합니다.",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "각 중국어 번역 아래에 병음 읽기 줄을 표시합니다. VRChat 채팅 상자에는 전체 메시지가 들어갈 때만 표시됩니다.",
   "Show it in": "표시 언어",
   "Show my original words in the chatbox": "채팅박스에 내 원문 표시",
   "Show your captions in the VRChat chatbox.": "내 자막을 VRChat 채팅박스에 표시합니다.",

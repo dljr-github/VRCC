@@ -322,6 +322,9 @@ class SettingsDialog(QDialog):
             )
             self._update_language_limited_items()
         settings_pages.set_translation_page_enabled(self, checked)
+        pinyin_check = getattr(self, "_pinyin_check", None)
+        if pinyin_check is not None:
+            pinyin_check.setEnabled(bool(checked))
         self._changed()
         if self._on_model_change is not None:
             self._on_model_change("mt")

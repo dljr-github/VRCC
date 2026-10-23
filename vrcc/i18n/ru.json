@@ -255,7 +255,7 @@
   "Settings": "Настройки",
   "Shorten to fit": "Сокращать до лимита",
   "Shortest caption (ms)": "Мин. длительность субтитра (мс)",
-  "Show a pinyin reading line under each Chinese translation.": "Показывает строку с чтением пиньинь под каждым переводом на китайский.",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "Показывает строку с чтением пиньинь под каждым переводом на китайский. В чат VRChat она попадает, только если всё сообщение ещё помещается.",
   "Show it in": "Показывать на",
   "Show my original words in the chatbox": "Показывать оригинал в чатбоксе",
   "Show your captions in the VRChat chatbox.": "Показывать твои субтитры в чатбоксе VRChat.",

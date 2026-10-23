@@ -255,7 +255,7 @@
   "Settings": "Paramètres",
   "Shorten to fit": "Raccourcir pour tenir",
   "Shortest caption (ms)": "Durée min d'un sous-titre (ms)",
-  "Show a pinyin reading line under each Chinese translation.": "Affiche une ligne de lecture en pinyin sous chaque traduction en chinois.",
+  "Show a pinyin reading line under each Chinese translation. The VRChat chatbox gets it only when the whole message still fits.": "Affiche une ligne de lecture en pinyin sous chaque traduction en chinois. La chatbox VRChat ne la reçoit que si le message entier tient encore.",
   "Show it in": "L'afficher en",
   "Show my original words in the chatbox": "Afficher mes paroles d'origine dans la chatbox",
   "Show your captions in the VRChat chatbox.": "Affiche tes sous-titres dans la chatbox VRChat.",
