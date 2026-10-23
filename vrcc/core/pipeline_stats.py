@@ -127,6 +127,27 @@ class SttCallStats:
             }
 
 
+class MtCallStats:
+    """Session-cumulative MT engine timings for mic captions: one sample per
+    fresh translate() call, timed like SttCallStats as the wait for the MT
+    slot's lock and the call itself. A pretranslate hit made no call and is
+    not counted, nor are prefetches (pretranslate's own summary covers them).
+    Never reset, so a restart folds into the one summary the real stop emits.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._calls: list[tuple[float, float]] = []
+
+    def record_call(self, wait_s: float, call_s: float) -> None:
+        with self._lock:
+            self._calls.append((wait_s, call_s))
+
+    def snapshot(self) -> list[tuple[float, float]]:
+        with self._lock:
+            return list(self._calls)
+
+
 class InputStats:
     """What the microphone actually delivered this run, so a "captions
     stopped working" report has something to check besides the transcript:
@@ -373,6 +394,8 @@ def log_summary(p: "Pipeline", *, restarting: bool = False) -> None:
         if restarting:
             return
         _emit(p._session)
+        _emit_mt(p._mt_stats.snapshot())
+        _emit_engines(p)
         pretranslate.log_summary(p)
     except Exception:  # noqa: BLE001 -- a stats failure must not break stop()
         logger.debug("STT run summary failed", exc_info=True)
@@ -437,4 +460,34 @@ def _emit(s: SessionStats) -> None:
         s.skipped_speculatives,
         s.stale_speculatives,
         rms_text, clip_text, s.gated_utterances, latency_text,
+    )
+
+
+def _emit_mt(calls: list[tuple[float, float]]) -> None:
+    if not calls:
+        return
+    call_s = [c for _w, c in calls]
+    p50, p95 = _percentiles(call_s, [50, 95])
+    logger.info(
+        "MT run: %d calls. Per call median %.2fs, p95 %.2fs, slowest %.2fs; "
+        "%.2fs in total spent waiting for the engine lock.",
+        len(calls), p50, p95, max(call_s), sum(w for w, _c in calls),
+    )
+
+
+def _engine_label(engine) -> str:
+    """What the loaded engine actually runs on, which can differ from the
+    configured device after a CUDA fallback."""
+    if engine is None:
+        return "none"
+    precision = getattr(engine, "_compute_type", None) or getattr(
+        getattr(engine, "_spec", None), "quantization", None
+    )
+    return f"{getattr(engine, '_device', None) or '-'}:{precision or '-'}"
+
+
+def _emit_engines(p: "Pipeline") -> None:
+    logger.info(
+        "Engines: STT %s, MT %s.",
+        _engine_label(p.stt_slot.current), _engine_label(p.mt_slot.current),
     )
