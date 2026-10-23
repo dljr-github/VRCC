@@ -92,3 +92,21 @@ def test_pipeline_config_gates_annotation():
     from vrcc.core.config import TranslateConfig
 
     assert TranslateConfig().pinyin is False
+
+
+def test_unreadable_dictionaries_degrade_to_plain_text(monkeypatch):
+    # A frozen build that ships pypinyin's modules without their JSON
+    # dictionaries raises OSError on import, not ImportError.
+    real_import = builtins.__import__
+
+    def no_dict(name, *args, **kwargs):
+        if name == "pypinyin":
+            raise FileNotFoundError("pinyin_dict.json")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_dict)
+    monkeypatch.setattr(pinyin, "_missing_logged", False)
+    assert pinyin.annotate([("Chinese Simplified", "你好")]) == [
+        ("Chinese Simplified", "你好")
+    ]
+    assert pinyin._missing_logged is True

@@ -20,7 +20,7 @@ from vrcc.core.events import (
     PhraseRecognized,
     PhraseTranslated,
 )
-from vrcc.core.pipeline_send import safe_submit
+from vrcc.core.pipeline_send import chatbox_translations, safe_submit
 from vrcc.core.pipeline_state import _MISSING
 from vrcc.core.pretranslate import _PrefetchJob
 from vrcc.translate import pinyin
@@ -463,9 +463,8 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
 
     if stop.is_set():
         return  # abandoned mid-call: discard, publish nothing
+    plain = translations
     if translations and p._config.translate.pinyin:
-        # Annotate before publish so the caption log and the chatbox show the
-        # same reading line.
         translations = pinyin.annotate(translations)
     p._bus.publish(
         PhraseTranslated(
@@ -475,17 +474,9 @@ def process_mt_job(p: "Pipeline", job: _MtJob, stop: "threading.Event") -> None:
             translations=tuple(translations),
         )
     )
-    submitted = translations
-    if len(targets) < len(all_targets) and not p._config.osc.include_original:
-        # Hiding the original presumes every configured target carries a
-        # translation. A skipped source-matching target is served by the
-        # original text itself, so that text re-enters the message in the
-        # target's slot; without it, readers of the source language get
-        # nothing at all.
-        submitted = list(translations)
-        for i, lang in enumerate(all_targets):
-            if lang == job.src:
-                submitted.insert(i, (lang.display, job.text))
+    submitted = chatbox_translations(
+        p, job.text, job.src, all_targets, targets, translations, plain
+    )
     _submit(p, job.text, submitted, job.utterance_id)
     if job.manage_typing:
         p._resolve_typing(job.utterance_id)

@@ -41,11 +41,15 @@ def _reading(text: str) -> str | None:
     global _missing_logged
     try:
         from pypinyin import pinyin
-    except ImportError:
+    except (ImportError, OSError):
+        # OSError: pypinyin loads its dictionaries from JSON files beside its
+        # modules at import time, so a build that ships the modules without
+        # them raises here on every call, not once.
         if not _missing_logged:
             _missing_logged = True
             logger.warning(
-                "pypinyin is not installed; Chinese translations stay unannotated"
+                "pypinyin is unavailable; Chinese translations stay unannotated",
+                exc_info=True,
             )
         return None
     reading = " ".join(token[0] for token in pinyin(text))
