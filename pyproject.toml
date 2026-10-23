@@ -26,6 +26,9 @@ dependencies = [
     "soundcard>=0.4.2",
     "soxr>=0.3",
     "python-osc>=1.8",
+    # Tone-marked pinyin reading lines under Chinese translations
+    # (vrcc.translate.pinyin); pure python.
+    "pypinyin>=0.53",
     "zeroconf>=0.120",
     "pydantic>=2.5",
     "platformdirs>=4.0",
