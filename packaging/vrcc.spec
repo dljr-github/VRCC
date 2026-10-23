@@ -118,6 +118,10 @@ datas += [(os.path.join(REPO_ROOT, "vrcc", "vrcc.ico"), "vrcc")]
 # (mediafoundation.py.h on Windows), so shipping the modules alone leaves the
 # import raising and captioning what you hear dead in every packaged build.
 datas += collect_data_files("soundcard")
+# pypinyin reads pinyin_dict.json and phrases_dict.json beside its modules at
+# import time, and no PyInstaller hook collects them, so without this the
+# Chinese pinyin reading line silently never appears in a packaged build.
+datas += collect_data_files("pypinyin")
 # GTCRN denoiser model and license.
 datas += [
     (os.path.join(REPO_ROOT, "vrcc", "audio", "gtcrn.onnx"), os.path.join("vrcc", "audio")),

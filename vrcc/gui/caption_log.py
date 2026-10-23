@@ -211,6 +211,17 @@ def _esc(text: str) -> str:
     )
 
 
+def _translation_html(text: str, fs: int) -> str:
+    """A translation's text, its later lines (the pinyin reading under a
+    Chinese translation) each on their own line at the gutter's smaller size.
+    Rich text folds a bare newline into a space, which ran the reading on
+    after the hanzi it reads."""
+    first, *rest = text.split("\n")
+    return _esc(first) + "".join(
+        f'<br/><span style="font-size:{fs}px;">{_esc(line)}</span>' for line in rest
+    )
+
+
 # Fixed column widths. Qt honors the HTML width *attribute*; CSS width on a
 # cell is silently ignored. Fixed px (not %) so a narrow window can't squeeze
 # the status column; 190 keeps "shortened to fit" on one line even at ~2x scale.
@@ -242,7 +253,8 @@ def render_row_html(
     trans = "".join(
         f'<div style="color:{c["muted"]}; margin-top:4px; '
         f'border-left: 2px solid {c["border"]}; padding-left:8px;">'
-        f'<span style="color:{c["muted"]};">{_esc(lang)}:</span> {_esc(text)}'
+        f'<span style="color:{c["muted"]};">{_esc(lang)}:</span> '
+        f"{_translation_html(text, fs)}"
         f"</div>"
         for lang, text in row.translations
     )

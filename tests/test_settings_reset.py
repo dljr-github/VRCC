@@ -448,7 +448,7 @@ _NOT_TUNING = {
     "translate": {
         "enabled", "model", "device", "device_index", "compute_type",
         "inter_threads", "intra_threads", "max_queued_batches", "targets",
-        "extra_translate_kwargs",
+        "extra_translate_kwargs", "pinyin",
     },
     "gui": {
         "theme", "font_scale", "ui_language", "window_geometry",

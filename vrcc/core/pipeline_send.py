@@ -10,6 +10,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from vrcc.core.events import AppError
+from vrcc.osc.chatbox_format import CHATBOX_LIMIT, format_message
 
 if TYPE_CHECKING:
     from vrcc.core.pipeline import Pipeline
@@ -37,3 +38,52 @@ def safe_submit(
     except Exception as exc:  # noqa: BLE001 -- a send failure is not fatal
         logger.exception("chatbox submit failed")
         p._bus.publish(AppError("CHATBOX_SEND_FAILED", str(exc)))
+
+
+def chatbox_translations(
+    p: "Pipeline",
+    original: str,
+    src: object,
+    all_targets: list,
+    targets: list,
+    translations: list[tuple[str, str]],
+    plain: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """The ``[(name, text), ...]`` the chatbox should carry for a phrase.
+
+    `translations` may carry pinyin reading lines that `plain` does not.
+    The reading roughly quadruples a Chinese translation, so a sentence that
+    fits alone overflows with it: truncation then drops the original and cuts
+    the reading, and split mode loses the line break and scatters hanzi and
+    pinyin across parts. The caption log keeps the reading; the chatbox
+    carries it only when the whole message still fits `CHATBOX_LIMIT`.
+    """
+    submitted = _with_skipped_targets(
+        p, original, src, all_targets, targets, translations
+    )
+    if translations is not plain and (
+        len(format_message(original, submitted, p._config.osc)) > CHATBOX_LIMIT
+    ):
+        submitted = _with_skipped_targets(p, original, src, all_targets, targets, plain)
+    return submitted
+
+
+def _with_skipped_targets(
+    p: "Pipeline",
+    original: str,
+    src: object,
+    all_targets: list,
+    targets: list,
+    translations: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Hiding the original presumes every configured target carries a
+    translation. A skipped source-matching target is served by the original
+    text itself, so that text re-enters the message in the target's slot;
+    without it, readers of the source language get nothing at all."""
+    if len(targets) == len(all_targets) or p._config.osc.include_original:
+        return translations
+    submitted = list(translations)
+    for i, lang in enumerate(all_targets):
+        if lang == src:
+            submitted.insert(i, (lang.display, original))
+    return submitted
