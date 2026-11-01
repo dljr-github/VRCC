@@ -25,7 +25,34 @@ python tools/bench_nemotron.py --chunks 560 --samples
 with the clip's language forced and once on auto. The PyPI sherpa-onnx
 wheel is CPU-only.
 
-## First look (cloud container, not a real machine)
+## LibriSpeech, cloud container CPU
+
+Run on 2026-11-01 in a 4-core shared cloud container (no GPU), 100
+LibriSpeech test-clean utterances (whole clips, median about 7 s), English
+forced, 4 threads. The baseline rows come from `tools/bench_stt.py
+--device cpu` on the same utterances and machine.
+
+| model | WER | median latency (whole clip) | RTF | finalize after last audio |
+|---|---|---|---|---|
+| Nemotron 560 ms | 3.6% | 1.969 s offline | 0.329 live | **0.309 s** median, 0.363 s p90 |
+| Nemotron 1120 ms | 3.8% | 1.424 s offline | 0.230 live | 0.396 s median, 0.462 s p90 |
+| parakeet-tdt-0.6b-v3 | 2.4% | 0.422 s | 0.067 | n/a |
+| small | 3.9% | 1.542 s | 0.215 | n/a |
+| large-v3-turbo | 1.9% | 4.778 s | 0.645 | n/a |
+
+- Live decoding gives the same text as offline decoding (same WER).
+- Once you stop talking, the 560 ms model has the caption in about 0.31 s,
+  quicker than Parakeet's 0.42 s, and it stays flat as clips get longer,
+  because the work was done while you spoke. But it spends about five
+  times Parakeet's total CPU (RTF 0.33 against 0.067), and its English WER
+  is worse (3.6% against 2.4%). Against Whisper `small`, the current
+  default, it is close on WER with a far shorter wait.
+- For English on CPU, Parakeet stays the better choice. Nemotron's case is
+  the languages Parakeet lacks (Japanese, Korean, Chinese, Arabic, Hindi,
+  Vietnamese and others) and the shorter wait; the next measurement should
+  be WER on those languages.
+
+## First look at the package's clips
 
 Run on 2026-11-01 in a shared cloud container with 4 threads, so the
 timings only compare against each other. LibriSpeech could not be
