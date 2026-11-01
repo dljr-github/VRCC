@@ -115,7 +115,40 @@ The `beam` column holds the sampling arm instead: `greedy`, or
 repetition penalty 1.05). Each arm also prints the server's load time and
 the VRAM it took.
 
-Not measured yet. To run it, unzip a llama.cpp release
+### First results (cloud container, CPU only)
+
+Run on 2026-11-01 in a 4-core shared cloud container with no GPU, on
+`--limit 120` (120 sentences, 732 pairs, 312 with a number). llama-server
+could not be built there, so the HY-MT rows ran on llama-cpp-python's
+server (0.3.36), which handles one request at a time: its ms/call is three
+decodes back to back, not three in parallel. The "device" column still
+says np=3 because that is the label the tool prints.
+
+| model | rep | ngram | beam | device | digit/all pairs | KEPT | SPELLED | DROPPED | merged | ADDED | dash frag | dash full | loops | ms/call med | ms/call mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| nllb-600M-int8 | 1.0 | 3 | 4 | cpu:int8 | 312/732 | 228 | 36 | 44 | 6 | 4 | 32/245 (13.1%) | 0/347 (0.0%) | 0 | 588 | 614 |
+| HY-MT1.5-1.8B-Q4_K_M | 1.0 | 0 | greedy | llama-cpp-python, cpu, serial | 312/732 | 288 | 5 | 16 | 0 | 3 | 0/245 (0.0%) | 0/347 (0.0%) | 1 | 3303 | 3225 |
+| HY-MT1.5-1.8B-Q8_0 | 1.0 | 0 | greedy | llama-cpp-python, cpu, serial | 312/732 | 283 | 5 | 20 | 1 | 4 | 0/245 (0.0%) | 0/347 (0.0%) | 1 | 3385 | 3257 |
+| HY-MT1.5-1.8B-Q8_0 | 1.05 | 0 | recommended | llama-cpp-python, cpu, serial | 312/732 | 278 | 6 | 25 | 0 | 3 | 0/245 (0.0%) | 0/347 (0.0%) | 0 | 3327 | 3242 |
+
+- HY-MT drops about a third as many numbers as NLLB-600M (16 against 44)
+  and never dresses a fragment as dialogue (0% against 13.1%).
+- Many of HY-MT's remaining DROPPED and ADDED are correct renderings the
+  instrument cannot read: "12月12日" as "12 décembre", or a Spanish date
+  written back as "12月12日". The real misses are digit runs read as
+  something else: "6 6 6" became "6:06", "88 88" became "88", and "one two
+  three four" became "once, twice, three times, four times" in Chinese.
+- The one loop is "Hmm hmm hmm hmm." into Russian, which ran to the
+  output cap as a single "Хмммм...". The app would need the same loop
+  guard NLLB output gets.
+- Q8_0 is no better than Q4_K_M here, and Tencent's sampling setting is
+  slightly worse than greedy. Q4_K_M greedy is the arm to carry forward.
+- On this CPU HY-MT took about 5.5 times NLLB-600M's time per call. With
+  the decodes serial, that is roughly 1.1 s per target. The 5090 numbers,
+  with llama-server's parallel slots, are what decide whether it is fast
+  enough.
+
+To run it, unzip a llama.cpp release
 (https://github.com/ggml-org/llama.cpp/releases, the CUDA 12 build for an
 NVIDIA GPU) and:
 
