@@ -102,3 +102,28 @@ that holds an unambiguous number, and a CJK numeral does not count
 inside a listed word (一起, 十分). Digit pairs are weighted toward the sentence
 shapes in the corpus, which is mostly synthetic VRChat-style speech and
 not recorded captions. One pass, no confidence intervals.
+
+## LLM arm: HY-MT1.5 1.8B through llama-server
+
+`tools/bench_llm_mt.py` runs Tencent's HY-MT1.5 1.8B through a llama.cpp
+`llama-server` child process and scores it with the same corpus, targets
+and columns as above, so its rows sit next to the NLLB ones. The server
+gets one slot per chatbox target (`--parallel 3`) and the three requests
+of a call go out together. Prompts are Tencent's published templates.
+The `beam` column holds the sampling arm instead: `greedy`, or
+`recommended` (Tencent's top_k 20, top_p 0.6, temperature 0.7,
+repetition penalty 1.05). Each arm also prints the server's load time and
+the VRAM it took.
+
+Not measured yet. To run it, unzip a llama.cpp release
+(https://github.com/ggml-org/llama.cpp/releases, the CUDA 12 build for an
+NVIDIA GPU) and:
+
+```powershell
+python -m tools.bench_llm_mt --server C:\llama\llama-server.exe --quants Q4_K_M,Q8_0 --sampling greedy,recommended --show 40 --json llm.json
+```
+
+The GGUF downloads once from `tencent/HY-MT1.5-1.8B-GGUF`. `--gpu-layers 0`
+runs it on the CPU. HY-MT1.5 is under the Tencent HY Community License,
+which does not apply in the European Union, the United Kingdom or South
+Korea.
