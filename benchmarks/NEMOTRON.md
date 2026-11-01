@@ -28,7 +28,7 @@ wheel is CPU-only.
 ## LibriSpeech, cloud container CPU
 
 Run on 2026-11-01 in a 4-core shared cloud container (no GPU), 100
-LibriSpeech test-clean utterances (whole clips, median about 7 s), English
+LibriSpeech test-clean utterances (whole clips, 7.5 s on average), English
 forced, 4 threads. The baseline rows come from `tools/bench_stt.py
 --device cpu` on the same utterances and machine.
 
