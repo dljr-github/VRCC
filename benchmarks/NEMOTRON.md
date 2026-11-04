@@ -52,6 +52,55 @@ forced, 4 threads. The baseline rows come from `tools/bench_stt.py
   Vietnamese and others) and the shorter wait; the next measurement should
   be WER on those languages.
 
+## Short utterances, cloud container CPU
+
+Chatbox lines are short, so this reruns English on the 200 shortest
+LibriSpeech test-clean clips (2.6 s or less), 4 threads, on 2026-11-03 (a
+different CPU from the table above; compare within this table).
+
+| model | WER | wait after speech (median) | RTF |
+|---|---|---|---|
+| Nemotron 560 ms | 5.3% | 0.486 s finalize (p90 0.571 s) | 0.607 live |
+| parakeet-tdt-0.6b-v3 | 5.4% | 0.315 s whole clip | 0.141 |
+| small | 5.3% | 1.755 s whole clip | 0.785 |
+
+On short lines the streaming advantage is gone: Parakeet transcribes the
+whole clip faster than Nemotron finalizes its tail, at a quarter of the
+CPU. The two-chunk tail padding (1.12 s of silence) is most of Nemotron's
+work on a clip this short.
+
+## Japanese, Korean and Chinese (FLEURS), cloud container CPU
+
+`tools/bench_fleurs.py`, 60 FLEURS dev sentences per language (one
+recording each, 11 to 13 s on average), language forced, 4 threads, quality
+gates open, on 2026-11-03. CER ignores punctuation, spaces and case.
+"Wait" is how long after the end of the audio the text is ready: whole
+clip for the VRCC models, finalize for Nemotron.
+
+| lang | model | CER | wait after speech (median) | RTF |
+|---|---|---|---|---|
+| ja | sense-voice-small | 6.9% | 0.559 s | 0.047 |
+| ja | small | 14.3% | 2.750 s | 0.226 |
+| ja | large-v3-turbo | 5.4% | 8.009 s | 0.631 |
+| ja | Nemotron 560 ms | 13.2% | 0.433 s | 0.462 |
+| ko | sense-voice-small | 7.9% | 0.652 s | 0.054 |
+| ko | small | 8.6% | 2.821 s | 0.225 |
+| ko | large-v3-turbo | 5.8% | 7.872 s | 0.632 |
+| ko | Nemotron 560 ms | 9.6% | 0.427 s | 0.462 |
+| zh | sense-voice-small | 7.2% | 0.559 s | 0.055 |
+| zh | small | 13.1% | 2.756 s | 0.258 |
+| zh | large-v3-turbo | 8.8% | 7.914 s | 0.737 |
+| zh | Nemotron 560 ms | 20.1% | 0.476 s | 0.499 |
+
+- SenseVoice Small, already in VRCC, beats Nemotron on all three
+  languages, at about a tenth of the CPU and a wait only 0.1 s longer.
+- Nemotron's Chinese is Simplified, so the 20% is not a script problem.
+  Some of it is numbers spelled out ("三个世纪" against "3个世纪"), which
+  CER counts, but most is wrong homophones and names ("独者" for "读者",
+  "博克" for "博客").
+- On CPU, Nemotron 3.5 Streaming does not earn a place: Parakeet is better
+  for English and SenseVoice for CJK, both cheaper.
+
 ## First look at the package's clips
 
 Run on 2026-11-01 in a shared cloud container with 4 threads, so the

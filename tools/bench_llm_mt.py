@@ -4,6 +4,9 @@ Run (Windows, from the repo root, with a llama.cpp release unzipped):
     python -m tools.bench_llm_mt --server C:\\llama\\llama-server.exe ^
         --quants Q4_K_M,Q8_0 --sampling greedy,recommended --json llm.json
 
+CPU only, in-process (needs ``pip install llama-cpp-python``, no server):
+    python -m tools.bench_llm_mt --backend inproc --quants Q4_K_M --threads 8
+
 Scores the same corpus, targets and failure columns as tools/bench_mt.py, so
 the table lines up with the NLLB rows in benchmarks/MT.md. Each arm also
 records the server's load time and the VRAM it took (nvidia-smi, before load
@@ -84,7 +87,7 @@ def skipped_targets(entries: list[dict], names: list[str]) -> int:
     )
 
 
-def run_arm(translator: LlamaServerTranslator, label: str, sampling: str,
+def run_arm(translator, label: str, sampling: str,
             entries: list[dict], names: list[str]) -> dict:
     before = gpu_memory_used_mb()
     translator.load()
@@ -104,8 +107,14 @@ def run_arm(translator: LlamaServerTranslator, label: str, sampling: str,
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--server", type=Path, required=True,
-                    help="path to llama-server(.exe)")
+    ap.add_argument("--backend", choices=("server", "inproc"), default="server",
+                    help="server: llama-server child process; inproc: "
+                    "llama-cpp-python in this process, CPU only, greedy, all "
+                    "targets in one batch (tools/llm_mt_inproc.py)")
+    ap.add_argument("--server", type=Path,
+                    help="path to llama-server(.exe); needed for --backend server")
+    ap.add_argument("--threads", type=int, default=4,
+                    help="CPU threads for --backend inproc")
     ap.add_argument("--gguf", type=Path,
                     help="a local GGUF; skips the download and --quants")
     ap.add_argument("--hf-repo", default=DEFAULT_REPO)
@@ -132,8 +141,10 @@ def main(argv: list[str] | None = None) -> int:
     unknown = [s for s in samplings if s not in SAMPLING]
     if unknown:
         ap.error(f"unknown sampling: {', '.join(unknown)}")
-    if not args.server.is_file():
-        ap.error(f"{args.server} does not exist")
+    if args.backend == "server" and (args.server is None or not args.server.is_file()):
+        ap.error("--backend server needs --server pointing at llama-server")
+    if args.backend == "inproc" and samplings != ["greedy"]:
+        ap.error("--backend inproc decodes greedily only")
 
     models_dir = default_paths(portable=False).models_dir
     if args.gguf:
@@ -155,12 +166,18 @@ def main(argv: list[str] | None = None) -> int:
     summaries, raw = [], []
     for label, gguf in models:
         for sampling in samplings:
-            translator = LlamaServerTranslator(
-                args.server, gguf, gpu_layers=args.gpu_layers,
-                parallel=args.parallel, sampling=sampling,
-                extra_args=args.server_arg,
-                log_path=args.log_dir / f"llama-server__{label}__{sampling}.log",
-            )
+            if args.backend == "inproc":
+                from tools.llm_mt_inproc import InProcessTranslator
+
+                translator = InProcessTranslator(
+                    gguf, threads=args.threads, parallel=args.parallel)
+            else:
+                translator = LlamaServerTranslator(
+                    args.server, gguf, gpu_layers=args.gpu_layers,
+                    parallel=args.parallel, sampling=sampling,
+                    extra_args=args.server_arg,
+                    log_path=args.log_dir / f"llama-server__{label}__{sampling}.log",
+                )
             arm = run_arm(translator, label, sampling, entries, names)
             summaries.append(summarize(arm))
             raw.append(arm)

@@ -186,3 +186,16 @@ def test_summarize_accepts_an_llm_arm():
     s = bench_mt.summarize(arm)
     assert s["ms_median"] == 2.0
     assert "| hy | 1.0 | 0 | greedy |" in bench_mt.table([s])
+
+
+def test_inproc_backend_rejects_sampled_arms(tmp_path):
+    gguf = tmp_path / "m.gguf"
+    gguf.write_bytes(b"")
+    with pytest.raises(SystemExit):
+        bench_llm_mt.main(["--backend", "inproc", "--gguf", str(gguf),
+                           "--sampling", "recommended"])
+
+
+def test_server_backend_needs_a_server(tmp_path):
+    with pytest.raises(SystemExit):
+        bench_llm_mt.main(["--gguf", str(tmp_path / "m.gguf")])
