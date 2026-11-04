@@ -148,6 +148,36 @@ says np=3 because that is the label the tool prints.
   with llama-server's parallel slots, are what decide whether it is fast
   enough.
 
+### Full corpus, CPU, all three targets batched
+
+Run on 2026-11-03 in a 4-core shared cloud container with no GPU (a
+different, slower CPU than the run above, so compare rows within this
+table only), on the whole corpus (2224 pairs, 928 with a number), 4
+threads each. HY-MT ran in-process through `--backend inproc`
+(tools/llm_mt_inproc.py): one llama.cpp context holds a sequence per
+target and every decode step advances all three together, the way NLLB's
+`translate_batch` does. That cut its time per call by about a quarter
+against decoding the targets one after another.
+
+| model | rep | ngram | beam | device | digit/all pairs | KEPT | SPELLED | DROPPED | merged | ADDED | dash frag | dash full | loops | ms/call med | ms/call mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| nllb-600M-int8 | 1.0 | 3 | 4 | cpu:int8 | 928/2224 | 676 | 108 | 134 | 22 | 10 | 82/734 (11.2%) | 0/1063 (0.0%) | 0 | 969 | 1012 |
+| HY-MT1.5-1.8B-Q4_K_M | 1.0 | 0 | greedy | llama-cpp-python cpu t=4 batch=3 | 928/2224 | 867 | 16 | 39 | 0 | 6 | 0/734 (0.0%) | 0/1063 (0.0%) | 6 | 2014 | 2032 |
+
+- The quality result holds on the full corpus: HY-MT keeps 93% of the
+  numbers against NLLB's 73%, drops 39 against 134, and puts a dialogue
+  dash on no fragment against 11%.
+- It costs about twice NLLB's time per call on CPU (2.0 s against 1.0 s
+  median for three targets). On a fast desktop CPU both would be quicker,
+  but the ratio is what to expect.
+- Six loops, all repeated interjections ("Oh oh oh oh oh oh oh." and
+  "Hmm hmm hmm hmm." into Russian ran to the cap as one long word; the
+  rest are faithful "No, no, no, no, no."). A loop guard like NLLB's is
+  still needed.
+- Many remaining DROPPED rows are correct date renderings ("12月12日" as
+  "12 décembre"); the real misses are spoken digit runs like "Zero zero
+  seven".
+
 To run it, unzip a llama.cpp release
 (https://github.com/ggml-org/llama.cpp/releases, the CUDA 12 build for an
 NVIDIA GPU) and:
