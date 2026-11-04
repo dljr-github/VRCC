@@ -73,13 +73,28 @@ def run_arm(model: str, rep: float, ngram: int, beam: int, device: str,
     engine = TranslateEngine(spec, model_dir, cfg, bus, strip_dash=False)
     engine.load()
     engine.warm_up()
+    rows, call_ms = score_engine(engine.translate, entries, names)
+    device_used = f"{engine._device}:{engine._compute_type}"
+    engine.unload()
+    return {"model": model, "rep": rep, "ngram": ngram, "beam": beam,
+            "device": device_used, "rows": rows, "call_ms": call_ms}
+
+
+def score_engine(translate, entries: list[dict], names: list[str],
+                 supports=None) -> tuple[list[dict], list[float]]:
+    """Run ``translate(text, src, targets)`` over the corpus the way the app
+    calls it (at most three targets per call) and score every output.
+
+    ``supports(language) -> bool`` drops targets an engine cannot produce
+    (the LLM arm in tools/bench_llm_mt.py); the default keeps them all.
+    Returns the per-pair rows and the wall time of each call in ms."""
     rows, call_ms = [], []
     for entry in entries:
         src = get(SOURCES[entry["src"]])
-        tgts = targets_for(src, names)
+        tgts = [t for t in targets_for(src, names) if supports is None or supports(t)]
         for i in range(0, len(tgts), CHATBOX_TARGETS):
             t0 = time.perf_counter()
-            outs = engine.translate(entry["text"], src, tgts[i:i + CHATBOX_TARGETS])
+            outs = translate(entry["text"], src, tgts[i:i + CHATBOX_TARGETS])
             call_ms.append((time.perf_counter() - t0) * 1000)
             for display, out in outs:
                 tgt = get(display)
@@ -94,10 +109,7 @@ def run_arm(model: str, rep: float, ngram: int, beam: int, device: str,
                     "loop": longest_run(out) >= LOOP_RUN,
                     "dash": leading_dash(entry["text"], out),
                 })
-    device_used = f"{engine._device}:{engine._compute_type}"
-    engine.unload()
-    return {"model": model, "rep": rep, "ngram": ngram, "beam": beam,
-            "device": device_used, "rows": rows, "call_ms": call_ms}
+    return rows, call_ms
 
 
 def summarize(arm: dict) -> dict:
